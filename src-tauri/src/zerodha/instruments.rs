@@ -1,0 +1,452 @@
+//! Zerodha's instrument master: the CSV that maps a trading symbol to the
+//! `instrument_token` every Kite API call needs. It is published per exchange
+//! (`/instruments/NSE`, …), needs no credentials, and is mostly options; only
+//! what can be charted (equities, indices, futures) is kept, which is about
+//! 25k rows and searches instantly from SQLite.
+
+use std::io::Read;
+
+use rusqlite::{params, Connection, OptionalExtension};
+
+use crate::models::SymbolMatch;
+
+/// The exchanges whose lists are downloaded. Each file carries its own
+/// options, which are dropped.
+pub const EXCHANGES: [&str; 7] = ["NSE", "BSE", "NFO", "BFO", "MCX", "CDS", "BCD"];
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Instrument {
+    /// `NSE:RELIANCE` — the chart symbol without its `zerodha:` prefix.
+    pub ticker: String,
+    pub exchange: String,
+    pub token: i64,
+    /// `EQUITY`, `INDEX` or `FUT`.
+    pub instrument: String,
+    /// The trading symbol exactly as Kite spells it (`NIFTY 50`, `M&M`).
+    pub symbol: String,
+    pub name: Option<String>,
+    /// `YYYY-MM-DD`, for futures.
+    pub expiry: Option<String>,
+}
+
+impl Instrument {
+    /// How quote requests name it: `EXCHANGE:TRADINGSYMBOL`.
+    pub fn quote_key(&self) -> String {
+        format!("{}:{}", self.exchange, self.symbol)
+    }
+}
+
+/// The chart ticker for an exchange and trading symbol. Spaces become
+/// underscores (`NIFTY_50`) so a ticker never contains whitespace.
+pub fn make_ticker(exchange: &str, symbol: &str) -> String {
+    format!("{exchange}:{}", symbol.trim().to_uppercase().replace(' ', "_"))
+}
+
+/// Normalises typed or stored text to a ticker key: upper-case, spaces to
+/// underscores, and a bare symbol assumed to be NSE.
+pub fn normalize_ticker(text: &str) -> String {
+    let t = text.trim().to_uppercase().replace(' ', "_");
+    if t.contains(':') {
+        t
+    } else {
+        format!("NSE:{t}")
+    }
+}
+
+const MONTHS: [&str; 12] = [
+    "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+];
+
+/// `NIFTY SEP 26 FUT` from a name and a `YYYY-MM-DD` expiry.
+fn future_name(name: &str, expiry: &str) -> String {
+    let month = expiry
+        .get(5..7)
+        .and_then(|m| m.parse::<usize>().ok())
+        .and_then(|m| MONTHS.get(m.wrapping_sub(1)));
+    match (month, expiry.get(2..4)) {
+        (Some(m), Some(yy)) => format!("{name} {m} {yy} FUT"),
+        _ => format!("{name} FUT"),
+    }
+}
+
+/// Parses one exchange's list, keeping chartable rows. `today` is
+/// `YYYY-MM-DD`; expired futures are dropped.
+pub fn parse_master(reader: impl Read, today: &str) -> Result<Vec<Instrument>, String> {
+    let mut csv = csv::ReaderBuilder::new().flexible(true).from_reader(reader);
+    let headers = csv
+        .headers()
+        .map_err(|e| format!("the instrument list has no header row: {e}"))?
+        .clone();
+    let col = |name: &str| {
+        headers
+            .iter()
+            .position(|h| h.trim_start_matches('\u{feff}') == name)
+            .ok_or_else(|| format!("the instrument list has no {name} column — Zerodha may have changed its format"))
+    };
+    let (c_token, c_symbol, c_name, c_expiry) = (
+        col("instrument_token")?,
+        col("tradingsymbol")?,
+        col("name")?,
+        col("expiry")?,
+    );
+    let (c_type, c_segment, c_exchange) = (col("instrument_type")?, col("segment")?, col("exchange")?);
+
+    let mut out = Vec::with_capacity(12_000);
+    let mut seen = std::collections::HashSet::new();
+    for record in csv.records() {
+        let Ok(r) = record else { continue };
+        let get = |i: usize| r.get(i).unwrap_or("").trim();
+
+        // Options (CE/PE) are left out: there are ~100k of them and they would
+        // drown every search.
+        let instrument = match (get(c_type), get(c_segment)) {
+            ("EQ", "INDICES") => "INDEX",
+            ("EQ", "NSE" | "BSE") => "EQUITY",
+            ("FUT", segment) if segment.ends_with("-FUT") => "FUT",
+            _ => continue,
+        };
+        let Ok(token) = get(c_token).parse::<i64>() else {
+            continue;
+        };
+        let (symbol, exchange) = (get(c_symbol), get(c_exchange));
+        if symbol.is_empty() || exchange.is_empty() {
+            continue;
+        }
+
+        let expiry = (instrument == "FUT")
+            .then(|| get(c_expiry))
+            .filter(|d| d.len() == 10 && d.as_bytes().get(4) == Some(&b'-'))
+            .map(str::to_string);
+        if expiry.as_deref().is_some_and(|d| d < today) {
+            continue;
+        }
+
+        let ticker = make_ticker(exchange, symbol);
+        if !seen.insert(ticker.clone()) {
+            continue;
+        }
+        let base = Some(get(c_name)).filter(|n| !n.is_empty()).unwrap_or(symbol);
+        let name = match (&expiry, instrument) {
+            (Some(e), "FUT") => future_name(base, e),
+            _ => base.to_string(),
+        };
+        out.push(Instrument {
+            ticker,
+            exchange: exchange.to_string(),
+            token,
+            instrument: instrument.to_string(),
+            symbol: symbol.to_string(),
+            name: Some(name),
+            expiry,
+        });
+    }
+    Ok(out)
+}
+
+// ---- Storage ---------------------------------------------------------------
+
+/// Replaces the stored instrument list. One transaction, so a failed refresh
+/// never leaves search half-empty.
+pub fn replace_all(conn: &mut Connection, items: &[Instrument]) -> rusqlite::Result<usize> {
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM zerodha_instruments", [])?;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT OR IGNORE INTO zerodha_instruments (ticker, exchange, token, instrument, symbol, name, expiry)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )?;
+        for i in items {
+            stmt.execute(params![
+                i.ticker,
+                i.exchange,
+                i.token,
+                i.instrument,
+                i.symbol,
+                i.name,
+                i.expiry
+            ])?;
+        }
+    }
+    tx.commit()?;
+    count(conn).map(|n| n as usize)
+}
+
+pub fn count(conn: &Connection) -> rusqlite::Result<i64> {
+    conn.query_row("SELECT COUNT(*) FROM zerodha_instruments", [], |r| r.get(0))
+}
+
+const COLUMNS: &str = "ticker, exchange, token, instrument, symbol, name, expiry";
+
+fn from_row(r: &rusqlite::Row) -> rusqlite::Result<Instrument> {
+    Ok(Instrument {
+        ticker: r.get(0)?,
+        exchange: r.get(1)?,
+        token: r.get(2)?,
+        instrument: r.get(3)?,
+        symbol: r.get(4)?,
+        name: r.get(5)?,
+        expiry: r.get(6)?,
+    })
+}
+
+/// Looks an instrument up by chart ticker (`NSE:RELIANCE`, or just `RELIANCE`).
+pub fn resolve(conn: &Connection, ticker: &str) -> rusqlite::Result<Option<Instrument>> {
+    conn.query_row(
+        &format!("SELECT {COLUMNS} FROM zerodha_instruments WHERE ticker = ?1"),
+        params![normalize_ticker(ticker)],
+        from_row,
+    )
+    .optional()
+}
+
+/// Lists up to this long are "short": they leave room for other providers' results.
+const SHORT_LIST: usize = 10;
+const MAX_FUTURES_IN_SHORT_LIST: usize = 3;
+
+fn escape_like(text: &str) -> String {
+    text.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+}
+
+/// Searches symbols and names. Exact symbol first, then prefix, then anywhere
+/// in the symbol, then in the name; ties prefer indices over stocks over
+/// futures, NSE over BSE, and shorter symbols.
+pub fn search(conn: &Connection, query: &str, limit: usize) -> rusqlite::Result<Vec<SymbolMatch>> {
+    // A short list is for picking a stock; a stock's monthly futures would
+    // crowd it out. A long list (someone scoped to Zerodha) has room for them.
+    let future_cap = if limit <= SHORT_LIST {
+        MAX_FUTURES_IN_SHORT_LIST
+    } else {
+        usize::MAX
+    };
+    let q = query.trim().to_lowercase();
+    // A query of nothing but separators or wildcards ("_", "%", "-") would
+    // match everything, which is never what was meant.
+    if !q.chars().any(char::is_alphanumeric) {
+        return Ok(Vec::new());
+    }
+    let exact = q.replace('_', " ");
+    let (prefix, any) = (
+        format!("{}%", escape_like(&exact)),
+        format!("%{}%", escape_like(&exact)),
+    );
+    let ticker_prefix = format!("{}%", escape_like(&q.replace(' ', "_")));
+
+    let mut stmt = conn.prepare(
+        "SELECT ticker, name, exchange, instrument FROM zerodha_instruments
+         WHERE LOWER(symbol) LIKE ?3 ESCAPE '\\' OR LOWER(name) LIKE ?3 ESCAPE '\\' OR LOWER(ticker) LIKE ?4 ESCAPE '\\'
+         ORDER BY
+           CASE WHEN LOWER(symbol) = ?1 THEN 0
+                WHEN LOWER(symbol) LIKE ?2 ESCAPE '\\' OR LOWER(ticker) LIKE ?4 ESCAPE '\\' THEN 1
+                WHEN LOWER(symbol) LIKE ?3 ESCAPE '\\' THEN 2 ELSE 3 END,
+           CASE instrument WHEN 'INDEX' THEN 0 WHEN 'EQUITY' THEN 1 ELSE 2 END,
+           CASE exchange WHEN 'NSE' THEN 0 WHEN 'BSE' THEN 1 WHEN 'NFO' THEN 2 WHEN 'MCX' THEN 3
+                         WHEN 'CDS' THEN 4 WHEN 'BFO' THEN 5 ELSE 6 END,
+           LENGTH(symbol)
+         LIMIT ?5",
+    )?;
+    // Over-fetch so that skipping surplus futures still leaves `limit` rows.
+    let rows = stmt.query_map(params![exact, prefix, any, ticker_prefix, (limit * 6) as i64], |r| {
+        Ok(SymbolMatch {
+            symbol: r.get(0)?,
+            name: r.get(1)?,
+            exchange: r.get(2)?,
+            kind: r.get(3)?,
+        })
+    })?;
+
+    let mut out = Vec::with_capacity(limit);
+    let mut futures = 0;
+    for row in rows {
+        let m = row?;
+        if m.kind.as_deref() == Some("FUT") {
+            futures += 1;
+            if futures > future_cap {
+                continue;
+            }
+        }
+        out.push(m);
+        if out.len() == limit {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+
+    const HEADER: &str =
+        "instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type,segment,exchange";
+
+    /// A miniature master with one of each kind of row, in Zerodha's real layout
+    /// (rows taken from the public lists).
+    fn master() -> String {
+        [
+            HEADER,
+            r#"256265,1001,NIFTY 50,"NIFTY 50",0,,0,0,0,EQ,INDICES,NSE"#,
+            r#"260105,1016,NIFTY BANK,"NIFTY BANK",0,,0,0,0,EQ,INDICES,NSE"#,
+            r#"738561,2885,RELIANCE,"RELIANCE INDUSTRIES",0,,0,0.1,1,EQ,NSE,NSE"#,
+            r#"519937,2031,M&M,"MAHINDRA & MAHINDRA",0,,0,0.1,1,EQ,NSE,NSE"#,
+            r#"4267265,16669,BAJAJ-AUTO,"BAJAJ AUTO",0,,0,0.5,1,EQ,NSE,NSE"#,
+            r#"128083204,500325,RELIANCE,"RELIANCE INDUSTRIES",0,,0,0.05,1,EQ,BSE,BSE"#,
+            r#"265,1,SENSEX,"SENSEX",0,,0,0,0,EQ,INDICES,BSE"#,
+            r#"17512194,68407,NIFTY26SEPFUT,"NIFTY",0,2026-09-29,0,0.1,65,FUT,NFO-FUT,NFO"#,
+            r#"12468226,48704,NIFTY26OCTFUT,"NIFTY",0,2026-10-27,0,0.1,65,FUT,NFO-FUT,NFO"#,
+            r#"15736578,61471,NIFTY26NOVFUT,"NIFTY",0,2026-11-23,0,0.1,65,FUT,NFO-FUT,NFO"#,
+            r#"16000001,61472,NIFTY26DECFUT,"NIFTY",0,2026-12-29,0,0.1,65,FUT,NFO-FUT,NFO"#,
+            r#"9999991,1,NIFTY20JANFUT,"NIFTY",0,2020-01-30,0,0.1,75,FUT,NFO-FUT,NFO"#,
+            r#"11111111,2,NIFTY26SEP25000CE,"NIFTY",0,2026-09-29,25000,0.05,65,CE,NFO-OPT,NFO"#,
+            r#"22222222,3,NIFTY26SEP25000PE,"NIFTY",0,2026-09-29,25000,0.05,65,PE,NFO-OPT,NFO"#,
+            r#"146251783,571296,ALUMINI26SEPFUT,"ALUMINI",0,2026-09-30,0,0.05,1,FUT,MCX-FUT,MCX"#,
+        ]
+        .join("\n")
+    }
+
+    fn parsed() -> Vec<Instrument> {
+        parse_master(master().as_bytes(), "2026-09-19").unwrap()
+    }
+
+    fn store() -> Database {
+        let db = Database::open_in_memory().unwrap();
+        replace_all(&mut db.conn.lock().unwrap(), &parsed()).unwrap();
+        db
+    }
+
+    #[test]
+    fn tickers_use_underscores_and_keep_the_symbols_own_punctuation() {
+        assert_eq!(make_ticker("NSE", "NIFTY 50"), "NSE:NIFTY_50");
+        assert_eq!(make_ticker("NSE", "m&m"), "NSE:M&M");
+        assert_eq!(make_ticker("NSE", "BAJAJ-AUTO"), "NSE:BAJAJ-AUTO");
+        assert_eq!(normalize_ticker("reliance"), "NSE:RELIANCE");
+        assert_eq!(normalize_ticker("bse:sensex"), "BSE:SENSEX");
+        assert_eq!(normalize_ticker(" nifty 50 "), "NSE:NIFTY_50");
+    }
+
+    #[test]
+    fn the_master_keeps_equities_indices_and_live_futures_and_drops_the_rest() {
+        let tickers: Vec<_> = parsed().into_iter().map(|i| i.ticker).collect();
+        assert!(tickers.contains(&"NSE:RELIANCE".to_string()));
+        assert!(
+            tickers.contains(&"BSE:RELIANCE".to_string()),
+            "same symbol on two exchanges"
+        );
+        assert!(tickers.contains(&"NSE:NIFTY_50".to_string()));
+        assert!(tickers.contains(&"BSE:SENSEX".to_string()));
+        assert!(tickers.contains(&"NFO:NIFTY26SEPFUT".to_string()));
+        assert!(tickers.contains(&"MCX:ALUMINI26SEPFUT".to_string()));
+        assert!(!tickers.iter().any(|t| t.contains("25000")), "options are excluded");
+        assert!(
+            !tickers.iter().any(|t| t.contains("20JAN")),
+            "expired futures are dropped"
+        );
+        assert_eq!(tickers.len(), 12, "3 indices, 4 equities and 5 futures");
+    }
+
+    #[test]
+    fn each_row_carries_the_token_kind_and_a_readable_name() {
+        let all = parsed();
+        let by = |t: &str| all.iter().find(|i| i.ticker == t).unwrap();
+        let reliance = by("NSE:RELIANCE");
+        assert_eq!((reliance.token, reliance.instrument.as_str()), (738561, "EQUITY"));
+        assert_eq!(reliance.name.as_deref(), Some("RELIANCE INDUSTRIES"));
+        let nifty = by("NSE:NIFTY_50");
+        assert_eq!((nifty.token, nifty.instrument.as_str()), (256265, "INDEX"));
+        assert_eq!(
+            nifty.symbol, "NIFTY 50",
+            "the trading symbol keeps its space for API calls"
+        );
+        let fut = by("NFO:NIFTY26SEPFUT");
+        assert_eq!(fut.instrument, "FUT");
+        assert_eq!(fut.expiry.as_deref(), Some("2026-09-29"));
+        assert_eq!(fut.name.as_deref(), Some("NIFTY SEP 26 FUT"));
+    }
+
+    #[test]
+    fn quote_requests_name_an_instrument_by_exchange_and_trading_symbol() {
+        let all = parsed();
+        let nifty = all.iter().find(|i| i.ticker == "NSE:NIFTY_50").unwrap();
+        assert_eq!(nifty.quote_key(), "NSE:NIFTY 50");
+        let mm = all.iter().find(|i| i.ticker == "NSE:M&M").unwrap();
+        assert_eq!(mm.quote_key(), "NSE:M&M");
+    }
+
+    #[test]
+    fn a_master_without_the_expected_columns_is_rejected_with_a_clear_message() {
+        let err = parse_master("foo,bar\n1,2\n".as_bytes(), "2026-09-19").unwrap_err();
+        assert!(err.contains("instrument_token"), "{err}");
+    }
+
+    #[test]
+    fn rows_with_a_bad_token_or_no_symbol_are_skipped_not_fatal() {
+        let csv = [
+            HEADER,
+            r#"abc,1,BROKEN,"X",0,,0,0,1,EQ,NSE,NSE"#,
+            r#"1,1,,"NO SYMBOL",0,,0,0,1,EQ,NSE,NSE"#,
+            r#"738561,2885,RELIANCE,"RELIANCE INDUSTRIES",0,,0,0.1,1,EQ,NSE,NSE"#,
+        ]
+        .join("\n");
+        assert_eq!(parse_master(csv.as_bytes(), "2026-09-19").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn replacing_the_list_swaps_it_atomically_and_resolve_finds_rows() {
+        let db = store();
+        let conn = db.conn.lock().unwrap();
+        assert_eq!(count(&conn).unwrap(), 12);
+        assert_eq!(resolve(&conn, "NSE:RELIANCE").unwrap().unwrap().token, 738561);
+        assert_eq!(
+            resolve(&conn, "reliance").unwrap().unwrap().exchange,
+            "NSE",
+            "bare means NSE"
+        );
+        assert_eq!(resolve(&conn, "NSE:NIFTY_50").unwrap().unwrap().token, 256265);
+        assert_eq!(resolve(&conn, "nse:nifty 50").unwrap().unwrap().token, 256265);
+        assert!(resolve(&conn, "NSE:NOPE").unwrap().is_none());
+    }
+
+    #[test]
+    fn search_ranks_exact_then_prefix_and_prefers_nse_and_indices() {
+        let db = store();
+        let conn = db.conn.lock().unwrap();
+        let hits = search(&conn, "reliance", 8).unwrap();
+        assert_eq!(hits[0].symbol, "NSE:RELIANCE");
+        assert_eq!(hits[1].symbol, "BSE:RELIANCE");
+        assert_eq!(hits[0].kind.as_deref(), Some("EQUITY"));
+
+        let nifty = search(&conn, "nifty", 8).unwrap();
+        assert_eq!(nifty[0].symbol, "NSE:NIFTY_50", "an index outranks the futures on it");
+        assert!(nifty.iter().any(|m| m.symbol == "NSE:NIFTY_BANK"));
+    }
+
+    #[test]
+    fn search_finds_names_symbols_with_spaces_and_odd_punctuation() {
+        let db = store();
+        let conn = db.conn.lock().unwrap();
+        assert_eq!(search(&conn, "mahindra", 5).unwrap()[0].symbol, "NSE:M&M");
+        assert_eq!(search(&conn, "nifty bank", 5).unwrap()[0].symbol, "NSE:NIFTY_BANK");
+        assert_eq!(search(&conn, "nifty_bank", 5).unwrap()[0].symbol, "NSE:NIFTY_BANK");
+        assert_eq!(search(&conn, "bajaj-auto", 5).unwrap()[0].symbol, "NSE:BAJAJ-AUTO");
+        assert_eq!(search(&conn, "sensex", 5).unwrap()[0].symbol, "BSE:SENSEX");
+    }
+
+    #[test]
+    fn a_short_list_caps_futures_but_a_scoped_search_shows_them_all() {
+        let db = store();
+        let conn = db.conn.lock().unwrap();
+        let short = search(&conn, "nifty", 8).unwrap();
+        assert_eq!(short.iter().filter(|m| m.kind.as_deref() == Some("FUT")).count(), 3);
+        let long = search(&conn, "nifty", 20).unwrap();
+        assert_eq!(long.iter().filter(|m| m.kind.as_deref() == Some("FUT")).count(), 4);
+    }
+
+    #[test]
+    fn separator_only_queries_match_nothing() {
+        let db = store();
+        let conn = db.conn.lock().unwrap();
+        for q in ["_", "%", "-", " ", "&"] {
+            assert!(search(&conn, q, 8).unwrap().is_empty(), "{q:?}");
+        }
+    }
+}

@@ -1,0 +1,88 @@
+/* Design tokens. The values below are the pre-JS default (the "Daylight"
+   theme) so the very first paint isn't unstyled; the live values for whichever
+   theme is selected are applied as inline custom properties on <html> by
+   ThemeProvider from src/theme/themes.ts. To change or add a theme, edit
+   themes.ts — not this file. Only durations are theme-independent. */
+
+:root {
+  --bg-base: #f5f6f8;
+  --surface-1: #ffffff;
+  --surface-hover: #edf0f4;
+  --border: #dde1e8;
+  --border-soft: #eceff3;
+
+  --text-primary: #12161c;
+  --text-secondary: #586273;
+  --text-muted: #8993a3;
+
+  --accent: #2962ff;
+  --accent-soft: rgba(41, 98, 255, 0.1);
+  --on-accent: #ffffff;
+
+  --loss: #d92d20;
+  --loss-soft: rgba(217, 45, 32, 0.1);
+  --profit: #0f8a5f;
+
+  --shadow-pop: 0 6px 20px rgba(16, 24, 40, 0.12);
+
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  --dur-fast: 120ms;
+  --dur: 200ms;
+
+  --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow: hidden; /* the app is a fixed-viewport workspace; panels scroll internally */
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+  background-clip: content-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

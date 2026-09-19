@@ -1,0 +1,11 @@
+//! Persistence layer: plain functions over a `&Connection`, kept free of any
+//! Tauri types so they can be unit-tested against an in-memory database.
+
+pub mod alerts;
+pub mod bars_cache;
+pub mod datasets;
+pub mod layouts;
+pub mod preferences;
+pub mod provider_settings;
+pub mod scripts;
+pub mod watchlists;

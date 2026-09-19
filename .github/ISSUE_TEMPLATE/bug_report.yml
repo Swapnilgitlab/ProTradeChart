@@ -1,0 +1,50 @@
+name: Bug report
+description: Something isn't working
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! For a security problem, please **don't** file it here — see SECURITY.md.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you see instead? Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Search for …
+        2. Switch to the 15m timeframe
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: symbol
+    attributes:
+      label: Symbol and timeframe (if it's a data problem)
+      placeholder: yahoo:RELIANCE.NS, 15m
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Shown in the About dialog (the ⓘ button).
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, Linux]
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: Optional. See CONTRIBUTING.md for where the log file is. Remove anything private first.
+      render: text
