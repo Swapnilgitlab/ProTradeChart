@@ -11,6 +11,7 @@ mod schema;
 mod secrets;
 mod store;
 mod throttle;
+mod update_commands;
 mod yahoo;
 mod zerodha;
 mod zerodha_commands;
@@ -37,7 +38,7 @@ pub fn run() {
                 .clear_targets()
                 .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout))
                 .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                    file_name: Some("candor".into()),
+                    file_name: Some("protradechart".into()),
                 }))
                 // Debug builds log request-level detail (what was asked of each data
                 // source, and what came back); release builds keep to the essentials.
@@ -52,6 +53,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // Installed first so a panic below lands in the log file instead
             // of vanishing with the window.
@@ -71,7 +73,7 @@ pub fn run() {
 
             let broker_http = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
-                .user_agent(concat!("candor/", env!("CARGO_PKG_VERSION")))
+                .user_agent(concat!("protradechart/", env!("CARGO_PKG_VERSION")))
                 .build()?;
             app.manage(DhanClient::new(broker_http.clone()));
             app.manage(ZerodhaClient::new(broker_http));
@@ -129,6 +131,7 @@ pub fn run() {
             commands::get_app_info,
             commands::get_ui_preference,
             commands::set_ui_preference,
+            update_commands::restart_app,
             commands::get_chart_layouts,
             commands::save_chart_layout,
             commands::delete_chart_layout,

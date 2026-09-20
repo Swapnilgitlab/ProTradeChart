@@ -41,15 +41,49 @@ CI runs exactly these, on Linux, macOS and Windows.
 
 ### App icon
 
-The icon set in `src-tauri/icons/` is generated from [`assets/logo.svg`](assets/logo.svg):
-`npx tauri icon assets/logo.svg` (then delete the `android/` and `ios/` folders it creates — this is a desktop app).
+The logo is [`assets/logo-lockup.png`](assets/logo-lockup.png) (the P mark with the wordmark, used in the README). The icon
+set in `src-tauri/icons/` is generated from [`assets/app-icon.png`](assets/app-icon.png) — the P mark on a light rounded
+plate, so it stays legible on dark taskbars and docks: `npx tauri icon assets/app-icon.png` (then delete the `android/` and
+`ios/` folders it creates — this is a desktop app). `public/favicon-32.png` and `public/favicon-128.png` (the favicon and the
+About dialog) are resized from the same master. Cargo doesn't notice changed icon files, so after regenerating them touch
+`src-tauri/build.rs` (or run `cargo clean -p protradechart`) to make the next build embed the new icon.
+
+### Releasing
+
+Installed copies of ProTradeChart update themselves from the newest GitHub release, and only accept an update signed with the
+updater key. `src-tauri/tauri.conf.json` holds its public half (`plugins.updater.pubkey`); the private half is **never
+committed** and lives in two repository secrets, which the release workflow needs or the build fails:
+
+- `TAURI_SIGNING_PRIVATE_KEY` — the contents of the key file;
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — its password.
+
+Set them with `gh secret set TAURI_SIGNING_PRIVATE_KEY < path/to/updater.key` and
+`gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD < path/to/password-file`. Keep a backup of the key and its password
+somewhere safe (a password manager): **if the private key is lost, installed copies can never be updated again** — users
+would have to download a new build by hand — and a leaked key lets anyone push code to every install. A new pair comes
+from `npx tauri signer generate -w <path>`; replacing the key means shipping one build, signed with the old key, that
+carries the new public key.
+
+To release: bump the version in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`, tag it
+(`git tag v0.2.0 && git push origin v0.2.0`), review the draft release the workflow creates, and publish it. Publishing is
+what makes `latest.json` visible to installed apps.
+
+Once every platform's build has uploaded, the workflow's `checksums` job downloads what the draft release actually holds and
+attaches a **`SHA256SUMS`** file to it (`scripts/publish-checksums.sh`, which uses `scripts/checksums.mjs`); check it is there
+before you publish. It skips signatures and `latest.json`, and a re-run replaces the earlier file (re-run just that job from the
+Actions page if you have to). If you also host the installers on your own site, download them from the release into a folder
+and run `node scripts/checksums.mjs <folder>` to write the same file, then publish it beside them — the hashes must match the
+release's, so people can compare the two.
+
+A local `npx tauri build` that makes installers needs the key too
+(`TAURI_SIGNING_PRIVATE_KEY` and `..._PASSWORD` in the environment); `--no-bundle` doesn't.
 
 ## Reporting bugs
 
 Please include your OS, the app version (*About*), the symbol and timeframe involved, and — if it's a data problem —
 whether the same symbol works on finance.yahoo.com. The app writes a log file that is very helpful to attach — Windows:
-`%LOCALAPPDATA%\io.github.swapnilgitlab.candor\logs`, macOS: `~/Library/Logs/io.github.swapnilgitlab.candor`, Linux:
-`~/.local/share/io.github.swapnilgitlab.candor/logs`. Remove anything private first.
+`%LOCALAPPDATA%\io.github.swapnilgitlab.protradechart\logs`, macOS: `~/Library/Logs/io.github.swapnilgitlab.protradechart`, Linux:
+`~/.local/share/io.github.swapnilgitlab.protradechart/logs`. Remove anything private first.
 
 Security issues: see [SECURITY.md](SECURITY.md) — please don't file those publicly.
 

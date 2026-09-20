@@ -7,6 +7,14 @@ name: Release
 #
 # The tag must match the version in package.json and src-tauri/tauri.conf.json.
 # The builds are not code-signed; see SECURITY.md.
+#
+# The app's auto-updater only accepts updates signed with the key whose public half is in
+# tauri.conf.json (plugins.updater.pubkey). The private half must be in two repository
+# secrets, or the build fails: TAURI_SIGNING_PRIVATE_KEY (the key file's contents) and
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD. See CONTRIBUTING.md, "Releasing".
+#
+# Once every platform has uploaded, the `checksums` job attaches a SHA256SUMS file to the same
+# draft release so people can verify what they download (see SECURITY.md).
 on:
   push:
     tags:
@@ -19,6 +27,9 @@ permissions:
 jobs:
   release:
     name: Build (${{ matrix.platform }} ${{ matrix.args }})
+    # Every leg uploads to the same release, so they all report the same id.
+    outputs:
+      release_id: ${{ steps.tauri.outputs.releaseId }}
     strategy:
       fail-fast: false
       matrix:
@@ -56,12 +67,34 @@ jobs:
       - run: npm ci
 
       - uses: tauri-apps/tauri-action@v0
+        id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v__VERSION__
-          releaseName: "Candor v__VERSION__"
-          releaseBody: "See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for what changed. These builds are unsigned — expect an OS warning on first launch."
+          releaseName: "ProTradeChart v__VERSION__"
+          releaseBody: "See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for what changed. These builds are unsigned — expect an OS warning on first launch. Check a download against the attached SHA256SUMS: see [SECURITY.md](https://github.com/${{ github.repository }}/blob/main/SECURITY.md#verifying-a-download)."
           releaseDraft: true
+          # Uploads latest.json, the file installed apps check for a newer version.
+          includeUpdaterJson: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  checksums:
+    name: SHA-256 checksums
+    needs: release
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Attach SHA256SUMS to the release
+        run: bash scripts/publish-checksums.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.release.outputs.release_id }}

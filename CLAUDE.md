@@ -5,7 +5,7 @@ Guidance for AI coding assistants (and humans) working in this repo. Start with 
 
 ## What this is
 
-Candor is an open-source (AGPL-3.0) Tauri 2 desktop charting app. React 19 + TypeScript frontend, Rust backend, charts by Vela
+ProTradeChart is an open-source (AGPL-3.0) Tauri 2 desktop charting app. React 19 + TypeScript frontend, Rust backend, charts by Vela
 (`@luxalgo/vela`, Apache-2.0 — its attribution mark must stay visible), SQLite for storage.
 
 ## Commands
@@ -15,6 +15,7 @@ npm run tauri:dev                       # run the app with hot reload
 npm run typecheck && npm test           # frontend checks
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 cargo fmt --manifest-path src-tauri/Cargo.toml
+node scripts/checksums.mjs <folder>     # SHA256SUMS for a folder of installers (its tests run with npm test)
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
@@ -55,6 +56,9 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   in-process `PineEngine`, and don't add other uses of `eval`. `installPineEngine`, `installPinePersistence` and
   `installPineHostActions` (`main.tsx`) must run before the first `VelaWorkspace`. See "Pine Script" in
   `docs/ARCHITECTURE.md`.
+- Pine scripts that ship with the app are the `.pine` files under `pine/indicators/` (see `pine/README.md`). Their declared
+  title is their identity in saved layouts (Vela stores manifest indicators by name), so don't rename one casually or give two
+  files the same title. `npm test` runs each on the real engine; keep that gate.
 - On a Vela script handle, `title` is a placeholder until the script runs (use `declaredTitle(source)` or `run.title`),
   and `ready` fires once — after `updateCode`, wait for `script:run` with `cause: 'code'`. `propValues()` includes
   the defaults: persist `inputDeltas(...)`, never the raw values.
@@ -70,6 +74,12 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   alerts will ring once per window. A crossing is judged between two price samples, so anything that changes an alert's
   status (pause, re-arm, edit) must clear `basePrice` (or set it to the current price) so it doesn't fire over a move that
   happened while it was off.
+- The auto-updater (`src/updates/`, `tauri-plugin-updater`) trusts only the public key in `tauri.conf.json`
+  (`plugins.updater.pubkey`). Never commit, print or paste the private key (`*.key` is git-ignored; it lives outside the
+  repo), and never change the pubkey without a plan for existing installs — they will refuse updates signed with any other
+  key. `bundle.createUpdaterArtifacts` makes `tauri build` demand `TAURI_SIGNING_PRIVATE_KEY` unless `--no-bundle` is used.
+  The check runs only in the `main` window and only in release builds (`startBackgroundUpdates`); see "Releasing" in
+  `CONTRIBUTING.md`.
 - Yahoo Finance endpoints are unofficial and have no published limits. Every request must go through `Market::get_json`
   (which applies the `Gate` in `gate.rs`: pacing, a per-minute budget, and a pause after HTTP 429) — never call Yahoo
   from anywhere else. Batch (`spark` takes 20 symbols), cache, and share polls (`data/livePoll.ts`) rather than adding

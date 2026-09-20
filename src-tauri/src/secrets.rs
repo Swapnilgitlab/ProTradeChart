@@ -11,7 +11,7 @@ use rusqlite::Connection;
 
 use crate::store::provider_settings::{self as settings, Table};
 
-const SERVICE: &str = "io.github.swapnilgitlab.candor";
+const SERVICE: &str = "io.github.swapnilgitlab.protradechart";
 
 /// Where a stored credential ended up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

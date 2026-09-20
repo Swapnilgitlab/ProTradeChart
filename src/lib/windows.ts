@@ -6,7 +6,7 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 export function openNewWindow(): void {
   new WebviewWindow(`chart-${Date.now()}`, {
     url: 'index.html',
-    title: 'Candor',
+    title: 'ProTradeChart',
     width: 1360,
     height: 860,
     minWidth: 900,

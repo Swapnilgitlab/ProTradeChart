@@ -1,11 +1,15 @@
-# Candor
+<p align="center">
+  <img src="assets/logo-lockup.png" alt="ProTradeChart — Open Source Charting for the Markets" width="340">
+</p>
+
+# ProTradeChart
 
 **Free, open-source desktop charting.** Fast candlestick charts with indicators and drawing tools, live-updating
 watchlists, saved layouts, and the ability to chart your own data — all running locally, with no account and no
 subscription.
 
 <p align="center">
-  <img src="docs/images/screenshot-dark.png" alt="Candor showing an AAPL daily chart with the watchlist docked on the right" width="900">
+  <img src="docs/images/screenshot-dark.png" alt="ProTradeChart showing an AAPL daily chart with the watchlist docked on the right" width="900">
 </p>
 
 ## Features
@@ -36,6 +40,8 @@ subscription.
   light/dark setting.
 - **Private by design.** Everything (layouts, watchlists, imported data, a small offline price cache) lives in one
   SQLite file on your machine. Nothing is uploaded anywhere.
+- **Updates.** ProTradeChart checks GitHub for a newer release about once a day and offers to install it (*About → Updates*).
+  Each update is verified against a signing key built into the app before it runs, and the daily check can be switched off.
 
 <p align="center">
   <img src="docs/images/data-providers.png" alt="The Data providers screen, with Dhan awaiting setup" width="440">
@@ -46,7 +52,8 @@ subscription.
 
 Prebuilt installers for Windows, macOS and Linux are produced by the
 [release workflow](.github/workflows/release.yml) and attached to each GitHub release. They are **not code-signed**, so Windows SmartScreen and macOS Gatekeeper will warn you the
-first time you run one — see [SECURITY.md](SECURITY.md#verifying-a-download).
+first time you run one — see [SECURITY.md](SECURITY.md#verifying-a-download). Each release also carries a `SHA256SUMS` file, so you can
+[check that a download is intact](SECURITY.md#checking-a-download-against-its-checksum).
 
 Or build it yourself:
 
@@ -61,8 +68,8 @@ You need:
 - On Linux, also `libdbus-1-dev` and `pkg-config` (`sudo apt install libdbus-1-dev pkg-config`) for keychain access
 
 ```bash
-git clone https://github.com/Swapnilgitlab/Candor.git
-cd Candor
+git clone https://github.com/Swapnilgitlab/ProTradeChart.git
+cd ProTradeChart
 npm install
 
 npm run tauri:dev      # run with hot reload
@@ -264,6 +271,7 @@ src-tauri/               Rust backend
   src/secrets.rs         Credentials: OS keychain, with an explicit fallback
   src/dhan/              Dhan: protocol, instrument list, HTTP client, live feed
   src/commands.rs        Tauri commands exposed to the frontend
+pine/                    Pine indicators bundled with the app (see pine/README.md)
 docs/                    Architecture notes and screenshots
 ```
 
@@ -277,7 +285,7 @@ Contributions are very welcome — bug reports, data-source fixes, new providers
 
 ## Acknowledgements and licence
 
-Candor is free software, released under the [GNU Affero General Public License v3.0](LICENSE)
+ProTradeChart is free software, released under the [GNU Affero General Public License v3.0](LICENSE)
 (AGPL-3.0-only). The complete source of every release is in this repository, at the release's tag. If you distribute
 the app or a modified version of it, you must do so under the same licence and make your source available.
 

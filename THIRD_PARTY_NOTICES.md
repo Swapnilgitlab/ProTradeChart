@@ -1,6 +1,6 @@
 # Third-party notices
 
-Candor is licensed under the GNU Affero General Public License
+ProTradeChart is licensed under the GNU Affero General Public License
 v3.0 (see [LICENSE](LICENSE)). It is built on the open-source components below.
 Their licences apply to them, not to this project's own code. All of them are
 compatible with distribution under the AGPL-3.0.
@@ -64,7 +64,7 @@ with, sponsored by, endorsed by, or in any way officially associated with Tradin
 
 | Component | Licence | Used for |
 | --- | --- | --- |
-| [Tauri](https://tauri.app) 2 and its plugins | MIT OR Apache-2.0 | Desktop shell, native dialogs, logging, notifications |
+| [Tauri](https://tauri.app) 2 and its plugins | MIT OR Apache-2.0 | Desktop shell, native dialogs, logging, notifications, updates |
 | [React](https://react.dev) 19 | MIT | User interface |
 | [lucide-react](https://lucide.dev) | ISC | Icons |
 | [CodeMirror](https://codemirror.net) 6 (`@codemirror/*`, `@lezer/highlight`) | MIT | The Pine script editor |

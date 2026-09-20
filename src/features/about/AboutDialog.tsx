@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Dialog } from '../../components/Dialog';
 import { getAppInfo, type AppInfo } from '../../lib/ipc';
+import { UpdatesSection } from './UpdatesSection';
 
 interface Props {
   onClose: () => void;
@@ -29,19 +30,29 @@ export function AboutDialog({ onClose }: Props) {
       <div className="about-brand">
         <img src="/favicon-128.png" alt="" />
         <div>
-          <h3>Candor</h3>
+          <h3>ProTradeChart</h3>
           <span className="muted">Free, open-source desktop charting</span>
         </div>
       </div>
 
-      <dl className="about-list">
+      <dl className="about-list about-links">
         <dt>Version</dt>
         <dd>{info?.version ?? '…'}</dd>
         <dt>License</dt>
         <dd>GNU AGPL-3.0 (free software, no warranty)</dd>
+        <dt>Developer</dt>
+        <dd>Swapnil Pawar, ProTradeJournal</dd>
+        <dt>Profiles</dt>
+        <dd>
+          <a href="https://x.com/swapnilpawar_">X: @swapnilpawar_</a>
+          {' · '}
+          <a href="https://github.com/Swapnilgitlab">GitHub: Swapnilgitlab</a>
+        </dd>
         <dt>Your data</dt>
         <dd>{info?.dataDir ?? '…'}</dd>
       </dl>
+
+      <UpdatesSection />
 
       <div className="section-title">Shortcuts</div>
       <dl className="about-list">

@@ -1132,3 +1132,28 @@ code {
 .alert-current strong {
   color: var(--text-primary);
 }
+
+/* ---- Updates ---------------------------------------------------------------- */
+
+.update-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.update-status {
+  flex: 1;
+  min-width: 0;
+}
+.update-status.error {
+  color: var(--loss);
+}
+.update-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}

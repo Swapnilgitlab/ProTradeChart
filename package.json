@@ -1,14 +1,14 @@
 {
-  "name": "candor",
+  "name": "protradechart",
   "private": true,
   "version": "0.1.0",
   "description": "Open-source desktop charting software — fast candlestick charts, indicators, drawing tools, watchlists and saved layouts.",
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Swapnilgitlab/Candor.git"
+    "url": "git+https://github.com/Swapnilgitlab/ProTradeChart.git"
   },
-  "homepage": "https://github.com/Swapnilgitlab/Candor",
+  "homepage": "https://github.com/Swapnilgitlab/ProTradeChart",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -36,6 +36,7 @@
     "@tauri-apps/plugin-log": "^2.9.0",
     "@tauri-apps/plugin-notification": "^2.4.0",
     "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-updater": "^2.12.0",
     "lucide-react": "^0.575.0",
     "pinets": "^0.9.34",
     "react": "^19.1.0",

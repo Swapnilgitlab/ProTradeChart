@@ -116,6 +116,24 @@ Not done yet: drawing alert levels on the chart. Vela's drawings (`chart.drawing
 they would share the undo history, be saved into layouts (they'd need stripping, like `withoutTheme`), and be draggable, all
 of which needs designing.
 
+### Updates
+
+ProTradeChart updates itself through `tauri-plugin-updater`; the pieces:
+
+- **The manifest.** `plugins.updater.endpoints` (in `tauri.conf.json`) is
+  `…/releases/latest/download/latest.json` on GitHub. `tauri-action` uploads that file with every release, and it only
+  resolves once the release is *published* (a draft is invisible), so publishing is the moment an update goes live.
+- **Trust.** Each installer is signed with the updater key (`bundle.createUpdaterArtifacts`); the plugin verifies the
+  signature against `plugins.updater.pubkey` before running anything. It is independent of OS code signing.
+- **Logic** (`updates/updater.ts`, pure): a small state machine — idle, checking, current, available, downloading,
+  installed, error — with the plugin and the restart injected, so it is unit-tested without Tauri. `updates/autoCheck.ts`
+  runs the background check (20 s after launch, then daily; the `autoUpdateCheck` preference is read each time; a failed
+  background check is silent). `updates/service.ts` wires the real plugin.
+- **UI.** *About → Updates* (`features/about/UpdatesSection.tsx`) checks, installs and holds the switch; a dot on the About
+  button and one toast announce a waiting update. Only the `main` window checks in the background.
+- **Restart.** Windows' installer closes the app itself; on macOS and Linux the `restart_app` command
+  (`update_commands.rs`) relaunches through Tauri's normal exit path.
+
 ### Adding a data provider
 
 1. Implement `DataProvider` in `src/data/providers/<name>.ts`. Return bars sorted ascending, `time` in epoch
@@ -273,7 +291,8 @@ script.
 | Engine | `pine/engine.ts` | `registerDefaultEngine('pine', …)` in `main.tsx`, before any workspace exists. A `PineWorkerEngine` wrapped in `BarsTap`, which records the bars each script runs on (Vela hands them only to the engine) so the tester can build an equity curve |
 | Library | `store/scripts.rs`, `pine_scripts` table, `lib/ipc.ts` | Saved scripts. The frontend detects a script's kind from its declaration (`pine/source.ts`) |
 | Layout persistence | `pine/persistence.ts` | Vela doesn't save runtime-added scripts, so a `registerStatePersistence` handler stores each chart's script indicators in the layout's per-chart `ext`: source, plus only the input and prop values that differ from the defaults. The layout is self-contained: it still opens if the script was deleted from the library |
-| Ids | `pine/engine.ts` | An indicator on a chart is `<libraryScriptId>~<suffix>`, so a legend row leads back to its library script |
+| Ids | `pine/ids.ts` | An indicator this app adds is `<libraryScriptId>~<suffix>`, so a legend row leads back to its library script, and one Vela added itself (a bundled script) can be told apart |
+| Bundled scripts | `pine/indicators/**/*.pine`, `pine/bundled.ts` | Scripts that ship with the app. Vite inlines them (`import.meta.glob(…, '?raw')`), and they are handed to Vela as its indicator **manifest** with `enabled: false`, so they appear in the chart's Indicators dialog (grouped by folder) without being added to every chart. Vela saves a manifest indicator in layouts **by name**, so a script's declared title is its identity; `persistence.ts` skips them so they aren't restored twice. `bundled.engine.test.ts` compiles and runs every one on the real engine. Editing a `.pine` file reloads the dev app (`reloadOnPineChange` in `vite.config.ts`: a hot-swapped module would leave the live chart on the old script). See `pine/README.md` |
 | Backtest report | `pine/tester.ts` | Pure. The engine reports fills and account state, not P&L, commission or an equity history, so trades, net P&L, run-up, drawdown, the equity curve and the summary are derived from fills + bars + the strategy's commission setting. Tests hold the numbers to PineTS's own ledger (`tester.engine.test.ts`) |
 | UI | `features/pine/` | A bottom dock (`PineDock`) with the Pine Editor (CodeMirror 6, `pineLanguage.ts`) and the Strategy Tester. Opened from the tab bar, `Ctrl+E`, or the "Edit script" button registered on every script's legend row (`pine/hostActions.ts`) |
 
@@ -303,7 +322,7 @@ properties on `<html>` and persists the choice. To add a theme, append one entry
   always the worker one (`PineWorkerEngine`): a Worker has no DOM and no Tauri IPC, so a pasted script can't reach the
   backend or a broker credential. Never switch to the in-process `PineEngine`, and don't add other uses of `eval`.
 - Tauri capabilities (`src-tauri/capabilities/default.json`) grant only what's used: window creation, the system
-  browser opener, native dialogs, and logging. The frontend has **no file-system access**; files are read through the
+  browser opener, native dialogs, notifications, updates, and logging. The frontend has **no file-system access**; files are read through the
   browser's file picker.
 - Broker credentials live in the OS keychain and are read only by the Rust backend; the web view never receives an access
   token, and the settings screen can't read one back.

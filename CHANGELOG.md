@@ -7,6 +7,13 @@ project uses [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- **Checksums.** Every release now carries a `SHA256SUMS` file listing the SHA-256 hash of each installer, so a download can
+  be verified (PowerShell, `shasum` and `sha256sum` instructions are in SECURITY.md). The release workflow attaches it after all
+  the platform builds finish, and `node scripts/checksums.mjs <folder>` writes the same file for installers you host yourself.
+- **Automatic updates.** ProTradeChart checks GitHub for a newer release about once a day and shows a dot on the About button and
+  a notice when one is waiting; *About → Updates* checks on demand, downloads with progress and installs. Every update
+  is verified against a signing key built into the app before it runs, and the daily check can be turned off. Releases now
+  need the updater signing key in the repository's secrets (see CONTRIBUTING).
 - **Price alerts.** Set an alert on any chart — right-click → *Add alert here…* (starting at the price under the cursor), the
   chart toolbar's *Alert* button, or `Alt+A` — and get a system notification, a toast and a chime when the price crosses
   your level, once or every time. The bell in the tab bar lists, pauses, edits and deletes alerts and badges the ones that
@@ -17,6 +24,9 @@ project uses [Semantic Versioning](https://semver.org).
   Zerodha's public instrument lists (about 24,000 equities, indices and futures). Kite tokens expire every morning, so the
   Data providers screen has an in-app login: open Zerodha's page, paste the address it redirects to, and the token is
   saved to your keychain. Needs a Kite Connect subscription with market data.
+- **Bundled Pine indicators.** Every `.pine` file under `pine/indicators/` is built into the app: it appears in the chart's
+  Indicators dialog (grouped by its folder) and in the Pine Editor's **Open** menu, and is saved by name in layouts. Adding
+  one is just writing the file (`pine/README.md`); `npm test` runs each on the real engine so a broken script can't ship.
 - **Pine Script: your own indicators and a strategy tester.** A Pine Editor (syntax colouring, completion, a console for
   errors and warnings) and a Strategy Tester share a resizable panel under the charts, opened from the tab bar or with
   `Ctrl+E`. Start from an example, write `indicator()` or `strategy()` code, and add it to the chart. Saved scripts live
@@ -49,6 +59,10 @@ project uses [Semantic Versioning](https://semver.org).
   light-theme chart dark. Layouts now leave the theme alone, and layouts you already saved are cleaned up when loaded.
 
 ### Changed
+
+- **About** now credits the developer, Swapnil Pawar of ProTradeJournal, with links to their X and GitHub profiles.
+- **New logo and app icon.** The README carries the full logo, and the app icon (window, taskbar, installers), the favicon
+  and the About dialog use its P mark on a light rounded plate, so they stay legible on dark taskbars and docks.
 
 - **The app is now licensed under the GNU AGPL-3.0** (it was MIT) because Pine Script support bundles PineTS, which is
   AGPL-3.0. Nothing changes for using the app; anyone who redistributes it, or a modified version, must do so under the

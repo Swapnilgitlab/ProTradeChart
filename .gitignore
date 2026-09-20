@@ -27,3 +27,7 @@ Thumbs.db
 
 # Tauri / Rust (see also src-tauri/.gitignore)
 src-tauri/target
+
+# Updater signing keys (the private half must never be committed)
+*.key
+.tauri/

@@ -23,6 +23,8 @@ import { publishDockRequest } from '../../pine/dockBus';
 import { AboutDialog } from '../about/AboutDialog';
 import { AlertsDialog } from '../alerts/AlertsDialog';
 import { useAlerts } from '../alerts/useAlerts';
+import { startBackgroundUpdates } from '../../updates/service';
+import { useUpdateState } from '../../updates/useUpdateState';
 import { ImportDataDialog } from '../datasets/ImportDataDialog';
 import { PineDock } from '../pine/PineDock';
 import { LayoutMenu, type LayoutSummary } from '../layouts/LayoutMenu';
@@ -197,6 +199,12 @@ export function Workspace() {
     return startAlertEngine();
   }, []);
   useEffect(() => {
+    if (getCurrentWindow().label !== 'main') return;
+    return startBackgroundUpdates();
+  }, []);
+  const updateState = useUpdateState();
+  const updateWaiting = updateState.kind === 'available' || updateState.kind === 'installed';
+  useEffect(() => {
     getPreference(PREF_ALERTS_SEEN)
       .then((v) => setAlertsSeenAt(v ? Number(v) : Date.now()))
       .catch(() => setAlertsSeenAt(Date.now()));
@@ -353,8 +361,15 @@ export function Workspace() {
             <AppWindow size={15} />
           </button>
           <ThemeSelect />
-          <button type="button" className="icon-button" aria-label="About" title="About & shortcuts" onClick={() => setAboutOpen(true)}>
+          <button
+            type="button"
+            className="icon-button bell-button"
+            aria-label="About"
+            title={updateWaiting ? 'About & shortcuts — an update is available' : 'About & shortcuts'}
+            onClick={() => setAboutOpen(true)}
+          >
             <Info size={15} />
+            {updateWaiting && <span className="update-dot" aria-hidden="true" />}
           </button>
         </div>
       </div>

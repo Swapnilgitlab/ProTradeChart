@@ -121,6 +121,9 @@ export const getPreference = (key: string) => invoke<string | null>('get_ui_pref
 
 export const setPreference = (key: string, value: string) => invoke<void>('set_ui_preference', { key, value });
 
+/** Relaunches the app; used once an update has been installed. */
+export const restartApp = () => invoke<void>('restart_app');
+
 // ---- Layouts ---------------------------------------------------------------
 
 export const getChartLayouts = () => invoke<ChartLayoutRow[]>('get_chart_layouts');

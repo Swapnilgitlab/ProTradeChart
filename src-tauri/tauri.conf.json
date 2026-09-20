@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Candor",
+  "productName": "ProTradeChart",
   "version": "0.1.0",
-  "identifier": "io.github.swapnilgitlab.candor",
+  "identifier": "io.github.swapnilgitlab.protradechart",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Candor",
+        "title": "ProTradeChart",
         "width": 1440,
         "height": 900,
         "minWidth": 900,
@@ -27,8 +27,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "publisher": "Candor contributors",
-    "copyright": "Copyright (c) Candor contributors",
+    "createUpdaterArtifacts": true,
+    "publisher": "ProTradeChart contributors",
+    "copyright": "Copyright (c) ProTradeChart contributors",
     "category": "Finance",
     "shortDescription": "Open-source desktop charting software",
     "longDescription": "Fast candlestick charts, technical indicators, drawing tools, watchlists and saved layouts. Free and open source.",
@@ -42,6 +43,13 @@
     "resources": {
       "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
       "../LICENSE": "LICENSE"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYzRDNERkFCRkUzQzVDQkYKUldTL1hEeitxOS9UODVtdURJWC9XVnYwZGtOOU8rUHRiRFlJQ0g3OUQ2RE9jUjB4d01URlFHZzcK",
+      "endpoints": ["https://github.com/Swapnilgitlab/ProTradeChart/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
     }
   }
 }
