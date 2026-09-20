@@ -6,6 +6,7 @@ import {
   type ExternalIndicatorEntry,
   type InputValue,
 } from '@luxalgo/vela/plugin';
+import { scriptIdOf } from './ids';
 import { declaredTitle } from './source';
 
 /** Vela saves a layout's manifest and native indicators itself, but not script indicators
@@ -38,6 +39,9 @@ export function toSavedScripts(handles: readonly HandleLike[]): SavedScript[] {
   const saved: SavedScript[] = [];
   for (const h of handles) {
     if (h.source === undefined) continue; // a native indicator: Vela persists those
+    // A bundled script added from the Indicators picker is a manifest entry, which Vela
+    // persists (by name) itself: saving it here too would restore it twice.
+    if (scriptIdOf(h.id) === null) continue;
     // `h.title` is a placeholder until the script has run; the title it declares is the real name.
     const entry: SavedScript = { id: h.id, name: declaredTitle(h.source) ?? h.title, source: h.source };
     // Deltas only, for props as for inputs: a default frozen into a layout would outlive a

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { InputSchema } from '@luxalgo/vela/plugin';
-import { makeIndicatorId, scriptIdOf } from './engine';
+import { makeIndicatorId, scriptIdOf } from './ids';
 import { parseSavedScripts, toIndicatorEntry, toSavedScripts } from './persistence';
 
 const PROP_SCHEMA: InputSchema[] = [
@@ -48,6 +48,8 @@ describe('toSavedScripts', () => {
       // Vela reports every prop, defaults included; only the one that differs is kept.
       handle({ id: 'b~2', inputValues: () => ({ len: 50, col: '#2196F3' }), propValues: () => ({ initial_capital: 5000, commission_value: 0 }), visible: false }),
       handle({ id: 'native', source: undefined }),
+      // Added by Vela from the bundled manifest, so Vela saves it (by name), not us.
+      handle({ id: 'manifest-3' }),
     ]);
     expect(saved).toEqual([
       { id: 'a~1', name: 'My MA', source: '//@version=6\nindicator("My MA")' },

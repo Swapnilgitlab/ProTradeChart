@@ -1,0 +1,26 @@
+//@version=6
+// An example of a bundled indicator. Replace it with your own or delete it: every
+// .pine file under pine/indicators ships inside the app.
+indicator("Moving average ribbon", overlay=true)
+
+first = input.int(10, "First length", minval=1, group="Lengths")
+step = input.int(5, "Step", minval=1, group="Lengths")
+src = input.source(close, "Source", group="Lengths")
+upColor = input.color(color.green, "Rising colour", group="Style")
+downColor = input.color(color.red, "Falling colour", group="Style")
+
+fastest = ta.ema(src, first)
+fast = ta.ema(src, first + step)
+middle = ta.ema(src, first + step * 2)
+slow = ta.ema(src, first + step * 3)
+slowest = ta.ema(src, first + step * 4)
+
+rising = fastest > slowest
+tone = rising ? upColor : downColor
+
+outer1 = plot(fastest, "EMA 1", color=tone, linewidth=2)
+plot(fast, "EMA 2", color=color.new(tone, 40))
+plot(middle, "EMA 3", color=color.new(tone, 55))
+plot(slow, "EMA 4", color=color.new(tone, 70))
+outer2 = plot(slowest, "EMA 5", color=color.new(tone, 80))
+fill(outer1, outer2, color=color.new(tone, 88))

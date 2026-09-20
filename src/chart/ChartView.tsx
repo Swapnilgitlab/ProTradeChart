@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { VelaWorkspace, type WorkspaceState } from '@luxalgo/vela/workspace';
 import { providerFactories } from '../data/providers';
 import { normalizeSymbol } from '../lib/symbols';
+import { BUNDLED_MANIFEST } from '../pine/bundled';
 import { useTheme } from '../theme/ThemeProvider';
 import { trackCursorPrice } from './alertActions';
 import { watchHistory } from './historyBackfill';
@@ -141,6 +142,9 @@ export const ChartView = forwardRef<ChartViewHandle, Props>(function ChartView(
           theme: theme.baseMode,
           live: true,
           providers: providerFactories,
+          // The Pine scripts that ship with the app (pine/indicators): listed in the Indicators
+          // dialog, not added to a chart until the user picks one.
+          indicators: BUNDLED_MANIFEST,
         });
         // Must run AFTER construction: Vela's constructor re-registers its
         // built-in moving-average descriptors on every `new VelaWorkspace`,

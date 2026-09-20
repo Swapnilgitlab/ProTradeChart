@@ -14,20 +14,7 @@ import { PineWorkerEngine } from '@luxalgo/vela-pinets';
  *  no Tauri IPC, so a pasted script can't reach the backend or the broker credentials.
  *  Don't switch this to `PineEngine` without revisiting the CSP note in ARCHITECTURE.md. */
 
-/** Vela's own indicator ids carry no meaning for us; ours look like `<scriptId>~<suffix>`
- *  so a legend row can be traced back to the library script it came from. */
-const ID_SEPARATOR = '~';
-export const DRAFT_SCRIPT_ID = 'draft';
-
-export function makeIndicatorId(scriptId: string): string {
-  return `${scriptId}${ID_SEPARATOR}${crypto.randomUUID().slice(0, 8)}`;
-}
-
-/** The library script an indicator id was minted for, or null for an id we didn't mint. */
-export function scriptIdOf(indicatorId: string): string | null {
-  const at = indicatorId.indexOf(ID_SEPARATOR);
-  return at > 0 ? indicatorId.slice(0, at) : null;
-}
+export { makeIndicatorId, scriptIdOf } from './ids';
 
 type BarsReader = () => ExecutionRequest['bars'];
 

@@ -5,6 +5,7 @@ import { useToast } from '../../components/Toasts';
 import { useDismiss } from '../../components/useDismiss';
 import { confirmDelete, confirmDiscard } from '../../lib/dialogs';
 import { getPreference, setPreference, type PineScriptRow } from '../../lib/ipc';
+import { BUNDLED_SCRIPTS, type BundledScript } from '../../pine/bundled';
 import type { DockRequest } from '../../pine/dockBus';
 import { makeIndicatorId, scriptIdOf } from '../../pine/engine';
 import { TEMPLATES, declaredTitle, detectKind, type ScriptTemplate } from '../../pine/source';
@@ -159,6 +160,15 @@ export function PineEditor({ workspace, editRequest, onStrategyAdded }: Props) {
     [canReplace, load],
   );
 
+  const openBundled = useCallback(
+    async (script: BundledScript) => {
+      setMenuOpen(false);
+      // A copy: saving it adds to the user's library and never touches the shipped file.
+      if (await canReplace()) load({ id: crypto.randomUUID(), name: script.name, source: script.source, linkedIndicatorId: null });
+    },
+    [canReplace, load],
+  );
+
   const openSaved = useCallback(
     async (row: PineScriptRow) => {
       setMenuOpen(false);
@@ -183,8 +193,13 @@ export function PineEditor({ workspace, editRequest, onStrategyAdded }: Props) {
         source: editRequest.source,
         linkedIndicatorId: editRequest.indicatorId,
       });
+      // An id we didn't mint means Vela added it: a script bundled with the app. Edits show
+      // on this chart, but a saved layout stores only its name, so they aren't kept.
+      if (libraryId === null) {
+        log('info', `"${declaredTitle(editRequest.source) ?? editRequest.name}" is bundled with the app. Edits apply to this chart only; Save keeps your own copy in My scripts.`);
+      }
     })();
-  }, [editRequest, buffer.id, buffer.linkedIndicatorId, canReplace, load, scripts]);
+  }, [editRequest, buffer.id, buffer.linkedIndicatorId, canReplace, load, scripts, log]);
 
   const saveScript = useCallback(async () => {
     if (!kind) {
@@ -291,6 +306,19 @@ export function PineEditor({ workspace, editRequest, onStrategyAdded }: Props) {
                 </div>
               ))}
               <div className="menu-divider" />
+              {BUNDLED_SCRIPTS.length > 0 && (
+                <>
+                  <div className="menu-heading">Bundled with the app</div>
+                  {BUNDLED_SCRIPTS.map((s) => (
+                    <button key={s.file} type="button" role="menuitem" className="menu-item" onClick={() => void openBundled(s)}>
+                      <span className={`pine-kind-dot ${s.kind}`} aria-hidden="true" />
+                      <span className="grow">{s.name}</span>
+                      <span className="muted small">{s.category}</span>
+                    </button>
+                  ))}
+                  <div className="menu-divider" />
+                </>
+              )}
               <div className="menu-heading">New from an example</div>
               {TEMPLATES.map((t) => (
                 <button key={t.id} type="button" role="menuitem" className="menu-item" onClick={() => void openTemplate(t)}>
