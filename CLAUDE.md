@@ -16,6 +16,7 @@ npm run typecheck && npm test           # frontend checks
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 cargo fmt --manifest-path src-tauri/Cargo.toml
 node scripts/checksums.mjs <folder>     # SHA256SUMS for a folder of installers (its tests run with npm test)
+npm run licenses                        # regenerate THIRD_PARTY_LICENSES.txt after any dependency change
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
@@ -51,6 +52,11 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   chart is switched to the machine's timezone so both display correctly.
 - The Content-Security-Policy in `tauri.conf.json` is **not applied by the Vite dev server** — test CSP-sensitive changes
   in a release build (`npx tauri build --no-bundle`).
+- `THIRD_PARTY_LICENSES.txt` is bundled with the installers and shown in About; it reproduces every dependency's licence.
+  Regenerate it (`npm run licenses`) whenever `package-lock.json` or `Cargo.lock` changes. The About dialog also carries
+  the AGPL's legal notices (copyright, no warranty, licence, source link): keep them.
+- The web view loads nothing from third-party servers the user didn't choose: the CSP has no remote `img-src`, and Vela's
+  crypto providers have `resolveSymbolIcon` switched off (`data/providers/index.ts`) so no coin logos come from Ledger.
 - Keep `writing` `﻿` and similar invisible characters as escape sequences, not literals.
 - Pine Script runs on PineTS in a **Worker** (`pine/engine.ts`), which is why the CSP has `'unsafe-eval'` — never use the
   in-process `PineEngine`, and don't add other uses of `eval`. `installPineEngine`, `installPinePersistence` and
@@ -80,6 +86,10 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   key. `bundle.createUpdaterArtifacts` makes `tauri build` demand `TAURI_SIGNING_PRIVATE_KEY` unless `--no-bundle` is used.
   The check runs only in the `main` window and only in release builds (`startBackgroundUpdates`); see "Releasing" in
   `CONTRIBUTING.md`.
+- Yahoo Finance is **opt-in**: it starts off (`terms` on its `ProviderSpec`), the user turns it on after reading its terms
+  notice, and the Rust commands refuse Yahoo requests while it's off. Don't make it default-on, don't go back to a
+  browser User-Agent, and don't add ads, paid features, referral links or ways to export/share Yahoo data — see "Yahoo
+  Finance is opt-in" in `docs/ARCHITECTURE.md`.
 - Yahoo Finance endpoints are unofficial and have no published limits. Every request must go through `Market::get_json`
   (which applies the `Gate` in `gate.rs`: pacing, a per-minute budget, and a pause after HTTP 429) — never call Yahoo
   from anywhere else. Batch (`spark` takes 20 symbols), cache, and share polls (`data/livePoll.ts`) rather than adding

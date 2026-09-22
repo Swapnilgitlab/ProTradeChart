@@ -36,7 +36,9 @@ CI runs exactly these, on Linux, macOS and Windows.
 - **No new network calls without saying so.** This app talks only to the market-data sources listed in the README. A
   new one needs a note in the README's *Data sources* section and in the PR.
 - **Dependencies.** Prefer what's already here. A new dependency needs a reason, and its licence has to be compatible
-  with AGPL-3.0 distribution (add it to [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+  with AGPL-3.0 distribution (add it to [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)). After any dependency change, run
+  `npm run licenses` and commit the regenerated `THIRD_PARTY_LICENSES.txt`; it fails loudly if a new component ships no
+  licence file and needs a look. (The release workflow regenerates it before building too.)
 - **Keep Vela's attribution intact.** See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ### App icon
@@ -68,8 +70,9 @@ To release: bump the version in `package.json`, `src-tauri/tauri.conf.json` and 
 (`git tag v0.2.0 && git push origin v0.2.0`), review the draft release the workflow creates, and publish it. Publishing is
 what makes `latest.json` visible to installed apps.
 
-Once every platform's build has uploaded, the workflow's `checksums` job downloads what the draft release actually holds and
-attaches a **`SHA256SUMS`** file to it (`scripts/publish-checksums.sh`, which uses `scripts/checksums.mjs`); check it is there
+Once every platform's build has uploaded, the workflow's `checksums` job attaches the source of the AGPL components the app
+is built from (`scripts/publish-component-sources.sh`: PineTS, Vela PineTS and Vela at their `package-lock.json` versions,
+from the upstream tags), then downloads what the draft release actually holds and attaches a **`SHA256SUMS`** file to it (`scripts/publish-checksums.sh`, which uses `scripts/checksums.mjs`); check it is there
 before you publish. It skips signatures and `latest.json`, and a re-run replaces the earlier file (re-run just that job from the
 Actions page if you have to). If you also host the installers on your own site, download them from the release into a folder
 and run `node scripts/checksums.mjs <folder>` to write the same file, then publish it beside them — the hashes must match the
@@ -87,6 +90,11 @@ whether the same symbol works on finance.yahoo.com. The app writes a log file th
 
 Security issues: see [SECURITY.md](SECURITY.md) — please don't file those publicly.
 
-## Licence
+## Licence and sign-off
 
 By contributing you agree that your contribution is licensed under the [GNU AGPL-3.0](LICENSE).
+
+Please **sign off every commit** (`git commit -s`). That adds a `Signed-off-by: Your Name <you@example.com>` line, which
+certifies the [Developer Certificate of Origin](https://developercertificate.org/): that you wrote the change, or otherwise
+have the right to submit it under this project's licence. Don't submit code, scripts or assets copied from elsewhere
+unless their licence allows AGPL-3.0 distribution, and say in the pull request where they came from.

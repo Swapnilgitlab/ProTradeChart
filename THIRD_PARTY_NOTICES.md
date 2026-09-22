@@ -1,9 +1,17 @@
 # Third-party notices
 
-ProTradeChart is licensed under the GNU Affero General Public License
-v3.0 (see [LICENSE](LICENSE)). It is built on the open-source components below.
+ProTradeChart is Copyright (C) 2026 Swapnil Pawar and the ProTradeChart
+contributors, and is licensed under the GNU Affero General Public License v3.0
+(see [LICENSE](LICENSE)). It is built on the open-source components below.
 Their licences apply to them, not to this project's own code. All of them are
 compatible with distribution under the AGPL-3.0.
+
+This page summarises them. The copyright notice and full licence text of every
+component compiled into the app — some 550 npm packages and Rust crates — are in
+[THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt), which is installed with the
+app and shown under *About → Third-party licences*. It is generated from the
+lockfiles by `npm run licenses` (`scripts/third-party-licenses.mjs`), and rebuilt
+by the release workflow before every build.
 
 ## Vela — charting engine (Apache-2.0, attribution required)
 
@@ -44,8 +52,12 @@ Vela is licensed under the Apache License, Version 2.0
 (<https://www.apache.org/licenses/LICENSE-2.0>).
 
 **This app keeps Vela's built-in attribution mark enabled** (the logomark in the
-bottom-left of each chart), and credits Vela in *About*. If you fork this
-project, please leave both in place.
+bottom-left of each chart), and credits Vela in *About*.
+
+**Additional term (AGPL-3.0, section 7(b)).** The attribution requirement above
+applies to the Vela material in this app and in any modified version of it: keep
+Vela's attribution mark, or the equivalent visible attribution Vela's notice
+describes, wherever a chart is shown.
 
 ## Pine Script support — PineTS and Vela PineTS (AGPL-3.0)
 
@@ -54,7 +66,13 @@ Pine Script indicators and strategies run on **PineTS**, a Pine Script runtime, 
 GNU Affero General Public License v3.0. They are the reason this app is AGPL-3.0 rather than MIT.
 
 - PineTS: built by LuxAlgo. Copyright (C) 2026-present LuxAlgo. <https://github.com/LuxAlgo/PineTS>
-- Vela PineTS: <https://www.npmjs.com/package/@luxalgo/vela-pinets>
+- Vela PineTS: <https://github.com/LuxAlgo/Vela-pinets> (npm: `@luxalgo/vela-pinets`)
+
+**Their source.** Every ProTradeChart release on GitHub carries, next to its installers, the
+source of PineTS, Vela PineTS and Vela at the exact versions it was built with
+(`pinets-<version>-source.tar.gz`, `vela-pinets-<version>-source.tar.gz`,
+`vela-<version>-source.tar.gz`), taken from the upstream `v<version>` tags. The versions
+are the ones pinned in `package-lock.json`; the app's own source is the release's tag.
 
 PineTS is an independently developed open source runtime. LuxAlgo Global, LLC and the PineTS project are not affiliated
 with, sponsored by, endorsed by, or in any way officially associated with TradingView, Inc. "Pine Script®" and
@@ -76,6 +94,11 @@ with, sponsored by, endorsed by, or in any way officially associated with Tradin
 | [keyring](https://github.com/hwchen/keyring-rs) | MIT OR Apache-2.0 | Access to the operating system's credential store |
 | [sha2](https://github.com/RustCrypto/hashes) | MIT OR Apache-2.0 | Signing Zerodha's login (a SHA-256 checksum, computed locally) |
 | [csv](https://github.com/BurntSushi/rust-csv), [base64](https://github.com/marshallpierce/rust-base64) | MIT OR Unlicense, MIT OR Apache-2.0 | Parsing the brokers' instrument lists, reading token expiry |
+| Microsoft Edge WebView2 SDK loader (through `webview2-com-sys`) | BSD-style, Microsoft | Starting the system web view (Windows builds) |
+
+Their own dependencies bring in many more (MIT, Apache-2.0, BSD, ISC, Zlib,
+Unicode-3.0, MPL-2.0 and CDLA-Permissive-2.0 licences among them); all are listed,
+with their licence texts, in [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt).
 
 ## Build and test tooling
 
@@ -84,11 +107,18 @@ are used to build and test the project and are not distributed in the app.
 
 ## Market data
 
-Price data is fetched at runtime from third-party services — Yahoo Finance,
-Binance, Coinbase and Hyperliquid, and Dhan (using the user's own account and
-credentials, only if they connect it). No data from those services is
-bundled with the app, and their terms of use apply to how you use it. See the
-data-source notes in the [README](README.md#data-sources).
+Price data is fetched at runtime, directly from the user's computer, from
+third-party services: Binance, Coinbase and Hyperliquid; Yahoo Finance, only
+after the user has read its notice and turned it on; and Dhan or Zerodha, with
+the user's own account and credentials, only if they connect one. No market
+data is bundled with the app or passes through any server of this project, and
+each service's terms apply to how its data is used. See the data-source notes in
+the [README](README.md#data-sources).
+
+Yahoo!, Yahoo Finance, Binance, Coinbase, Hyperliquid, Dhan, Zerodha and Kite
+Connect are trademarks of their respective owners. ProTradeChart is not
+affiliated with, endorsed by or sponsored by any of them; their names are used
+only to say where data comes from.
 
 The exact versions of every dependency are pinned in `package-lock.json` and
 `src-tauri/Cargo.lock`.

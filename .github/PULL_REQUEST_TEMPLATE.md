@@ -13,3 +13,5 @@
 - [ ] New behaviour in parsers / request planning / resampling / the store has tests
 - [ ] No new network destinations (or the README's *Data sources* section is updated)
 - [ ] Vela's attribution is untouched
+- [ ] Every commit is signed off (`git commit -s`; see CONTRIBUTING)
+- [ ] Any new dependency is AGPL-3.0-compatible, and `npm run licenses` was re-run

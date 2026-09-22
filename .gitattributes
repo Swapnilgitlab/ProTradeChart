@@ -1,2 +1,4 @@
 # Shell scripts run on Linux runners: keep LF line endings on every checkout.
 *.sh text eol=lf
+# Node scripts start with a #! line, which Node and Vitest fail to parse when a CRLF follows it.
+*.mjs text eol=lf

@@ -9,6 +9,7 @@ use tauri::{AppHandle, Manager, State};
 use crate::db::{now_ms, Database};
 use crate::market::Market;
 use crate::models::*;
+use crate::providers;
 use crate::store::{bars_cache, datasets, layouts, preferences, scripts, watchlists};
 use crate::yahoo;
 
@@ -170,6 +171,16 @@ pub fn get_dataset_bars(
 
 // ---- Market data (Yahoo Finance) -------------------------------------------
 
+/// Yahoo Finance is opt-in: its data comes under Yahoo's terms, which the user
+/// reads before switching it on. The check is made here, before any request,
+/// so no window — however stale its idea of the settings — can reach Yahoo
+/// while it is off.
+const YAHOO_OFF: &str = "Yahoo Finance is off. Turn it on in Data providers (the plug icon) to chart Yahoo symbols.";
+
+fn yahoo_is_on(db: &Database) -> Result<bool, String> {
+    providers::is_on(&*lock(db)?, "yahoo")
+}
+
 /// Bars for `symbol` at a Yahoo `interval` (`1m`…`1mo`). The requested window
 /// is clamped to what Yahoo serves for that interval. If the network request
 /// fails, whatever is in the local cache is returned instead (flagged
@@ -183,6 +194,9 @@ pub async fn fetch_bars(
     db: State<'_, Database>,
     market: State<'_, Market>,
 ) -> Result<BarsResponse, String> {
+    if !yahoo_is_on(&db)? {
+        return Err(YAHOO_OFF.to_string());
+    }
     if yahoo::interval_limits(&interval).is_none() {
         return Err(format!("Yahoo Finance doesn't serve a '{interval}' interval"));
     }
@@ -254,16 +268,27 @@ pub async fn fetch_bars(
 pub async fn search_symbols(
     query: String,
     limit: Option<u32>,
+    db: State<'_, Database>,
     market: State<'_, Market>,
 ) -> Result<Vec<SymbolMatch>, String> {
     let query = query.trim();
-    if query.is_empty() {
+    if query.is_empty() || !yahoo_is_on(&db)? {
         return Ok(Vec::new());
     }
     market.search(query, limit.unwrap_or(8).clamp(1, 25)).await
 }
 
 #[tauri::command]
-pub async fn fetch_quotes(symbols: Vec<String>, market: State<'_, Market>) -> Result<Vec<Quote>, String> {
+pub async fn fetch_quotes(
+    symbols: Vec<String>,
+    db: State<'_, Database>,
+    market: State<'_, Market>,
+) -> Result<Vec<Quote>, String> {
+    if !yahoo_is_on(&db)? {
+        return Ok(symbols
+            .iter()
+            .map(|s| yahoo::quote_error(s, "Yahoo Finance is off"))
+            .collect());
+    }
     Ok(market.quotes(&symbols).await)
 }

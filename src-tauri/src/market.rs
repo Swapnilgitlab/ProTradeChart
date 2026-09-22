@@ -16,9 +16,14 @@ use crate::gate::{Gate, Limits, Refusal};
 use crate::models::{Quote, SymbolMatch};
 use crate::yahoo::{self, ChartData};
 
-/// Yahoo rejects requests with no browser-like User-Agent.
-const USER_AGENT: &str =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+/// The app says who it is rather than posing as a browser, so Yahoo can see
+/// (and, if it chooses, refuse) exactly this client. Yahoo does reject a
+/// request with no User-Agent at all.
+const USER_AGENT: &str = concat!(
+    "ProTradeChart/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/Swapnilgitlab/ProTradeChart)"
+);
 
 /// A quote is reused this long, so a watchlist refresh, a window-focus refresh
 /// and a second window all cost one request between them.

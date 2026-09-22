@@ -17,8 +17,9 @@ subscription.
 - **Serious charts.** Candles, bars, line, area, baseline and Heikin Ashi; a full drawing toolbar (lines, shapes, text
   annotations and more); 70+ built-in indicators; multiple panes; a WebGL2 renderer with a canvas fallback.
   Drawn by [Vela](https://luxalgo.com/vela).
-- **Many markets, no API key.** Stocks, ETFs, indices, FX and futures from Yahoo Finance (global exchanges,
-  1-minute to monthly bars) — plus live-streaming crypto from Binance, Coinbase and Hyperliquid.
+- **Many markets.** Live-streaming crypto from Binance, Coinbase and Hyperliquid, ready to use. Stocks, ETFs, indices, FX
+  and futures from Yahoo Finance's public endpoints if you choose to turn that source on — it comes under Yahoo's own
+  terms, so it starts off (see [Data sources](#data-sources)).
 - **Bring your own broker.** Connect a [Dhan](#connecting-dhan) or [Zerodha](#connecting-zerodha) account for
   exchange-grade Indian market data — intraday history and a live tick feed. Credentials go in your operating system's
   keychain. More brokers plug into the same system.
@@ -33,13 +34,15 @@ subscription.
 - **Layouts.** Save your whole session — every tab, its chart grid, and each chart's symbol, indicators, drawings and
   settings — as a named layout, and mark one as the default. Layouts don't include the theme; that stays your own choice.
 - **Watchlists.** Unlimited lists with live prices and day change, sortable, and importable from a TradingView export.
-- **Pine Script.** Write, save and run your own indicators, and backtest strategies against a chart's history, in a built-in
-  Pine Editor and Strategy Tester (equity curve, performance summary, list of trades). Runs on
-  [PineTS](https://github.com/LuxAlgo/PineTS). Backtests are approximate and can differ from TradingView's.
+- **Pine Script®-compatible scripts.** Write, save and run your own indicators, and backtest strategies against a chart's
+  history, in a built-in Script Editor and Strategy Tester (equity curve, performance summary, list of trades). Runs on
+  [PineTS](https://github.com/LuxAlgo/PineTS). Backtests are approximate and can differ from TradingView's. Pine Script is a
+  trademark of TradingView, Inc.; ProTradeChart is not affiliated with TradingView.
 - **Six themes.** Daylight, Paper, Midnight, Graphite, Ocean and Terminal. The starting theme follows your OS's
   light/dark setting.
-- **Private by design.** Everything (layouts, watchlists, imported data, a small offline price cache) lives in one
-  SQLite file on your machine. Nothing is uploaded anywhere.
+- **Private by design.** No account and no telemetry. Everything (layouts, watchlists, imported data, a small offline
+  price cache) lives in one SQLite file on your machine; the app talks only to the data sources you turn on and, to check
+  for updates, GitHub ([details](SECURITY.md#what-the-app-does-and-doesnt-do)).
 - **Updates.** ProTradeChart checks GitHub for a newer release about once a day and offers to install it (*About → Updates*).
   Each update is verified against a signing key built into the app before it runs, and the daily check can be switched off.
 
@@ -88,11 +91,11 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib    # backend unit tests
 
 | To… | Do this |
 | --- | --- |
-| Load a symbol | Type in the search box (`Ctrl+K`) and press Enter. Results come from every data source at once. |
+| Load a symbol | Type in the search box (`Ctrl+K`) and press Enter. Results come from every data source that is switched on. |
 | Set a price alert | Right-click the chart → **Add alert here…** (it starts at the price under the cursor), or the **Alert** button in the chart toolbar, or `Alt+A`. The bell in the tab bar lists your alerts and shows how many have fired since you last looked. |
 | Open another chart | `Ctrl+T`, or the **+** in the tab bar. Middle-click or `Ctrl+W` closes a tab. |
 | Show several charts at once | The **Layout** button in the chart's toolbar (next to the timeframe and style buttons): choose a grid from 1×1 to 4×4. New charts start on the same symbol; click one to make it the active chart (it gets a white outline), then search or click a watchlist symbol to change just that chart — the tab label follows it. The sync switches in the same dropdown link symbol, interval, crosshair and style. |
-| Write an indicator or backtest a strategy | The **</>** icon in the tab bar, or `Ctrl+E`, opens the Pine Editor. Pick an example from **Open**, edit it, then **Add to chart** (`Ctrl+Enter`); **Save** (`Ctrl+S`) keeps it in your script library. A strategy opens the **Strategy Tester**. The pencil on a script's legend row reopens its code. Scripts on a chart are saved with the layout. |
+| Write an indicator or backtest a strategy | The **</>** icon in the tab bar, or `Ctrl+E`, opens the Script Editor. Pick an example from **Open**, edit it, then **Add to chart** (`Ctrl+Enter`); **Save** (`Ctrl+S`) keeps it in your script library. A strategy opens the **Strategy Tester**. The pencil on a script's legend row reopens its code. Scripts on a chart are saved with the layout. |
 | Change timeframe / style / indicators | The toolbar at the top of the chart. On the chart itself, press `?` for Vela's own shortcut list. |
 | Save your setup | **Layout** menu → *Save as new layout…*. *Set as default* makes it the starting session (and the template for new tabs). |
 | Track symbols | The watchlist on the right. Click a row to chart it; `↑`/`↓` step through the list. |
@@ -104,7 +107,8 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib    # backend unit tests
 
 ### Symbols
 
-Every symbol is `provider:TICKER`. Typing a bare ticker means Yahoo Finance.
+Every symbol is `provider:TICKER`. Typing a bare ticker means the default source: Yahoo Finance (once you've turned it
+on), unless you make another one the default under *Data providers*.
 
 | Prefix | Examples |
 | --- | --- |
@@ -139,7 +143,7 @@ time,open,high,low,close,volume
 
 | Source | Covers | Timeframes | Live? |
 | --- | --- | --- | --- |
-| **Yahoo Finance** | Stocks, ETFs, indices, FX, futures, crypto — most world exchanges | 1m, 5m, 15m, 30m, 1h, 90m, D, W, M, plus anything buildable from those (2m, 2h, 3h, 4h…) | Polled every 15 s (intraday) / 60 s (daily) |
+| **Yahoo Finance** *(off until you turn it on)* | Stocks, ETFs, indices, FX, futures, crypto — most world exchanges | 1m, 5m, 15m, 30m, 1h, 90m, D, W, M, plus anything buildable from those (2m, 2h, 3h, 4h…) | Polled every 15 s (intraday) / 60 s (daily) |
 | **Binance** | Spot and perpetual crypto | 1 minute to monthly | Live stream |
 | **Coinbase** | Spot crypto | 1 minute to monthly | Live stream |
 | **Hyperliquid** | Perpetual and spot crypto | 1 minute to monthly | Live stream |
@@ -149,8 +153,12 @@ time,open,high,low,close,volume
 
 A few things worth knowing:
 
-- Yahoo Finance's endpoints are **public but unofficial**. They can be rate-limited, change without notice, or return
-  delayed prices for some exchanges. Yahoo only keeps a limited intraday history (about 30 days of 1-minute bars, 60 days
+- **Yahoo Finance is off until you turn it on.** ProTradeChart is not affiliated with, endorsed by or sponsored by Yahoo,
+  and there is no official API or data licence behind the endpoints it reads; your computer fetches them directly. Yahoo's
+  [terms of service](https://legal.yahoo.com/us/en/yahoo/terms/otos/index.html) govern that use, including their limits on
+  automated access and commercial use, so the app shows you a notice first (on first launch, and under *Data providers*)
+  and leaves the choice to you. If you use it, use the data for your own information only: don't republish, resell or
+  redistribute it. The endpoints can be rate-limited, change without notice, or return delayed prices for some exchanges. Yahoo only keeps a limited intraday history (about 30 days of 1-minute bars, 60 days
   of 2–90-minute bars, 2 years of hourly bars); daily and longer go back to the listing date.
 - A chart opens with about 500 bars (two years of daily candles). **Scroll or zoom back and older candles load
   automatically**, for as long as the source has them: a daily Yahoo chart goes back to the stock's listing, while
@@ -163,6 +171,13 @@ A few things worth knowing:
   live poll; and on *429 Too Many Requests* the app sends nothing for 30 seconds (doubling on repeats, up to 15 minutes)
   and draws charts from the local cache in the meantime. Details in
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#yahoo-finance-and-rate-limits).
+- **Crypto** comes from the exchanges' public market-data APIs, under their own terms
+  ([Binance](https://www.binance.com/en/terms), [Coinbase](https://www.coinbase.com/legal/market_data),
+  [Hyperliquid](https://app.hyperliquid.xyz/terms)). The app only reads prices — it never trades. Where binance.com is
+  blocked it uses Binance.US; some sources simply aren't available in some countries, and the app doesn't work around that.
+- **Broker data is yours alone.** Data from a Dhan or Zerodha account is licensed to you for your own use under your
+  broker's and the exchanges' rules: don't rebroadcast it (on a public stream or website, say). The app only reads market
+  data from your account; it never places orders.
 - This software is for information only and is **not financial advice**.
 
 ## Connecting Dhan
@@ -285,9 +300,11 @@ Contributions are very welcome — bug reports, data-source fixes, new providers
 
 ## Acknowledgements and licence
 
-ProTradeChart is free software, released under the [GNU Affero General Public License v3.0](LICENSE)
-(AGPL-3.0-only). The complete source of every release is in this repository, at the release's tag. If you distribute
-the app or a modified version of it, you must do so under the same licence and make your source available.
+ProTradeChart is Copyright (C) 2026 Swapnil Pawar and the ProTradeChart contributors. It is free software, released under
+the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only), and comes with **no warranty**. The complete source
+of every release is in this repository, at the release's tag, and each release also carries the source of the AGPL
+components it is built on (PineTS, Vela PineTS and Vela, at the exact versions used). If you distribute the app or a
+modified version of it, you must do so under the same licence and make your source available.
 
 Pine Script support is built on [**PineTS**](https://github.com/LuxAlgo/PineTS) and
 [**Vela PineTS**](https://www.npmjs.com/package/@luxalgo/vela-pinets) by LuxAlgo, both licensed under AGPL-3.0 — which is why
@@ -296,4 +313,6 @@ affiliated with, sponsored by, or endorsed by TradingView. The script editor is 
 
 Charts are rendered by [**Vela™**](https://luxalgo.com/vela) by LuxAlgo, licensed under Apache-2.0 with an attribution
 requirement — the small logomark at the bottom-left of every chart must stay visible. See
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for that and the other components this project is built on.
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for that and the other components this project is built on, and
+[THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) (also in the app, under *About → Third-party licences*) for the licence
+text of every one of them.

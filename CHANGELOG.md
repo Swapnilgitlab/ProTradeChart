@@ -7,6 +7,12 @@ project uses [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- **Licences in the app.** *About* now has a Legal section with the copyright notice and the AGPL's no-warranty statement,
+  links to the source code, and shows the licence and **THIRD_PARTY_LICENSES.txt** — the copyright notice and licence
+  text of every npm package and Rust crate compiled into the app — without leaving it. The file is installed with the app
+  too. `npm run licenses` regenerates it, and releases rebuild it before building and attach the source of PineTS,
+  Vela PineTS and Vela at the exact versions used.
+
 - **Checksums.** Every release now carries a `SHA256SUMS` file listing the SHA-256 hash of each installer, so a download can
   be verified (PowerShell, `shasum` and `sha256sum` instructions are in SECURITY.md). The release workflow attaches it after all
   the platform builds finish, and `node scripts/checksums.mjs <folder>` writes the same file for installers you host yourself.
@@ -25,9 +31,9 @@ project uses [Semantic Versioning](https://semver.org).
   Data providers screen has an in-app login: open Zerodha's page, paste the address it redirects to, and the token is
   saved to your keychain. Needs a Kite Connect subscription with market data.
 - **Bundled Pine indicators.** Every `.pine` file under `pine/indicators/` is built into the app: it appears in the chart's
-  Indicators dialog (grouped by its folder) and in the Pine Editor's **Open** menu, and is saved by name in layouts. Adding
+  Indicators dialog (grouped by its folder) and in the Script Editor's **Open** menu, and is saved by name in layouts. Adding
   one is just writing the file (`pine/README.md`); `npm test` runs each on the real engine so a broken script can't ship.
-- **Pine Script: your own indicators and a strategy tester.** A Pine Editor (syntax colouring, completion, a console for
+- **Pine Script: your own indicators and a strategy tester.** A Script Editor (syntax colouring, completion, a console for
   errors and warnings) and a Strategy Tester share a resizable panel under the charts, opened from the tab bar or with
   `Ctrl+E`. Start from an example, write `indicator()` or `strategy()` code, and add it to the chart. Saved scripts live
   in your script library; scripts on a chart are saved with the layout, and the pencil on a script's legend row reopens its
@@ -60,6 +66,16 @@ project uses [Semantic Versioning](https://semver.org).
 
 ### Changed
 
+- **Yahoo Finance is now opt-in.** Its data comes under Yahoo's own terms (there is no official API or data licence behind
+  the endpoints the app uses), so it starts switched off. A first-run dialog, and the Data providers screen, show what that
+  means with a link to Yahoo's terms, and Yahoo is turned on only when you choose to; until then no request reaches Yahoo,
+  and new charts open on a crypto pair. The app is not affiliated with Yahoo. Existing installs see the dialog once.
+- **Crypto symbols show a two-letter badge instead of a coin logo.** The logos came from Ledger's icon server, a third
+  party you never chose to contact. The web view no longer loads images from the internet at all.
+- **Requests to Yahoo identify the app** (`ProTradeChart/<version>` with a link to this repository) instead of posing as a
+  web browser.
+- The README, About and third-party notices now spell out each data source's terms: Yahoo for personal use, the crypto
+  exchanges' own terms, and broker data being licensed to you alone.
 - **About** now credits the developer, Swapnil Pawar of ProTradeJournal, with links to their X and GitHub profiles.
 - **New logo and app icon.** The README carries the full logo, and the app icon (window, taskbar, installers), the favicon
   and the About dialog use its P mark on a light rounded plate, so they stay legible on dark taskbars and docks.

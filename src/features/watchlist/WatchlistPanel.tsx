@@ -34,6 +34,7 @@ import {
 } from '../../lib/ipc';
 import { displayTicker, providerLabel, splitSymbol } from '../../lib/symbols';
 import { parseWatchlistFile } from '../../lib/watchlistImport';
+import { useProviderState } from '../providers/useProviderState';
 import { SymbolSearchBox, type PickedSymbol } from '../search/SymbolSearchBox';
 
 interface Props {
@@ -88,6 +89,12 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
   const switcherRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const quoteToken = useRef(0);
+  // Switching a data source on or off re-prices the list straight away.
+  const { providers } = useProviderState();
+  const usableProviders = providers
+    .filter((p) => p.enabled && p.configured)
+    .map((p) => p.id)
+    .join(',');
 
   useDismiss(switcherRef, switcherOpen, () => setSwitcherOpen(false));
   useDismiss(moreRef, moreOpen, () => setMoreOpen(false));
@@ -159,7 +166,7 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
       window.clearInterval(timer);
       window.removeEventListener('focus', refreshOnFocus);
     };
-  }, [symbolsKey, collapsed]);
+  }, [symbolsKey, collapsed, usableProviders]);
 
   const visibleItems = useMemo(
     () => sortItems(detail?.items ?? [], quotes, sortKey, sortDir),

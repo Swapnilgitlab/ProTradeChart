@@ -703,6 +703,14 @@ a {
   margin: 4px 0 0;
   padding-left: 18px;
 }
+.terms-notice p,
+.terms-confirm p {
+  margin: 0 0 6px;
+  line-height: 1.5;
+}
+.terms-confirm {
+  border-color: var(--accent);
+}
 
 .stat-grid {
   display: grid;
@@ -794,6 +802,27 @@ a {
 }
 .about-links a {
   color: var(--accent);
+}
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+.link-button:hover {
+  text-decoration: underline;
+}
+.license-text {
+  margin: 0;
+  max-height: 60vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: "Cascadia Mono", "JetBrains Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
 }
 
 /* ---- Toasts ------------------------------------------------------------- */

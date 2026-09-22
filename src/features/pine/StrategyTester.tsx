@@ -31,12 +31,12 @@ export function StrategyTester({ entries, onOpenEditor }: Props) {
       <div className="pine-empty">
         <div className="pine-empty-title">No strategy on the chart yet</div>
         <p className="secondary">
-          Write a <code>strategy()</code> script in the Pine Editor and add it to the chart. Its trades, equity curve and
+          Write a <code>strategy()</code> script in the Script Editor and add it to the chart. Its trades, equity curve and
           performance will appear here.
         </p>
         <button type="button" className="btn btn-primary" onClick={onOpenEditor}>
           <Code size={14} />
-          Open Pine Editor
+          Open Script Editor
         </button>
       </div>
     );

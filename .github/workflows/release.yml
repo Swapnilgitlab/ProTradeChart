@@ -13,8 +13,10 @@ name: Release
 # secrets, or the build fails: TAURI_SIGNING_PRIVATE_KEY (the key file's contents) and
 # TAURI_SIGNING_PRIVATE_KEY_PASSWORD. See CONTRIBUTING.md, "Releasing".
 #
-# Once every platform has uploaded, the `checksums` job attaches a SHA256SUMS file to the same
-# draft release so people can verify what they download (see SECURITY.md).
+# Once every platform has uploaded, the `checksums` job attaches the source of the AGPL
+# components the app is built from (PineTS, Vela PineTS and Vela, at the versions in
+# package-lock.json) and then a SHA256SUMS file to the same draft release, so people can get
+# the complete source and verify what they download (see SECURITY.md).
 on:
   push:
     tags:
@@ -66,6 +68,11 @@ jobs:
 
       - run: npm ci
 
+      # The installers carry THIRD_PARTY_LICENSES.txt; rebuild it from the lockfiles being
+      # built, so a release can't ship a list that has fallen behind its dependencies.
+      - name: Third-party licences
+        run: node scripts/third-party-licenses.mjs
+
       - uses: tauri-apps/tauri-action@v0
         id: tauri
         env:
@@ -92,6 +99,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Attach the AGPL components' source to the release
+        run: bash scripts/publish-component-sources.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.release.outputs.release_id }}
 
       - name: Attach SHA256SUMS to the release
         run: bash scripts/publish-checksums.sh

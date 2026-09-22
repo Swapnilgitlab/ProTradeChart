@@ -7,7 +7,7 @@ import { onOpenAlerts, openAlerts, type AlertDraft } from '../../alerts/ui';
 import { ChartView, type ChartViewHandle } from '../../chart/ChartView';
 import { ThemeSelect } from '../../components/ThemeSelect';
 import { useToast } from '../../components/Toasts';
-import { ensureProvidersLoaded } from '../../data/providerStatus';
+import { starterSymbol } from '../../data/providerStatus';
 import {
   deleteChartLayout,
   errorMessage,
@@ -29,6 +29,7 @@ import { ImportDataDialog } from '../datasets/ImportDataDialog';
 import { PineDock } from '../pine/PineDock';
 import { LayoutMenu, type LayoutSummary } from '../layouts/LayoutMenu';
 import { DataProvidersDialog } from '../providers/DataProvidersDialog';
+import { MarketDataIntro, needsMarketDataIntro } from '../providers/MarketDataIntro';
 import { parseLayout, serializeLayout, type LayoutDocument } from '../layouts/layoutDocument';
 import { SymbolSearchBox } from '../search/SymbolSearchBox';
 import { WatchlistPanel } from '../watchlist/WatchlistPanel';
@@ -42,13 +43,12 @@ interface ChartTab {
   initialState?: WorkspaceState;
 }
 
-const DEFAULT_SYMBOL = 'yahoo:AAPL';
 /** When the alerts list was last looked at: alerts fired since then wear a badge. */
 const PREF_ALERTS_SEEN = 'alerts_seen_at';
 /** Set once the "how to change one chart of a grid" hint has been shown. */
 const PREF_GRID_HINT = 'grid_hint_seen';
 
-function createTab(symbol: string = DEFAULT_SYMBOL, initialState?: WorkspaceState): ChartTab {
+function createTab(symbol: string = starterSymbol(), initialState?: WorkspaceState): ChartTab {
   return { id: crypto.randomUUID(), symbol, initialState };
 }
 
@@ -65,6 +65,10 @@ export function Workspace() {
   const toast = useToast();
   const [tabs, setTabs] = useState<ChartTab[]>(() => [createTab()]);
   const [activeTabId, setActiveTabId] = useState<string>(() => tabs[0].id);
+  /** Charts are built once the data providers are known — and, on a first run,
+   *  once the user has said whether to use Yahoo Finance (see MarketDataIntro). */
+  const [startup, setStartup] = useState<'loading' | 'intro' | 'ready'>('loading');
+  const firstTabId = useRef(tabs[0].id);
   const [layouts, setLayouts] = useState<ChartLayoutRow[]>([]);
   const [currentLayoutId, setCurrentLayoutId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -114,11 +118,33 @@ export function Workspace() {
     [toast],
   );
 
+  const finishStartup = useCallback(() => {
+    // The first tab was made before anyone knew which providers are on. If a
+    // saved layout hasn't replaced it, start it on a symbol that can load.
+    const symbol = starterSymbol();
+    setTabs((prev) =>
+      prev.length === 1 && prev[0].id === firstTabId.current && !prev[0].initialState && prev[0].symbol !== symbol
+        ? [{ ...prev[0], symbol }]
+        : prev,
+    );
+    setStartup('ready');
+  }, []);
+
   // Which data providers are on, and the default. Loaded up front so search
   // and quotes know what's available; data code also waits on this itself.
   useEffect(() => {
-    void ensureProvidersLoaded();
-  }, []);
+    let cancelled = false;
+    needsMarketDataIntro()
+      .catch(() => false)
+      .then((ask) => {
+        if (cancelled) return;
+        if (ask) setStartup('intro');
+        else finishStartup();
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [finishStartup]);
 
   // Load saved layouts once; the default one (if any) becomes the starting session.
   useEffect(() => {
@@ -348,7 +374,7 @@ export function Workspace() {
             <Bell size={15} />
             {unseenAlerts > 0 && <span className="icon-badge">{unseenAlerts > 9 ? '9+' : unseenAlerts}</span>}
           </button>
-          <button type="button" className="icon-button" aria-label="Pine Editor" title="Pine Editor and Strategy Tester (Ctrl+E)" onClick={() => publishDockRequest({ type: 'toggle' })}>
+          <button type="button" className="icon-button" aria-label="Script Editor" title="Script Editor and Strategy Tester (Ctrl+E)" onClick={() => publishDockRequest({ type: 'toggle' })}>
             <Code size={15} />
           </button>
           <button type="button" className="icon-button" aria-label="Data providers" title="Data providers: where prices come from" onClick={() => setProvidersOpen(true)}>
@@ -377,7 +403,7 @@ export function Workspace() {
       <div className="app-body">
         <div className="app-main">
           <div className="app-canvases">
-            {tabs.map((tab) => (
+            {startup === 'ready' && tabs.map((tab) => (
               <div key={tab.id} className={tab.id === activeTabId ? 'tab-panel' : undefined} style={tab.id === activeTabId ? undefined : { display: 'none' }}>
                 <ChartView
                   ref={(handle) => {
@@ -398,6 +424,7 @@ export function Workspace() {
         <WatchlistPanel activeSymbol={activeTab.symbol} onSelectSymbol={goToSymbol} />
       </div>
 
+      {startup === 'intro' && <MarketDataIntro onDone={finishStartup} />}
       {importOpen && <ImportDataDialog onClose={() => setImportOpen(false)} onOpenSymbol={goToSymbol} />}
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
       {providersOpen && <DataProvidersDialog onClose={() => setProvidersOpen(false)} />}

@@ -1,7 +1,7 @@
 # Bundled Pine indicators
 
 Every `.pine` file under [`indicators/`](indicators) is built into the app. Users see them in the chart's
-**Indicators** dialog, and in the Pine Editor under **Open → Bundled with the app**. Nothing else is needed to ship a
+**Indicators** dialog, and in the Script Editor under **Open → Bundled with the app**. Nothing else is needed to ship a
 script: the installer contains it once you build.
 
 ## Adding one
@@ -10,7 +10,7 @@ script: the installer contains it once you build.
    Indicators dialog (nest folders for `A / B`); a file directly in `indicators/` goes under "Pine scripts".
 2. Write a normal Pine script, starting with `//@version=6` and an `indicator(...)` (or `strategy(...)`) call.
 3. Run `npm run tauri:dev`. Saving a `.pine` file reloads the app, so you can edit in your own editor and watch the chart.
-   You can also write and try scripts in the app's Pine Editor first, then paste the finished text into a file here.
+   You can also write and try scripts in the app's Script Editor first, then paste the finished text into a file here.
 4. Run `npm test`. It compiles and runs **every** bundled script on the real engine, so a script with a mistake fails the
    build instead of reaching users.
 

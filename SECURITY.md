@@ -12,10 +12,13 @@ volunteer project, so please allow some time.
 ## What the app does and doesn't do
 
 - It has **no accounts, no telemetry and no server of its own.** Nothing you do is sent anywhere except the market-data
-  requests needed to draw charts (Yahoo Finance, Binance, Coinbase, Hyperliquid, and — only if you connect them — Dhan and Zerodha):
-  the symbol you're looking at, and what you type into the search box. The one other request is the **update check**:
-  about once a day (and when you press *Check for updates*) the app asks GitHub for the latest release's manifest, which
-  reveals your IP address to GitHub like any download. You can switch it off in *About → Updates*.
+  requests needed to draw charts (Binance, Coinbase and Hyperliquid, and — only if you turn them on — Yahoo Finance, Dhan
+  and Zerodha): the symbol you're looking at, and what you type into the search box. Yahoo Finance is **off until you turn
+  it on**; while it is off, nothing is sent to Yahoo at all, and when it is on, requests identify the app by name and
+  version. The app loads no images, fonts or scripts from the internet (coin logos, which Vela would fetch from Ledger's
+  icon server, are switched off). The one other request is the **update check**: about once a day (and when you press
+  *Check for updates*) the app asks GitHub for the latest release's manifest, which reveals your IP address to GitHub like
+  any download. You can switch it off in *About → Updates*.
 - **Updates are signed.** An update is only installed if it verifies against a public key built into the app
   (`plugins.updater.pubkey` in `tauri.conf.json`); the matching private key is held by the maintainer and used only by the
   release workflow. This is separate from the operating-system code signing described below.

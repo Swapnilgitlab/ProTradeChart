@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Open-source desktop charting software — fast candlestick charts, indicators, drawing tools, watchlists and saved layouts.",
   "license": "AGPL-3.0-only",
+  "author": "Swapnil Pawar",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Swapnilgitlab/ProTradeChart.git"
@@ -19,7 +20,8 @@
     "test:watch": "vitest",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "licenses": "node scripts/third-party-licenses.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

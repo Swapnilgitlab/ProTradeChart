@@ -7,7 +7,7 @@ const EDIT_ICON = 'charting.pine.edit';
 let installed = false;
 
 /** Adds an "Edit script" button to the legend row of every script indicator — TradingView's
- *  "Source code" action — which opens that script in the Pine Editor. Register before the
+ *  "Source code" action — which opens that script in the Script Editor. Register before the
  *  first workspace is built, like every Vela contribution. */
 export function installPineHostActions(): void {
   if (installed) return;

@@ -20,9 +20,9 @@ import type { ProviderId } from '../../lib/symbols';
  *  is decided by `data/providerStatus`. */
 const instances: Record<ProviderId, DataProvider> = {
   yahoo: new YahooProvider(),
-  binance: new BinanceProvider(),
-  coinbase: new CoinbaseProvider(),
-  hyperliquid: new HyperliquidProvider(),
+  binance: withoutRemoteIcons(new BinanceProvider()),
+  coinbase: withoutRemoteIcons(new CoinbaseProvider()),
+  hyperliquid: withoutRemoteIcons(new HyperliquidProvider()),
   csv: new CsvProvider(),
   dhan: new DhanProvider(),
   zerodha: new ZerodhaProvider(),
@@ -39,6 +39,14 @@ export const providerFactories: Record<ProviderId, () => DataProvider> = {
   dhan: () => instances.dhan,
   zerodha: () => instances.zerodha,
 };
+
+/** Vela's crypto providers give each coin the logo from Ledger's icon server. Fetching
+ *  it would tell a third party the user never chose which coins they look at, so the
+ *  symbol shows Vela's two-letter badge instead (the CSP blocks remote images anyway). */
+function withoutRemoteIcons<T extends DataProvider>(provider: T): T {
+  provider.resolveSymbolIcon = () => undefined;
+  return provider;
+}
 
 export function getProvider(id: string): DataProvider | undefined {
   return (instances as Record<string, DataProvider>)[id];

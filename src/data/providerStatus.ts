@@ -35,15 +35,22 @@ export function subscribeProviderState(listener: () => void): () => void {
 
 export const providerInfo = (id: string): ProviderInfo | undefined => state.providers.find((p) => p.id === id);
 
-/** Providers that need the user's own account: never assumed ready. */
-const BROKERS = new Set<string>(['dhan', 'zerodha']);
+/** Providers that need the user's own account, or their agreement to a data
+ *  source's terms (Yahoo Finance): never assumed ready. */
+const OPT_IN = new Set<string>(['dhan', 'zerodha', 'yahoo']);
 
 /** Enabled and fully set up. Before the first load, only what needs no setup
- *  counts, so a broker is never assumed to be ready. */
+ *  or agreement counts, so an opt-in source is never assumed to be ready. */
 export function isProviderUsable(id: string): boolean {
   const info = providerInfo(id);
-  if (!info) return !state.loaded && !BROKERS.has(id);
+  if (!info) return !state.loaded && !OPT_IN.has(id);
   return info.enabled && info.configured;
+}
+
+/** What a brand-new chart shows: a stock while Yahoo Finance is on, otherwise
+ *  a crypto pair, which needs no setup. */
+export function starterSymbol(): string {
+  return isProviderUsable('yahoo') ? 'yahoo:AAPL' : 'binance:BTCUSDT';
 }
 
 /** Providers that can be searched right now. */
@@ -71,7 +78,8 @@ export function ensureProvidersLoaded(): Promise<void> {
   return loading;
 }
 
-/** The default falls back to Yahoo if the chosen provider is later switched off. */
+/** The default falls back to Yahoo if the chosen provider is later switched off
+ *  (and a Yahoo symbol then says that Yahoo is off, if it is). */
 export function effectiveDefaultProvider(): ProviderId {
   return isProviderUsable(state.defaultProvider) ? state.defaultProvider : DEFAULT_PROVIDER;
 }

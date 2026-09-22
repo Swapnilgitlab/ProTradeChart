@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost https: wss:"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost https: wss:"
     }
   },
   "bundle": {
@@ -29,7 +29,7 @@
     "targets": "all",
     "createUpdaterArtifacts": true,
     "publisher": "ProTradeChart contributors",
-    "copyright": "Copyright (c) ProTradeChart contributors",
+    "copyright": "Copyright (C) 2026 Swapnil Pawar and the ProTradeChart contributors",
     "category": "Finance",
     "shortDescription": "Open-source desktop charting software",
     "longDescription": "Fast candlestick charts, technical indicators, drawing tools, watchlists and saved layouts. Free and open source.",
@@ -42,6 +42,7 @@
     ],
     "resources": {
       "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "../THIRD_PARTY_LICENSES.txt": "THIRD_PARTY_LICENSES.txt",
       "../LICENSE": "LICENSE"
     }
   },

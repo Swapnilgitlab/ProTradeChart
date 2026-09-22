@@ -39,6 +39,23 @@ so search and watchlist quotes use the same instance the charts do.
 | `csv` | `data/providers/csv.ts` + `src-tauri/src/store/datasets.rs` | User-imported files, served from SQLite. |
 | `binance`, `coinbase`, `hyperliquid` | Vela's bundled providers | Fetched directly from the webview; they also stream live. |
 
+### Yahoo Finance is opt-in
+
+There is no official API or data licence behind the Yahoo Finance endpoints this app uses, and Yahoo's terms of service
+limit automated access and commercial use. So the app treats Yahoo as the user's choice, not its own:
+
+- **It starts off.** A provider with `terms` in `providers.rs` (Yahoo is the only one) defaults to off, like a broker, and
+  the user turns it on after reading the notice: in the first-run `MarketDataIntro` dialog or under Data providers, where
+  the switch asks for confirmation. Both render the notice and link from the backend's catalogue (`TermsNotice`), so the
+  wording lives in one place. A future source with terms of its own only needs `terms` set.
+- **The backend enforces it.** Every Yahoo command refuses before touching the network while Yahoo is off
+  (`yahoo_is_on` in `commands.rs`), so a second window with stale settings can't reach Yahoo either.
+- **It says who it is.** Requests carry `ProTradeChart/<version> (+repository URL)` as the User-Agent rather than a
+  browser's, so Yahoo can see, and refuse if it wants, exactly this client. (Yahoo rejects a request with no User-Agent.)
+- **Keep it non-commercial and local.** No ads, paid tiers, sponsorships or referral links in a build that fetches Yahoo
+  data (Binance's terms likewise forbid profiting from its market data, including through advertising or referral
+  fees), and no feature that exports, syncs or shares Yahoo data off the user's computer.
+
 ### Yahoo Finance and rate limits
 
 Yahoo publishes **no rate limits** for the endpoints this app uses, and what users report varies with time and IP
@@ -294,7 +311,7 @@ script.
 | Ids | `pine/ids.ts` | An indicator this app adds is `<libraryScriptId>~<suffix>`, so a legend row leads back to its library script, and one Vela added itself (a bundled script) can be told apart |
 | Bundled scripts | `pine/indicators/**/*.pine`, `pine/bundled.ts` | Scripts that ship with the app. Vite inlines them (`import.meta.glob(…, '?raw')`), and they are handed to Vela as its indicator **manifest** with `enabled: false`, so they appear in the chart's Indicators dialog (grouped by folder) without being added to every chart. Vela saves a manifest indicator in layouts **by name**, so a script's declared title is its identity; `persistence.ts` skips them so they aren't restored twice. `bundled.engine.test.ts` compiles and runs every one on the real engine. Editing a `.pine` file reloads the dev app (`reloadOnPineChange` in `vite.config.ts`: a hot-swapped module would leave the live chart on the old script). See `pine/README.md` |
 | Backtest report | `pine/tester.ts` | Pure. The engine reports fills and account state, not P&L, commission or an equity history, so trades, net P&L, run-up, drawdown, the equity curve and the summary are derived from fills + bars + the strategy's commission setting. Tests hold the numbers to PineTS's own ledger (`tester.engine.test.ts`) |
-| UI | `features/pine/` | A bottom dock (`PineDock`) with the Pine Editor (CodeMirror 6, `pineLanguage.ts`) and the Strategy Tester. Opened from the tab bar, `Ctrl+E`, or the "Edit script" button registered on every script's legend row (`pine/hostActions.ts`) |
+| UI | `features/pine/` | A bottom dock (`PineDock`) with the Script Editor (CodeMirror 6, `pineLanguage.ts`) and the Strategy Tester. Opened from the tab bar, `Ctrl+E`, or the "Edit script" button registered on every script's legend row (`pine/hostActions.ts`) |
 
 - **The backtest covers the bars the chart has loaded**, so a longer test means scrolling the chart back (see "History on
   demand"). `script:run` events drive the tester; strategies removed from the chart are pruned.
@@ -315,8 +332,10 @@ properties on `<html>` and persists the choice. To add a theme, append one entry
 
 ## Security model
 
-- The webview's Content-Security-Policy (`tauri.conf.json`) blocks remote scripts and frames, and allows outbound
-  connections (`connect-src https: wss:`), which the crypto providers need.
+- The webview's Content-Security-Policy (`tauri.conf.json`) blocks remote scripts, frames and images, and allows
+  outbound connections (`connect-src https: wss:`), which the crypto providers need. Nothing is loaded from a server the
+  user didn't choose: Vela's crypto providers would show coin logos from Ledger's icon server, so
+  `data/providers/index.ts` turns their `resolveSymbolIcon` off and charts show Vela's initials badge.
 - **`script-src` includes `'unsafe-eval'`, and only for Pine.** PineTS compiles a script to JavaScript with
   `new Function`, which the policy otherwise blocks (checked: without it every script fails to compile). The engine is
   always the worker one (`PineWorkerEngine`): a Worker has no DOM and no Tauri IPC, so a pasted script can't reach the

@@ -30,7 +30,7 @@ interface Props {
   workspace: VelaWorkspace | null;
 }
 
-/** TradingView's bottom panel: the Pine Editor and the Strategy Tester, sharing one
+/** TradingView's bottom panel: the Script Editor and the Strategy Tester, sharing one
  *  resizable dock under the charts. Both stay mounted while the dock is hidden, so an
  *  editor buffer and the latest backtest survive closing and reopening it. */
 export function PineDock({ workspace }: Props) {
@@ -116,7 +116,7 @@ export function PineDock({ workspace }: Props) {
       <div className="pine-dock-header">
         <div className="pine-tabs" role="tablist">
           <button type="button" role="tab" aria-selected={tab === 'editor'} className={`pine-tab${tab === 'editor' ? ' active' : ''}`} onClick={() => setTab('editor')}>
-            Pine Editor
+            Script Editor
           </button>
           <button type="button" role="tab" aria-selected={tab === 'tester'} className={`pine-tab${tab === 'tester' ? ' active' : ''}`} onClick={() => setTab('tester')}>
             Strategy Tester

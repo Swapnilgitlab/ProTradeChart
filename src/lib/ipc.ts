@@ -214,6 +214,10 @@ export interface ProviderInfo {
   docsUrl: string | null;
   /** Where credentials are kept: the OS `keychain`, or (unencrypted) the `database`. */
   secretStorage: 'keychain' | 'database' | null;
+  /** Set for a source whose data comes under someone else's terms: shown, and
+   *  accepted, before it can be switched on. */
+  termsNotice: string | null;
+  termsUrl: string | null;
 }
 
 export interface TestResult {

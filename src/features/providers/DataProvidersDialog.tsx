@@ -28,6 +28,7 @@ import {
   zerodhaUpdateInstruments,
 } from '../../lib/ipc';
 import type { ProviderId } from '../../lib/symbols';
+import { TermsNotice } from './TermsNotice';
 import { useProviderState } from './useProviderState';
 
 interface Props {
@@ -138,6 +139,8 @@ function ProviderDetail({ provider, isDefault }: { provider: ProviderInfo; isDef
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState<null | 'save' | 'test' | 'clear' | 'toggle'>(null);
   const [test, setTest] = useState<TestResult | null>(null);
+  /** A source with terms isn't switched on by the switch alone: the user confirms under its notice. */
+  const [confirmingTerms, setConfirmingTerms] = useState(false);
 
   const dirty = Object.keys(edits).length > 0;
   const hasFields = provider.fields.length > 0;
@@ -238,6 +241,7 @@ function ProviderDetail({ provider, isDefault }: { provider: ProviderInfo; isDef
         {isDefault && <span className="pill ok">Default</span>}
       </div>
       <p className="secondary prov-description">{provider.description}</p>
+      <TermsNotice provider={provider} />
 
       {provider.docsUrl && (
         <p className="small" style={{ margin: '0 0 12px' }}>
@@ -250,7 +254,11 @@ function ProviderDetail({ provider, isDefault }: { provider: ProviderInfo; isDef
           type="checkbox"
           checked={provider.enabled}
           disabled={!provider.canDisable || (!provider.configured && hasFields) || busy !== null}
-          onChange={(e) => void switchOn(e.currentTarget.checked)}
+          onChange={(e) => {
+            const next = e.currentTarget.checked;
+            if (next && provider.termsNotice) setConfirmingTerms(true);
+            else void switchOn(next);
+          }}
         />
         <span>
           <strong>Use {provider.label}</strong>
@@ -265,6 +273,31 @@ function ProviderDetail({ provider, isDefault }: { provider: ProviderInfo; isDef
           </span>
         </span>
       </label>
+
+      {confirmingTerms && !provider.enabled && (
+        <div className="notice terms-confirm" role="alertdialog" aria-label={`Turn on ${provider.label}`}>
+          <p>
+            Turn on {provider.label}? Doing so confirms you have read the notice above, and that using this source, and
+            keeping to its terms, is your own choice.
+          </p>
+          <div className="prov-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy !== null}
+              onClick={() => {
+                setConfirmingTerms(false);
+                void switchOn(true);
+              }}
+            >
+              Turn on {provider.label}
+            </button>
+            <button type="button" className="btn" disabled={busy !== null} onClick={() => setConfirmingTerms(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {hasFields && (
         <div className="prov-fields">

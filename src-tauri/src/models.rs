@@ -201,6 +201,9 @@ pub struct ProviderInfo {
     pub docs_url: Option<String>,
     /// `keychain` or `database` when any credential is stored.
     pub secret_storage: Option<String>,
+    /// Shown before the provider can be switched on, with a link to the terms themselves.
+    pub terms_notice: Option<String>,
+    pub terms_url: Option<String>,
 }
 
 // ---- Price alerts ----------------------------------------------------------
