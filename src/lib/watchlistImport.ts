@@ -1,4 +1,4 @@
-import { joinSymbol, PROVIDER_LABELS, type ProviderId } from './symbols';
+import { joinSymbol, PROVIDER_LABELS, resolveTypedSymbol, type ProviderId } from './symbols';
 
 export interface ImportedWatchlistItem {
   symbol: string;
@@ -11,65 +11,15 @@ export interface WatchlistImportResult {
   skipped: string[];
 }
 
-/** Yahoo ticker suffix per TradingView exchange code. */
-const YAHOO_SUFFIX: Record<string, string> = {
-  NSE: '.NS',
-  BSE: '.BO',
-  LSE: '.L',
-  TSX: '.TO',
-  TSXV: '.V',
-  ASX: '.AX',
-  SGX: '.SI',
-  XETR: '.DE',
-  FWB: '.F',
-  EURONEXT: '.PA',
-  MIL: '.MI',
-  BME: '.MC',
-  SIX: '.SW',
-  OMXSTO: '.ST',
-  OMXCOP: '.CO',
-  OMXHEX: '.HE',
-  TSE: '.T',
-  KRX: '.KS',
-  TWSE: '.TW',
-  SSE: '.SS',
-  SZSE: '.SZ',
-  JSE: '.JO',
-  BMFBOVESPA: '.SA',
-};
-
-/** US venues need no suffix. */
-const US_EXCHANGES = new Set(['NASDAQ', 'NYSE', 'AMEX', 'ARCA', 'CBOE', 'BATS', 'OTC', 'NYSEARCA']);
-
-/** TradingView index/FX pseudo-exchanges → the Yahoo ticker that carries them. */
-const YAHOO_INDEX: Record<string, string> = {
-  SPX: '^GSPC',
-  NDX: '^NDX',
-  DJI: '^DJI',
-  RUT: '^RUT',
-  VIX: '^VIX',
-  NI225: '^N225',
-  UKX: '^FTSE',
-  DAX: '^GDAXI',
-  CAC40: '^FCHI',
-  HSI: '^HSI',
-  NIFTY: '^NSEI',
-  NIFTY50: '^NSEI',
-  BANKNIFTY: '^NSEBANK',
-  SENSEX: '^BSESN',
-  DXY: 'DX-Y.NYB',
-  GOLD: 'GC=F',
-  SILVER: 'SI=F',
-  USOIL: 'CL=F',
-};
-
-const FX_EXCHANGES = new Set(['FX', 'FX_IDC', 'OANDA', 'FOREXCOM', 'FXCM', 'SAXO', 'PEPPERSTONE']);
 const PASS_THROUGH_PROVIDERS = new Set<string>(Object.keys(PROVIDER_LABELS));
 
 export interface MapOptions {
-  /** Where NSE and BSE symbols go: Yahoo (`RELIANCE.NS`) or one of the user's
-   *  own broker accounts (`dhan:NSE:RELIANCE`, `zerodha:NSE:RELIANCE`). */
-  indianProvider?: 'yahoo' | 'dhan' | 'zerodha';
+  /** Where NSE and BSE symbols go: one of the user's own broker accounts
+   *  (`dhan:NSE:RELIANCE`, `zerodha:NSE:RELIANCE`). With none, they can't be charted
+   *  and are skipped. */
+  indianProvider?: 'dhan' | 'zerodha';
+  /** Where an entry with no exchange goes (default: the app's default provider). */
+  defaultProvider?: ProviderId;
 }
 
 /** TradingView's index shorthands → the ticker Dhan's instrument list uses. */
@@ -95,18 +45,15 @@ function coinbasePair(ticker: string): string {
   return m ? `${m[1]}-${m[2]}` : ticker;
 }
 
-function hongKongTicker(ticker: string): string {
-  return /^\d+$/.test(ticker) ? `${ticker.padStart(4, '0')}.HK` : `${ticker}.HK`;
-}
-
 /** Maps one `EXCHANGE:TICKER` (TradingView) or bare `TICKER` entry to this
- *  app's `provider:TICKER`, or `null` if it can't be charted. */
+ *  app's `provider:TICKER`, or `null` if it can't be charted — an exchange none
+ *  of the app's data sources covers (US and most world stocks, FX, futures). */
 export function mapSymbol(entry: string, options: MapOptions = {}): string | null {
   const raw = entry.trim().replace(/^["']|["']$/g, '');
   if (!raw) return null;
 
   const colon = raw.indexOf(':');
-  if (colon < 0) return /^[A-Za-z0-9^.=\-_]+$/.test(raw) ? joinSymbol('yahoo', raw.toUpperCase()) : null;
+  if (colon < 0) return /^[A-Za-z0-9^.=_-]+$/.test(raw) ? resolveTypedSymbol(raw, options.defaultProvider) : null;
 
   const prefix = raw.slice(0, colon).trim();
   const ticker = raw.slice(colon + 1).trim();
@@ -128,25 +75,16 @@ export function mapSymbol(entry: string, options: MapOptions = {}): string | nul
   if (exchange === 'COINBASE') return joinSymbol('coinbase', coinbasePair(upper));
   if (exchange === 'HYPERLIQUID') return joinSymbol('hyperliquid', upper);
 
-  if (FX_EXCHANGES.has(exchange)) return /^[A-Z]{6}$/.test(upper) ? joinSymbol('yahoo', `${upper}=X`) : null;
-  if (exchange === 'HKEX') return joinSymbol('yahoo', hongKongTicker(upper));
-  if (options.indianProvider === 'dhan' && (exchange === 'NSE' || exchange === 'BSE')) {
-    const index = DHAN_INDEX[upper];
-    return joinSymbol('dhan', index ? `IDX:${index}` : `${exchange}:${upper}`);
+  if (exchange === 'NSE' || exchange === 'BSE') {
+    if (options.indianProvider === 'dhan') {
+      const index = DHAN_INDEX[upper];
+      return joinSymbol('dhan', index ? `IDX:${index}` : `${exchange}:${upper}`);
+    }
+    if (options.indianProvider === 'zerodha') {
+      return joinSymbol('zerodha', `${exchange}:${(exchange === 'NSE' && ZERODHA_INDEX[upper]) || upper}`);
+    }
   }
-  if (options.indianProvider === 'zerodha' && (exchange === 'NSE' || exchange === 'BSE')) {
-    return joinSymbol('zerodha', `${exchange}:${(exchange === 'NSE' && ZERODHA_INDEX[upper]) || upper}`);
-  }
-  if (exchange in YAHOO_SUFFIX) {
-    // NSE/BSE index shorthands share the exchange code with equities.
-    if (upper in YAHOO_INDEX && (exchange === 'NSE' || exchange === 'BSE')) return joinSymbol('yahoo', YAHOO_INDEX[upper]);
-    return joinSymbol('yahoo', `${upper}${YAHOO_SUFFIX[exchange]}`);
-  }
-  if (US_EXCHANGES.has(exchange)) return joinSymbol('yahoo', upper.replace(/\./g, '-'));
-  if (upper in YAHOO_INDEX) return joinSymbol('yahoo', YAHOO_INDEX[upper]);
-
-  // An unknown exchange is far more likely a real US-style ticker than a typo.
-  return joinSymbol('yahoo', upper.replace(/\./g, '-'));
+  return null;
 }
 
 const SYMBOL_HEADERS = ['symbol', 'ticker', 'symbols', 'tickers', 'instrument', 'code'];

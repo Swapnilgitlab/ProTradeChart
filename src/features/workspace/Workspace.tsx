@@ -7,7 +7,7 @@ import { onOpenAlerts, openAlerts, type AlertDraft } from '../../alerts/ui';
 import { ChartView, type ChartViewHandle } from '../../chart/ChartView';
 import { ThemeSelect } from '../../components/ThemeSelect';
 import { useToast } from '../../components/Toasts';
-import { starterSymbol } from '../../data/providerStatus';
+import { ensureProvidersLoaded, starterSymbol } from '../../data/providerStatus';
 import {
   deleteChartLayout,
   errorMessage,
@@ -17,7 +17,7 @@ import {
   setPreference,
   type ChartLayoutRow,
 } from '../../lib/ipc';
-import { displayTicker } from '../../lib/symbols';
+import { displayTicker, isSupportedSymbol } from '../../lib/symbols';
 import { openNewWindow } from '../../lib/windows';
 import { publishDockRequest } from '../../pine/dockBus';
 import { AboutDialog } from '../about/AboutDialog';
@@ -29,8 +29,7 @@ import { ImportDataDialog } from '../datasets/ImportDataDialog';
 import { PineDock } from '../pine/PineDock';
 import { LayoutMenu, type LayoutSummary } from '../layouts/LayoutMenu';
 import { DataProvidersDialog } from '../providers/DataProvidersDialog';
-import { MarketDataIntro, needsMarketDataIntro } from '../providers/MarketDataIntro';
-import { parseLayout, serializeLayout, type LayoutDocument } from '../layouts/layoutDocument';
+import { parseLayout, serializeLayout, withoutUnsupportedSymbols, type LayoutDocument } from '../layouts/layoutDocument';
 import { SymbolSearchBox } from '../search/SymbolSearchBox';
 import { WatchlistPanel } from '../watchlist/WatchlistPanel';
 
@@ -65,10 +64,8 @@ export function Workspace() {
   const toast = useToast();
   const [tabs, setTabs] = useState<ChartTab[]>(() => [createTab()]);
   const [activeTabId, setActiveTabId] = useState<string>(() => tabs[0].id);
-  /** Charts are built once the data providers are known — and, on a first run,
-   *  once the user has said whether to use Yahoo Finance (see MarketDataIntro). */
-  const [startup, setStartup] = useState<'loading' | 'intro' | 'ready'>('loading');
-  const firstTabId = useRef(tabs[0].id);
+  /** Charts are built once the data providers are known. */
+  const [startup, setStartup] = useState<'loading' | 'ready'>('loading');
   const [layouts, setLayouts] = useState<ChartLayoutRow[]>([]);
   const [currentLayoutId, setCurrentLayoutId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -109,42 +106,35 @@ export function Workspace() {
         toast(`The layout "${row.name}" is damaged and couldn't be loaded.`, 'error');
         return;
       }
-      const next = doc.tabs.map((t) => createTab(t.symbol, t.state));
+      // A layout saved before a data source was removed can hold symbols that can't load.
+      const { doc: usable, replaced } = withoutUnsupportedSymbols(doc, starterSymbol());
+      if (replaced > 0) {
+        toast(
+          `${replaced} tab${replaced === 1 ? '' : 's'} used Yahoo Finance, which is no longer a data source, and now show ${displayTicker(starterSymbol())}. The saved layout is unchanged until you save it again.`,
+          'info',
+        );
+      }
+      const next = usable.tabs.map((t) => createTab(t.symbol, t.state));
       chartRefs.current.clear();
       setTabs(next);
-      setActiveTabId(next[doc.activeTabIndex].id);
+      setActiveTabId(next[usable.activeTabIndex].id);
       setCurrentLayoutId(row.id);
     },
     [toast],
   );
 
-  const finishStartup = useCallback(() => {
-    // The first tab was made before anyone knew which providers are on. If a
-    // saved layout hasn't replaced it, start it on a symbol that can load.
-    const symbol = starterSymbol();
-    setTabs((prev) =>
-      prev.length === 1 && prev[0].id === firstTabId.current && !prev[0].initialState && prev[0].symbol !== symbol
-        ? [{ ...prev[0], symbol }]
-        : prev,
-    );
-    setStartup('ready');
-  }, []);
-
   // Which data providers are on, and the default. Loaded up front so search
   // and quotes know what's available; data code also waits on this itself.
+  // Charts are built only once that is known.
   useEffect(() => {
     let cancelled = false;
-    needsMarketDataIntro()
-      .catch(() => false)
-      .then((ask) => {
-        if (cancelled) return;
-        if (ask) setStartup('intro');
-        else finishStartup();
-      });
+    ensureProvidersLoaded().then(() => {
+      if (!cancelled) setStartup('ready');
+    });
     return () => {
       cancelled = true;
     };
-  }, [finishStartup]);
+  }, []);
 
   // Load saved layouts once; the default one (if any) becomes the starting session.
   useEffect(() => {
@@ -171,7 +161,8 @@ export function Workspace() {
       let tab: ChartTab | null = null;
       if (!symbol) {
         const def = layouts.find((l) => l.isDefault);
-        const template = def && parseLayout(def.stateJson)?.tabs[0];
+        const parsed = def && parseLayout(def.stateJson);
+        const template = parsed && withoutUnsupportedSymbols({ ...parsed, tabs: parsed.tabs.slice(0, 1) }, starterSymbol()).doc.tabs[0];
         if (template) tab = createTab(template.symbol, template.state);
       }
       const created = tab ?? createTab(symbol);
@@ -202,10 +193,15 @@ export function Workspace() {
    *  dialog — to whichever tab is active. */
   const goToSymbol = useCallback(
     (symbol: string) => {
+      if (!isSupportedSymbol(symbol)) {
+        // e.g. a watchlist row saved when Yahoo Finance was a source: nothing can load it.
+        toast(`${displayTicker(symbol)} came from a data source that is no longer available.`, 'info');
+        return;
+      }
       chartRefs.current.get(activeTab.id)?.setSymbol(symbol);
       setTabSymbol(activeTab.id, symbol);
     },
-    [activeTab.id, setTabSymbol],
+    [activeTab.id, setTabSymbol, toast],
   );
 
   const stepTab = useCallback(
@@ -424,7 +420,6 @@ export function Workspace() {
         <WatchlistPanel activeSymbol={activeTab.symbol} onSelectSymbol={goToSymbol} />
       </div>
 
-      {startup === 'intro' && <MarketDataIntro onDone={finishStartup} />}
       {importOpen && <ImportDataDialog onClose={() => setImportOpen(false)} onOpenSymbol={goToSymbol} />}
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
       {providersOpen && <DataProvidersDialog onClose={() => setProvidersOpen(false)} />}

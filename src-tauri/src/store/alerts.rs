@@ -101,7 +101,7 @@ mod tests {
     fn a_saved_alert_reads_back_exactly() {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
-        let mut a = alert("a1", "yahoo:AAPL", 250.5, 100);
+        let mut a = alert("a1", "binance:BTCUSDT", 250.5, 100);
         a.message = "earnings tomorrow".into();
         a.mode = "every".into();
         save(&conn, &a).unwrap();
@@ -112,9 +112,9 @@ mod tests {
     fn alerts_are_listed_newest_first() {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
-        save(&conn, &alert("old", "yahoo:A", 1.0, 100)).unwrap();
-        save(&conn, &alert("new", "yahoo:B", 2.0, 300)).unwrap();
-        save(&conn, &alert("mid", "yahoo:C", 3.0, 200)).unwrap();
+        save(&conn, &alert("old", "binance:ETHUSDT", 1.0, 100)).unwrap();
+        save(&conn, &alert("new", "binance:SOLUSDT", 2.0, 300)).unwrap();
+        save(&conn, &alert("mid", "binance:BNBUSDT", 3.0, 200)).unwrap();
         let ids: Vec<_> = list(&conn).unwrap().into_iter().map(|a| a.id).collect();
         assert_eq!(ids, ["new", "mid", "old"]);
     }
@@ -123,9 +123,9 @@ mod tests {
     fn saving_again_updates_in_place_and_keeps_the_creation_time() {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
-        save(&conn, &alert("a1", "yahoo:AAPL", 250.0, 100)).unwrap();
+        save(&conn, &alert("a1", "binance:BTCUSDT", 250.0, 100)).unwrap();
 
-        let mut fired = alert("a1", "yahoo:AAPL", 260.0, 999);
+        let mut fired = alert("a1", "binance:BTCUSDT", 260.0, 999);
         fired.status = "triggered".into();
         fired.triggered_at = Some(500);
         fired.trigger_price = Some(260.4);
@@ -144,7 +144,7 @@ mod tests {
     fn a_missing_base_price_and_trigger_time_are_stored_as_null() {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
-        let mut a = alert("a1", "yahoo:AAPL", 250.0, 1);
+        let mut a = alert("a1", "binance:BTCUSDT", 250.0, 1);
         a.base_price = None;
         save(&conn, &a).unwrap();
         let back = &list(&conn).unwrap()[0];
@@ -158,8 +158,8 @@ mod tests {
     fn delete_removes_one_alert_and_ignores_an_unknown_id() {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
-        save(&conn, &alert("a", "yahoo:A", 1.0, 1)).unwrap();
-        save(&conn, &alert("b", "yahoo:B", 2.0, 2)).unwrap();
+        save(&conn, &alert("a", "binance:ETHUSDT", 1.0, 1)).unwrap();
+        save(&conn, &alert("b", "binance:SOLUSDT", 2.0, 2)).unwrap();
         delete(&conn, "a").unwrap();
         delete(&conn, "nope").unwrap();
         assert_eq!(list(&conn).unwrap().len(), 1);
@@ -170,7 +170,7 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
         for (id, status) in [("a", "active"), ("b", "triggered"), ("c", "paused"), ("d", "triggered")] {
-            let mut a = alert(id, "yahoo:X", 1.0, 1);
+            let mut a = alert(id, "binance:XRPUSDT", 1.0, 1);
             a.status = status.into();
             save(&conn, &a).unwrap();
         }

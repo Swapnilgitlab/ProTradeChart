@@ -108,14 +108,13 @@ are used to build and test the project and are not distributed in the app.
 ## Market data
 
 Price data is fetched at runtime, directly from the user's computer, from
-third-party services: Binance, Coinbase and Hyperliquid; Yahoo Finance, only
-after the user has read its notice and turned it on; and Dhan or Zerodha, with
+third-party services: Binance, Coinbase and Hyperliquid; and Dhan or Zerodha, with
 the user's own account and credentials, only if they connect one. No market
 data is bundled with the app or passes through any server of this project, and
 each service's terms apply to how its data is used. See the data-source notes in
 the [README](README.md#data-sources).
 
-Yahoo!, Yahoo Finance, Binance, Coinbase, Hyperliquid, Dhan, Zerodha and Kite
+Binance, Coinbase, Hyperliquid, Dhan, Zerodha and Kite
 Connect are trademarks of their respective owners. ProTradeChart is not
 affiliated with, endorsed by or sponsored by any of them; their names are used
 only to say where data comes from.

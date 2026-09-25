@@ -1,5 +1,5 @@
 import type { WorkspaceState } from '@luxalgo/vela/workspace';
-import { normalizeSymbol } from '../../lib/symbols';
+import { isSupportedSymbol, normalizeSymbol } from '../../lib/symbols';
 
 /** What one saved layout's `stateJson` deserializes to: the WHOLE session —
  *  every tab's symbol plus its full Vela state — not a single chart's settings.
@@ -91,4 +91,30 @@ export function parseLayout(json: string): LayoutDocument | null {
 
   const index = typeof doc.activeTabIndex === 'number' ? Math.trunc(doc.activeTabIndex) : 0;
   return { version: 1, tabs, activeTabIndex: Math.min(Math.max(index, 0), tabs.length - 1) };
+}
+
+/** A layout can hold symbols from a data source the app no longer has (Yahoo Finance was
+ *  removed); they can't load, and would leave a chart blank with no explanation. Each tab —
+ *  and each chart of its grid — holding one is moved to `fallback`. `replaced` counts the
+ *  tabs changed, so the user can be told. Nothing stored is rewritten: this is applied to the
+ *  layout being opened, and a saved layout keeps its old symbols until it is saved again. */
+export function withoutUnsupportedSymbols(doc: LayoutDocument, fallback: string): { doc: LayoutDocument; replaced: number } {
+  let replaced = 0;
+  const tabs = doc.tabs.map((tab) => {
+    let changed = !isSupportedSymbol(tab.symbol);
+    let state = tab.state;
+    if (state && Array.isArray(state.charts)) {
+      const charts = state.charts.map((chart) => {
+        if (typeof chart.symbol !== 'string' || isSupportedSymbol(normalizeSymbol(chart.symbol))) return chart;
+        changed = true;
+        const { provider: _venue, ...rest } = chart;
+        return { ...rest, symbol: fallback };
+      });
+      state = { ...state, charts };
+    }
+    if (!changed) return tab;
+    replaced++;
+    return { symbol: !isSupportedSymbol(tab.symbol) ? fallback : tab.symbol, ...(state ? { state } : {}) };
+  });
+  return { doc: { ...doc, tabs }, replaced };
 }

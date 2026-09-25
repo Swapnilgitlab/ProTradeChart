@@ -24,9 +24,9 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
 
 ## Conventions
 
-- A chart symbol is always `provider:TICKER` (`yahoo:AAPL`). Use the helpers in `src/lib/symbols.ts`; never split on `:`
-  by hand.
-- Pure logic lives in `src/lib/` (TypeScript) or `src-tauri/src/{yahoo.rs,store/}` (Rust) and has unit tests. Components
+- A chart symbol is always `provider:TICKER` (`binance:BTCUSDT`). Use the helpers in `src/lib/symbols.ts`; never split on
+  `:` by hand.
+- Pure logic lives in `src/lib/` (TypeScript) or `src-tauri/src/store/` (Rust) and has unit tests. Components
   and Tauri commands stay thin.
 - All `invoke` calls go through `src/lib/ipc.ts`; its types mirror `src-tauri/src/models.rs` (camelCase over the wire).
 - Data providers report failures with `notify()` from `src/data/events.ts` and return `[]` — they don't throw into Vela.
@@ -72,6 +72,9 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   loaded. The app is AGPL-3.0 because it bundles PineTS: new dependencies must be compatible with that.
 - Verify a new broker integration against the real service with fake credentials (real error bodies, real socket
   behaviour) before trusting the docs: Dhan's feed, for one, accepts the socket and drops it on a bad token.
+- Zerodha's one-click login (`zerodha/callback.rs`) catches Kite's redirect on `127.0.0.1:47821`, so the port is part of
+  the user's Kite app configuration: changing it silently breaks every existing setup. Bind before opening the browser,
+  keep it loopback-only, and leave `zerodha_complete_login` (paste the address) working for apps that redirect elsewhere.
 - Zerodha (Kite Connect) tokens expire every morning and have no expiry field: the app estimates the reset (next 06:00 IST)
   from when the token was saved (`accessTokenSavedAt`). Kite's instrument lists are public (no login) and its bad-token
   errors are `{"status":"error","error_type":"TokenException"}`. `cargo test --lib zerodha::live -- --ignored` runs opt-in
@@ -86,11 +89,9 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   key. `bundle.createUpdaterArtifacts` makes `tauri build` demand `TAURI_SIGNING_PRIVATE_KEY` unless `--no-bundle` is used.
   The check runs only in the `main` window and only in release builds (`startBackgroundUpdates`); see "Releasing" in
   `CONTRIBUTING.md`.
-- Yahoo Finance is **opt-in**: it starts off (`terms` on its `ProviderSpec`), the user turns it on after reading its terms
-  notice, and the Rust commands refuse Yahoo requests while it's off. Don't make it default-on, don't go back to a
-  browser User-Agent, and don't add ads, paid features, referral links or ways to export/share Yahoo data — see "Yahoo
-  Finance is opt-in" in `docs/ARCHITECTURE.md`.
-- Yahoo Finance endpoints are unofficial and have no published limits. Every request must go through `Market::get_json`
-  (which applies the `Gate` in `gate.rs`: pacing, a per-minute budget, and a pause after HTTP 429) — never call Yahoo
-  from anywhere else. Batch (`spark` takes 20 symbols), cache, and share polls (`data/livePoll.ts`) rather than adding
-  per-symbol or per-pane requests. See "Yahoo Finance and rate limits" in `docs/ARCHITECTURE.md`.
+- **Yahoo Finance is not a data source, and shouldn't come back without the owner's say-so.** It was removed entirely: its
+  provider, backend client and rate limiter, its terms/opt-in UI, and its `yahoo:` symbols. Symbols saved from it stay in
+  users' watchlists, layouts and alerts but can't load: `isSupportedSymbol` (`lib/symbols.ts`) recognises them, and
+  `withoutUnsupportedSymbols` moves a layout's tabs off them when it opens (nothing stored is rewritten). `store/retired.rs`
+  purges its cache and settings once. A bare ticker now means Binance (`DEFAULT_PROVIDER`), which needs no account. Don't add
+  a source that scrapes an unofficial endpoint, and don't leave `yahoo` in any provider list.

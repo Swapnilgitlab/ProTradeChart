@@ -29,7 +29,7 @@ CI runs exactly these, on Linux, macOS and Windows.
 - **Test the logic that can be tested.** Parsers, request planning, resampling and the SQLite store are pure and have
   unit tests — new behaviour there should come with tests. UI work is checked by running the app; say in the PR
   description what you tried.
-- **Keep pure logic out of components and commands.** Put it in `src/lib/` or `src-tauri/src/{yahoo,store}/` where it can
+- **Keep pure logic out of components and commands.** Put it in `src/lib/` or `src-tauri/src/store/` where it can
   be tested without a window.
 - **Match the surrounding code.** Comments explain *why*, not what. Prefer small functions and plain data over
   abstraction.
@@ -84,7 +84,7 @@ A local `npx tauri build` that makes installers needs the key too
 ## Reporting bugs
 
 Please include your OS, the app version (*About*), the symbol and timeframe involved, and — if it's a data problem —
-whether the same symbol works on finance.yahoo.com. The app writes a log file that is very helpful to attach — Windows:
+whether the same symbol works on the source's own website. The app writes a log file that is very helpful to attach — Windows:
 `%LOCALAPPDATA%\io.github.swapnilgitlab.protradechart\logs`, macOS: `~/Library/Logs/io.github.swapnilgitlab.protradechart`, Linux:
 `~/.local/share/io.github.swapnilgitlab.protradechart/logs`. Remove anything private first.
 

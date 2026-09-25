@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Check, ExternalLink, Eye, EyeOff, KeyRound, RefreshCw, ShieldAlert, Star } from 'lucide-react';
+import { Check, Copy, ExternalLink, Eye, EyeOff, KeyRound, RefreshCw, ShieldAlert, Star } from 'lucide-react';
 import { Dialog } from '../../components/Dialog';
 import { useToast } from '../../components/Toasts';
 import { onDhanStatus } from '../../data/dhanLive';
@@ -23,12 +23,13 @@ import {
   type TestResult,
   type ZerodhaStatus,
   zerodhaCompleteLogin,
+  zerodhaLoginInBrowser,
   zerodhaLoginUrl,
+  zerodhaRedirectUrl,
   zerodhaStatus,
   zerodhaUpdateInstruments,
 } from '../../lib/ipc';
 import type { ProviderId } from '../../lib/symbols';
-import { TermsNotice } from './TermsNotice';
 import { useProviderState } from './useProviderState';
 
 interface Props {
@@ -139,8 +140,6 @@ function ProviderDetail({ provider, isDefault }: { provider: ProviderInfo; isDef
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState<null | 'save' | 'test' | 'clear' | 'toggle'>(null);
   const [test, setTest] = useState<TestResult | null>(null);
-  /** A source with terms isn't switched on by the switch alone: the user confirms under its notice. */
-  const [confirmingTerms, setConfirmingTerms] = useState(false);
 
   const dirty = Object.keys(edits).length > 0;
   const hasFields = provider.fields.length > 0;
@@ -241,7 +240,6 @@ function ProviderDetail({ provider, isDefault }: { provider: ProviderInfo; isDef
         {isDefault && <span className="pill ok">Default</span>}
       </div>
       <p className="secondary prov-description">{provider.description}</p>
-      <TermsNotice provider={provider} />
 
       {provider.docsUrl && (
         <p className="small" style={{ margin: '0 0 12px' }}>
@@ -254,11 +252,7 @@ function ProviderDetail({ provider, isDefault }: { provider: ProviderInfo; isDef
           type="checkbox"
           checked={provider.enabled}
           disabled={!provider.canDisable || (!provider.configured && hasFields) || busy !== null}
-          onChange={(e) => {
-            const next = e.currentTarget.checked;
-            if (next && provider.termsNotice) setConfirmingTerms(true);
-            else void switchOn(next);
-          }}
+          onChange={(e) => void switchOn(e.currentTarget.checked)}
         />
         <span>
           <strong>Use {provider.label}</strong>
@@ -274,31 +268,6 @@ function ProviderDetail({ provider, isDefault }: { provider: ProviderInfo; isDef
         </span>
       </label>
 
-      {confirmingTerms && !provider.enabled && (
-        <div className="notice terms-confirm" role="alertdialog" aria-label={`Turn on ${provider.label}`}>
-          <p>
-            Turn on {provider.label}? Doing so confirms you have read the notice above, and that using this source, and
-            keeping to its terms, is your own choice.
-          </p>
-          <div className="prov-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={busy !== null}
-              onClick={() => {
-                setConfirmingTerms(false);
-                void switchOn(true);
-              }}
-            >
-              Turn on {provider.label}
-            </button>
-            <button type="button" className="btn" disabled={busy !== null} onClick={() => setConfirmingTerms(false)}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
       {hasFields && (
         <div className="prov-fields">
           {provider.fields.map((f) => {
@@ -308,26 +277,26 @@ function ProviderDetail({ provider, isDefault }: { provider: ProviderInfo; isDef
               <div className="field" key={f.key}>
                 <label htmlFor={`prov-${provider.id}-${f.key}`}>{f.label}</label>
                 <div className="input-with-button">
-                  <input
-                    id={`prov-${provider.id}-${f.key}`}
-                    type={f.secret && !shown ? 'password' : 'text'}
-                    value={value}
-                    placeholder={f.secret && f.isSet ? '•••••••• saved — type to replace' : f.placeholder}
-                    autoComplete="off"
-                    spellCheck={false}
-                    onChange={(e) => setEdits({ ...edits, [f.key]: e.currentTarget.value })}
-                  />
-                  {f.secret && (
-                    <button
-                      type="button"
-                      className="icon-button"
-                      aria-label={shown ? `Hide ${f.label}` : `Show ${f.label}`}
-                      onClick={() => setRevealed({ ...revealed, [f.key]: !shown })}
-                    >
-                      {shown ? <EyeOff size={14} /> : <Eye size={14} />}
-                    </button>
-                  )}
-                </div>
+                      <input
+                        id={`prov-${provider.id}-${f.key}`}
+                        type={f.secret && !shown ? 'password' : 'text'}
+                        value={value}
+                        placeholder={f.secret && f.isSet ? '•••••••• saved — type to replace' : f.placeholder}
+                        autoComplete="off"
+                        spellCheck={false}
+                        onChange={(e) => setEdits({ ...edits, [f.key]: e.currentTarget.value })}
+                      />
+                      {f.secret && (
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label={shown ? `Hide ${f.label}` : `Show ${f.label}`}
+                          onClick={() => setRevealed({ ...revealed, [f.key]: !shown })}
+                        >
+                          {shown ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      )}
+                    </div>
                 <span className="field-hint">{f.help}</span>
               </div>
             );
@@ -360,7 +329,10 @@ function ProviderDetail({ provider, isDefault }: { provider: ProviderInfo; isDef
             <button
               type="button"
               className="btn"
-              disabled={(!provider.configured && !dirty) || busy !== null}
+              // Anything saved can be forgotten — not only a complete setup. A Zerodha login that has
+              // not happened yet leaves a key and secret with no access token, and a wrong pair has to
+              // be clearable.
+              disabled={(!provider.fields.some((f) => f.isSet) && !dirty) || busy !== null}
               onClick={() => void onClear()}
             >
               Forget credentials
@@ -507,13 +479,20 @@ function ZerodhaPanel({ provider, onLoggedIn }: { provider: ProviderInfo; onLogg
   const toast = useToast();
   const [status, setStatus] = useState<ZerodhaStatus | null>(null);
   const [feed, setFeed] = useState<FeedStatus | null>(null);
-  const [working, setWorking] = useState<null | 'open' | 'login' | 'instruments'>(null);
+  const [working, setWorking] = useState<null | 'browser' | 'open' | 'login' | 'instruments'>(null);
   const [pasted, setPasted] = useState('');
+  const [redirectUrl, setRedirectUrl] = useState('');
 
   const keysSaved = ['apiKey', 'apiSecret'].every((k) => provider.fields.find((f) => f.key === k)?.isSet);
   const hasToken = provider.fields.find((f) => f.key === 'accessToken')?.isSet ?? false;
 
   const load = useCallback(() => zerodhaStatus().then(setStatus).catch(() => {}), []);
+
+  useEffect(() => {
+    void zerodhaRedirectUrl()
+      .then(setRedirectUrl)
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     void load();
@@ -532,6 +511,31 @@ function ZerodhaPanel({ provider, onLoggedIn }: { provider: ProviderInfo; onLogg
         <a href="https://developers.kite.trade">developers.kite.trade</a>.
       </p>
     );
+  }
+
+  /** The whole login in one go: the backend opens Zerodha's page and catches
+   *  the redirect, so there is nothing to copy. Waits as long as the user takes. */
+  async function loginInBrowser() {
+    setWorking('browser');
+    try {
+      await zerodhaLoginInBrowser();
+      toast('Logged in to Zerodha.', 'success');
+      await onLoggedIn();
+      await load();
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    } finally {
+      setWorking(null);
+    }
+  }
+
+  async function copyRedirectUrl() {
+    try {
+      await navigator.clipboard.writeText(redirectUrl);
+      toast('Redirect URL copied.', 'success');
+    } catch {
+      toast(`Copy it by hand: ${redirectUrl}`, 'error');
+    }
   }
 
   async function openLogin() {
@@ -589,19 +593,36 @@ function ZerodhaPanel({ provider, onLoggedIn }: { provider: ProviderInfo; onLogg
 
       <div className="prov-login">
         <div className="label">{hasToken ? 'Log in again' : 'Log in'}</div>
-        <ol className="small">
-          <li>
-            <button type="button" className="btn" disabled={working !== null} onClick={() => void openLogin()}>
-              <ExternalLink size={13} /> {working === 'open' ? 'Opening…' : 'Open Zerodha login'}
-            </button>{' '}
-            and sign in.
-          </li>
-          <li>
-            Zerodha then sends your browser to the redirect URL of your Kite app. Copy that whole address from the address
-            bar (it contains <code>request_token=…</code>) and paste it here.
-          </li>
-        </ol>
-        <div className="input-with-button">
+        <p className="small" style={{ margin: '0 0 8px' }}>
+          Zerodha signs you in for the day. The app opens its login page and takes the token from the browser when
+          you're done — nothing to copy.
+        </p>
+        <button type="button" className="btn btn-primary" disabled={working !== null} onClick={() => void loginInBrowser()}>
+          <ExternalLink size={13} /> {working === 'browser' ? 'Waiting for you to finish…' : 'Log in with Zerodha'}
+        </button>
+        <div className="field-hint" style={{ marginTop: 8 }}>
+          For this, your Kite app's redirect URL must be exactly <code>{redirectUrl || '…'}</code>{' '}
+          <button type="button" className="btn btn-tiny" disabled={!redirectUrl} onClick={() => void copyRedirectUrl()}>
+            <Copy size={11} /> Copy
+          </button>{' '}
+          — set it on your app at <a href="https://developers.kite.trade">developers.kite.trade</a>.
+        </div>
+
+        <details className="prov-manual">
+          <summary className="small">Redirect URL set to something else? Paste the address instead</summary>
+          <ol className="small">
+            <li>
+              <button type="button" className="btn" disabled={working !== null} onClick={() => void openLogin()}>
+                <ExternalLink size={13} /> {working === 'open' ? 'Opening…' : 'Open Zerodha login'}
+              </button>{' '}
+              and sign in.
+            </li>
+            <li>
+              Zerodha then sends your browser to the redirect URL of your Kite app. Copy that whole address from the
+              address bar (it contains <code>request_token=…</code>) and paste it here.
+            </li>
+          </ol>
+          <div className="input-with-button">
           <input
             type="text"
             value={pasted}
@@ -623,9 +644,10 @@ function ZerodhaPanel({ provider, onLoggedIn }: { provider: ProviderInfo; onLogg
             {working === 'login' ? 'Logging in…' : 'Finish login'}
           </button>
         </div>
-        <span className="field-hint">
-          Each request token works once and only for a few minutes, so paste it straight away.
-        </span>
+          <span className="field-hint">
+            Each request token works once and only for a few minutes, so paste it straight away.
+          </span>
+        </details>
       </div>
 
       <div className="prov-status-row">

@@ -98,19 +98,16 @@ pub fn remove_items(conn: &mut Connection, watchlist_id: i64, symbols: &[String]
 
 const SEEDED_PREF: &str = "watchlists_seeded";
 
-/// The starter list shown on a fresh install — a spread of instruments across
-/// every built-in data source, so a new user has something to click straight
-/// away. Runs once per database: deleting the list later doesn't bring it back.
+/// The starter list shown on a fresh install — a spread across the crypto sources
+/// that need no account, so a new user has something to click straight away. Runs once per database: deleting the list later doesn't bring it back.
 const STARTER_SYMBOLS: &[(&str, &str)] = &[
-    ("yahoo:^GSPC", "S&P 500"),
-    ("yahoo:AAPL", "Apple Inc."),
-    ("yahoo:MSFT", "Microsoft Corporation"),
-    ("yahoo:NVDA", "NVIDIA Corporation"),
-    ("yahoo:^NSEI", "NIFTY 50"),
-    ("yahoo:RELIANCE.NS", "Reliance Industries"),
-    ("yahoo:EURUSD=X", "EUR/USD"),
     ("binance:BTCUSDT", "Bitcoin / TetherUS"),
     ("binance:ETHUSDT", "Ethereum / TetherUS"),
+    ("binance:SOLUSDT", "Solana / TetherUS"),
+    ("binance:BNBUSDT", "BNB / TetherUS"),
+    ("coinbase:BTC-USD", "Bitcoin / US Dollar"),
+    ("coinbase:ETH-USD", "Ethereum / US Dollar"),
+    ("hyperliquid:BTC", "Bitcoin perpetual"),
 ];
 
 pub fn seed_starter_list_once(conn: &mut Connection) -> rusqlite::Result<()> {
@@ -161,14 +158,14 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let mut conn = db.conn.lock().unwrap();
         let id = create(&conn, "Tech").unwrap();
-        let added = add_items(&mut conn, id, &[item("yahoo:MSFT"), item("yahoo:AAPL")]).unwrap();
+        let added = add_items(&mut conn, id, &[item("binance:ETHUSDT"), item("binance:BTCUSDT")]).unwrap();
         assert_eq!(added, 2);
 
         let detail = get(&conn, id).unwrap().unwrap();
         assert_eq!(detail.name, "Tech");
         assert_eq!(
             detail.items.iter().map(|i| i.symbol.as_str()).collect::<Vec<_>>(),
-            ["yahoo:MSFT", "yahoo:AAPL"]
+            ["binance:ETHUSDT", "binance:BTCUSDT"]
         );
     }
 
@@ -177,8 +174,8 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let mut conn = db.conn.lock().unwrap();
         let id = create(&conn, "Dupes").unwrap();
-        add_items(&mut conn, id, &[item("yahoo:AAPL")]).unwrap();
-        let added = add_items(&mut conn, id, &[item("yahoo:AAPL"), item("yahoo:TSLA")]).unwrap();
+        add_items(&mut conn, id, &[item("binance:BTCUSDT")]).unwrap();
+        let added = add_items(&mut conn, id, &[item("binance:BTCUSDT"), item("binance:SOLUSDT")]).unwrap();
         assert_eq!(added, 1);
         assert_eq!(get(&conn, id).unwrap().unwrap().items.len(), 2);
     }
@@ -189,8 +186,8 @@ mod tests {
         let mut conn = db.conn.lock().unwrap();
         let a = create(&conn, "A").unwrap();
         let b = create(&conn, "B").unwrap();
-        assert_eq!(add_items(&mut conn, a, &[item("yahoo:AAPL")]).unwrap(), 1);
-        assert_eq!(add_items(&mut conn, b, &[item("yahoo:AAPL")]).unwrap(), 1);
+        assert_eq!(add_items(&mut conn, a, &[item("binance:BTCUSDT")]).unwrap(), 1);
+        assert_eq!(add_items(&mut conn, b, &[item("binance:BTCUSDT")]).unwrap(), 1);
     }
 
     #[test]

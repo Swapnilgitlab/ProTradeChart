@@ -55,16 +55,20 @@ export class ZerodhaProvider implements DataProvider {
     const { tf, plan } = target;
     const limit = range.limit ?? DEFAULT_BAR_COUNT;
     const from = range.from ?? (range.to ?? Date.now()) - lookbackMs(tf, limit);
-    // See YahooProvider: daily bars are stamped at local midnight, so ask a day
-    // wider and clip to the exact range afterwards.
+    // A daily bar is stamped at local midnight but the exchange dates it by its
+    // session open, which can fall on the other side of that instant. Ask a day
+    // wider and clip to the exact range afterwards, so a bar on the boundary is
+    // neither lost nor duplicated.
     const pad = tf.kind === 'minutes' ? 0 : DAY_MS;
 
     let res: BarsResponse;
     try {
       res = await zerodhaFetchBars(ticker, plan.interval, from - pad, range.to === undefined ? undefined : range.to + pad);
     } catch (err) {
-      // See YahooProvider: a failed backfill is thrown so Vela keeps what it
-      // has and the chart retries later, instead of a toast on a working chart.
+      // Older history is loaded behind a chart that already works. A failure there
+      // is thrown, not reported: Vela stops that backfill and keeps what it has, and
+      // the chart tries again later (see historyBackfill.ts), instead of a toast on a
+      // working chart.
       if (isBackfillRequest(range)) throw new Error(errorMessage(err));
       notify('error', errorMessage(err));
       return [];

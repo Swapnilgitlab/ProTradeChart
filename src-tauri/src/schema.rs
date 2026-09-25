@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS watchlist_items (
 );
 CREATE INDEX IF NOT EXISTS idx_watchlist_items_list ON watchlist_items(watchlist_id);
 
--- Read-through cache of Yahoo Finance bars, used only as an offline fallback.
+-- Read-through cache of the brokers' bars (keys start `dhan:` / `zerodha:`), used only as an
+-- offline fallback.
 CREATE TABLE IF NOT EXISTS bars_cache (
   symbol    TEXT NOT NULL,
   interval  TEXT NOT NULL,
@@ -58,14 +59,6 @@ CREATE TABLE IF NOT EXISTS bars_cache (
   volume    REAL,
   PRIMARY KEY (symbol, interval, ts)
 ) WITHOUT ROWID;
-
--- Per-symbol exchange timezone, remembered so offline bars from the cache are
--- still grouped into the right trading day.
-CREATE TABLE IF NOT EXISTS symbol_meta (
-  symbol      TEXT PRIMARY KEY,
-  gmt_offset  INTEGER NOT NULL,
-  timezone    TEXT
-);
 
 -- User-imported OHLCV datasets (CSV), chartable as `csv:<TICKER>`.
 CREATE TABLE IF NOT EXISTS datasets (

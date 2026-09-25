@@ -47,7 +47,7 @@ describe('HistoryBackfill', () => {
 
   beforeEach(() => {
     request = vi.fn<(bars: number) => void>();
-    market = 'yahoo:AAPL|D';
+    market = 'binance:BTCUSDT|D';
     clock = 1_000_000;
     requested = undefined;
     backfill = new HistoryBackfill({
@@ -115,7 +115,7 @@ describe('HistoryBackfill', () => {
     backfill.onViewport(view(-10));
     expect(request).not.toHaveBeenCalled();
 
-    market = 'yahoo:MSFT|D';
+    market = 'binance:ETHUSDT|D';
     backfill.onHistory(done(0, 500)); // the new market's own load
     backfill.onViewport(view(-10));
     expect(request).toHaveBeenCalledTimes(1);
@@ -123,7 +123,7 @@ describe('HistoryBackfill', () => {
 
   it('ignores viewport movement while a symbol switch is still loading', () => {
     backfill.onHistory(done(0, 500));
-    market = 'yahoo:MSFT|D'; // switched, but its history has not landed yet
+    market = 'binance:ETHUSDT|D'; // switched, but its history has not landed yet
     backfill.onViewport(view(-10));
     expect(request).not.toHaveBeenCalled();
   });
@@ -158,7 +158,7 @@ describe('HistoryBackfill', () => {
     expect(request).toHaveBeenCalledTimes(3);
 
     // A different market loading fine starts from scratch.
-    market = 'yahoo:MSFT|D';
+    market = 'binance:ETHUSDT|D';
     backfill.onHistory(done(0, 500));
     backfill.onViewport(view(-10));
     expect(request).toHaveBeenCalledTimes(4);

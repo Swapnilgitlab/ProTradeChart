@@ -7,6 +7,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { trackCursorPrice } from './alertActions';
 import { watchHistory } from './historyBackfill';
 import { installThinMovingAverages } from './thinMovingAverages';
+import { showCompanyName } from './watermarkName';
 
 // Vela's own default grid hues, at 20% opacity — the same neutral gray it
 // already picks per light/dark, only more subtle. `setTheme()` re-skins the
@@ -31,11 +32,13 @@ function applyGridOpacity(ws: VelaWorkspace, baseMode: 'light' | 'dark') {
 }
 
 /** Starts watching every chart of `ws` that isn't already: loading older
- *  history as the user scrolls or zooms back (see historyBackfill.ts), and
- *  remembering the price under the cursor for "add alert here".
+ *  history as the user scrolls or zooms back (see historyBackfill.ts),
+ *  remembering the price under the cursor for "add alert here", and putting the
+ *  company name under the symbol watermark (see watermarkName.ts).
  *  Cells come and go with layout changes, so this is safe to call repeatedly. */
 function watchAllCells(ws: VelaWorkspace, watched: Map<object, () => void>) {
-  const live = new Set<object>(ws.cells().map((cell) => cell.chart));
+  const cells = ws.cells();
+  const live = new Set<object>(cells.map((cell) => cell.chart));
   for (const [chart, stop] of watched) {
     // A cell Vela rebuilt (or dropped) leaves its old chart behind.
     if (!live.has(chart)) {
@@ -43,10 +46,10 @@ function watchAllCells(ws: VelaWorkspace, watched: Map<object, () => void>) {
       watched.delete(chart);
     }
   }
-  for (const chart of live) {
+  for (const cell of cells) {
+    const chart = cell.chart;
     if (!watched.has(chart)) {
-      const velaChart = chart as VelaWorkspace['chart'];
-      const stops = [watchHistory(velaChart), trackCursorPrice(velaChart)];
+      const stops = [watchHistory(chart), trackCursorPrice(chart), showCompanyName(cell)];
       watched.set(chart, () => stops.forEach((stop) => stop()));
     }
   }

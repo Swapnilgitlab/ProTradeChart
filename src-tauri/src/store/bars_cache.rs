@@ -1,7 +1,8 @@
-//! Read-through cache of market bars. It is only consulted when the network
-//! request fails, so the chart still draws something offline.
+//! Read-through cache of the brokers' bars (`dhan:…`, `zerodha:…`). It is only
+//! consulted when the network request fails, so the chart still draws something
+//! offline.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 
 use crate::models::Bar;
 
@@ -66,28 +67,9 @@ pub fn get(
     Ok(bars)
 }
 
-/// Remembers a symbol's exchange UTC offset (seconds) and timezone name.
-pub fn put_meta(conn: &Connection, symbol: &str, gmt_offset: i64, timezone: Option<&str>) -> rusqlite::Result<()> {
-    conn.execute(
-        "INSERT INTO symbol_meta (symbol, gmt_offset, timezone) VALUES (?1, ?2, ?3)
-         ON CONFLICT(symbol) DO UPDATE SET gmt_offset = excluded.gmt_offset, timezone = excluded.timezone",
-        params![symbol, gmt_offset, timezone],
-    )?;
-    Ok(())
-}
-
-pub fn get_meta(conn: &Connection, symbol: &str) -> rusqlite::Result<Option<(i64, Option<String>)>> {
-    conn.query_row(
-        "SELECT gmt_offset, timezone FROM symbol_meta WHERE symbol = ?1",
-        params![symbol],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )
-    .optional()
-}
-
 pub fn prune_intraday(conn: &Connection, now_ms: i64) -> rusqlite::Result<()> {
     conn.execute(
-        "DELETE FROM bars_cache WHERE interval NOT IN ('1d', '5d', '1wk', '1mo') AND ts < ?1",
+        "DELETE FROM bars_cache WHERE interval NOT IN ('1d', '5d', '1wk', '1mo', '3mo') AND ts < ?1",
         params![now_ms - INTRADAY_RETENTION_MS],
     )?;
     Ok(())
@@ -115,14 +97,14 @@ mod tests {
         let mut conn = db.conn.lock().unwrap();
         put(
             &mut conn,
-            "AAPL",
-            "1d",
+            "dhan:NSE:RELIANCE",
+            "1D",
             &[bar(1000, 1.0), bar(2000, 2.0), bar(3000, 3.0)],
         )
         .unwrap();
-        put(&mut conn, "AAPL", "1d", &[bar(3000, 9.0)]).unwrap();
+        put(&mut conn, "dhan:NSE:RELIANCE", "1D", &[bar(3000, 9.0)]).unwrap();
 
-        let bars = get(&conn, "AAPL", "1d", None, None, None).unwrap();
+        let bars = get(&conn, "dhan:NSE:RELIANCE", "1D", None, None, None).unwrap();
         assert_eq!(bars.iter().map(|b| b.time).collect::<Vec<_>>(), [1000, 2000, 3000]);
         assert_eq!(bars[2].close, 9.0);
     }
@@ -148,19 +130,6 @@ mod tests {
         put(&mut conn, "X", "1d", &[bar(1000, 1.0)]).unwrap();
         assert!(get(&conn, "X", "5m", None, None, None).unwrap().is_empty());
         assert!(get(&conn, "Y", "1d", None, None, None).unwrap().is_empty());
-    }
-
-    #[test]
-    fn symbol_meta_round_trips_and_updates() {
-        let db = Database::open_in_memory().unwrap();
-        let conn = db.conn.lock().unwrap();
-        assert_eq!(get_meta(&conn, "BHP.AX").unwrap(), None);
-        put_meta(&conn, "BHP.AX", 36000, Some("Australia/Sydney")).unwrap();
-        put_meta(&conn, "BHP.AX", 39600, Some("Australia/Sydney")).unwrap(); // DST change
-        assert_eq!(
-            get_meta(&conn, "BHP.AX").unwrap(),
-            Some((39600, Some("Australia/Sydney".to_string())))
-        );
     }
 
     #[test]

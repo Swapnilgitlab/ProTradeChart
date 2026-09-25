@@ -24,13 +24,6 @@ pub struct FieldSpec {
     pub placeholder: &'static str,
 }
 
-/// What a user is shown, and agrees to, before a source whose data comes
-/// under someone else's terms is switched on.
-pub struct Terms {
-    pub notice: &'static str,
-    pub url: &'static str,
-}
-
 pub struct ProviderSpec {
     pub id: &'static str,
     pub label: &'static str,
@@ -44,34 +37,9 @@ pub struct ProviderSpec {
     pub search: bool,
     pub quotes: bool,
     pub docs_url: Option<&'static str>,
-    /// A provider with terms starts off: the user turns it on after reading them.
-    pub terms: Option<Terms>,
 }
 
 pub const PROVIDERS: &[ProviderSpec] = &[
-    ProviderSpec {
-        id: "yahoo",
-        label: "Yahoo Finance",
-        description: "Stocks, ETFs, indices, FX and futures from most world exchanges, read from Yahoo Finance's \
-                      public web endpoints. No account needed, but there is no official API behind them: prices \
-                      can be delayed, and access can stop without notice.",
-        category: "free",
-        fields: &[],
-        can_disable: true,
-        history: true,
-        live: true,
-        search: true,
-        quotes: true,
-        docs_url: None,
-        terms: Some(Terms {
-            notice: "ProTradeChart is not affiliated with, endorsed by or sponsored by Yahoo. This source reads \
-                     Yahoo Finance's public web endpoints directly from your computer; there is no official API \
-                     or data licence behind them. Yahoo's terms of service govern that use, including their limits \
-                     on automated access and on commercial use, so read them and decide for yourself. If you turn \
-                     it on, use the data for your own information only: don't republish, resell or redistribute it.",
-            url: "https://legal.yahoo.com/us/en/yahoo/terms/otos/index.html",
-        }),
-    },
     ProviderSpec {
         id: "binance",
         label: "Binance",
@@ -84,7 +52,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         search: true,
         quotes: true,
         docs_url: None,
-        terms: None,
     },
     ProviderSpec {
         id: "coinbase",
@@ -98,7 +65,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         search: true,
         quotes: true,
         docs_url: None,
-        terms: None,
     },
     ProviderSpec {
         id: "hyperliquid",
@@ -112,7 +78,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         search: true,
         quotes: true,
         docs_url: None,
-        terms: None,
     },
     ProviderSpec {
         id: "csv",
@@ -126,7 +91,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         search: true,
         quotes: true,
         docs_url: None,
-        terms: None,
     },
     ProviderSpec {
         id: "dhan",
@@ -157,7 +121,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         search: true,
         quotes: true,
         docs_url: Some("https://dhanhq.co/docs/v2/"),
-        terms: None,
     },
     ProviderSpec {
         id: "zerodha",
@@ -196,7 +159,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         search: true,
         quotes: true,
         docs_url: Some("https://kite.trade/docs/connect/v3/"),
-        terms: None,
     },
 ];
 
@@ -209,8 +171,7 @@ fn require_spec(id: &str) -> Result<&'static ProviderSpec, String> {
 }
 
 /// Whether a provider is switched on. Free and local providers default to on;
-/// broker providers, and any provider with terms to accept, stay off until the
-/// user turns them on.
+/// broker providers stay off until the user sets them up and turns them on.
 fn is_enabled(conn: &Connection, spec: &ProviderSpec) -> rusqlite::Result<bool> {
     if !spec.can_disable {
         return Ok(true);
@@ -219,15 +180,9 @@ fn is_enabled(conn: &Connection, spec: &ProviderSpec) -> rusqlite::Result<bool> 
         match settings::get(conn, Table::Settings, spec.id, ENABLED_KEY)?.as_deref() {
             Some("1") => true,
             Some("0") => false,
-            _ => spec.category != "broker" && spec.terms.is_none(),
+            _ => spec.category != "broker",
         },
     )
-}
-
-/// Whether a provider is switched on — for data commands to check before they
-/// touch the network, whatever the webview believes.
-pub fn is_on(conn: &Connection, provider: &str) -> Result<bool, String> {
-    is_enabled(conn, require_spec(provider)?).map_err(|e| e.to_string())
 }
 
 /// Trims what people paste: whitespace, newlines, wrapping quotes, and a
@@ -292,8 +247,6 @@ pub fn describe(conn: &Connection, secrets: &Secrets) -> rusqlite::Result<Vec<Pr
             },
             docs_url: spec.docs_url.map(str::to_string),
             secret_storage: storage.map(|s| s.as_str().to_string()),
-            terms_notice: spec.terms.as_ref().map(|t| t.notice.to_string()),
-            terms_url: spec.terms.as_ref().map(|t| t.url.to_string()),
         });
     }
     Ok(out)
@@ -423,38 +376,16 @@ mod tests {
     }
 
     #[test]
-    fn yahoo_starts_off_until_its_terms_are_accepted() {
+    fn yahoo_is_not_a_data_source() {
+        assert!(
+            spec("yahoo").is_none(),
+            "Yahoo Finance was removed; nothing should serve or configure it"
+        );
         let (db, secrets) = setup();
         let conn = db.conn.lock().unwrap();
-        let yahoo = info(&conn, &secrets, "yahoo");
-        assert!(!yahoo.enabled, "no request may reach Yahoo before the user turns it on");
-        assert!(yahoo.configured, "nothing to fill in: turning it on is the only step");
-        assert!(yahoo
-            .terms_notice
-            .as_deref()
-            .is_some_and(|n| n.contains("not affiliated")));
-        assert!(yahoo
-            .terms_url
-            .as_deref()
-            .is_some_and(|u| u.starts_with("https://legal.yahoo.com/")));
-        assert_eq!(is_on(&conn, "yahoo"), Ok(false));
-
-        set_enabled(&conn, "yahoo", true).unwrap();
-        assert_eq!(is_on(&conn, "yahoo"), Ok(true));
-        assert!(is_usable(&conn, &secrets, "yahoo").unwrap());
-        set_enabled(&conn, "yahoo", false).unwrap();
-        assert_eq!(is_on(&conn, "yahoo"), Ok(false));
-    }
-
-    #[test]
-    fn only_sources_with_terms_carry_a_notice() {
-        let (db, secrets) = setup();
-        let conn = db.conn.lock().unwrap();
-        for p in describe(&conn, &secrets).unwrap() {
-            assert_eq!(p.terms_notice.is_some(), p.terms_url.is_some(), "{}", p.id);
-        }
-        assert!(info(&conn, &secrets, "binance").terms_notice.is_none());
-        assert!(is_on(&conn, "nope").is_err());
+        assert!(is_usable(&conn, &secrets, "yahoo").is_err());
+        assert!(set_enabled(&conn, "yahoo", true).is_err());
+        assert!(describe(&conn, &secrets).unwrap().iter().all(|p| p.id != "yahoo"));
     }
 
     #[test]

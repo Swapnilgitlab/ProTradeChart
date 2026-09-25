@@ -7,6 +7,10 @@ project uses [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- **Zerodha logs in with one click.** Set your Kite app's redirect URL to `http://127.0.0.1:47821` (shown, with a
+  Copy button, next to the login button) and *Log in with Zerodha* now collects the access token itself — no copying
+  the address out of the browser. Pasting it by hand is still there for Kite apps that redirect elsewhere.
+
 - **Licences in the app.** *About* now has a Legal section with the copyright notice and the AGPL's no-warranty statement,
   links to the source code, and shows the licence and **THIRD_PARTY_LICENSES.txt** — the copyright notice and licence
   text of every npm package and Rust crate compiled into the app — without leaving it. The file is installed with the app
@@ -43,8 +47,8 @@ project uses [Semantic Versioning](https://semver.org).
   differ from TradingView's. Powered by [PineTS](https://github.com/LuxAlgo/PineTS).
 - **Older history loads as you scroll back.** Charts used to stop at their first ~500 candles (two years of daily bars)
   and show empty space beyond. Scrolling or zooming toward the oldest loaded candle now fetches more, in the background
-  and without moving the view, until the source has nothing older — a daily Yahoo chart reaches back to the stock's
-  listing, intraday charts to the limit Yahoo keeps. Works for every data source and every chart of a grid.
+  and without moving the view, until the source has nothing older. Works for every data source and every chart of a
+  grid.
 - **Chart grids.** Each tab can now show 1 to 16 charts (1×1 up to 4×4), chosen from the layout button in the chart's
   toolbar, with sync switches for symbol, interval, crosshair and style. The active chart is the one the search box and
   watchlist act on and the one the tab is named after. Saved layouts keep the grid. New charts start on the tab's symbol;
@@ -54,9 +58,12 @@ project uses [Semantic Versioning](https://semver.org).
 - **Dhan** as the first broker provider: exchange-grade history (1/5/15/25/60-minute and daily bars, built up to other
   timeframes), a live tick feed shared across all charts and windows, watchlist quotes, and symbol search over Dhan's
   instrument list. Credentials are kept in the OS keychain and used only by the Rust backend.
-- Watchlist import maps NSE/BSE symbols to Dhan when it is the default provider.
+- Watchlist import maps NSE/BSE symbols to your broker (Dhan or Zerodha) when you have one set up.
 
 ### Fixed
+
+- **Forget credentials** in *Data providers* now works as soon as anything is saved. It used to need a complete setup, so
+  a wrong Zerodha API key and secret, saved before the first login, could not be cleared.
 
 - Restoring a saved layout that contains a moving average could throw an error ("Cannot read properties of undefined
   (reading 'bars')") because the indicator was handed its saved settings before it had been started.
@@ -66,16 +73,10 @@ project uses [Semantic Versioning](https://semver.org).
 
 ### Changed
 
-- **Yahoo Finance is now opt-in.** Its data comes under Yahoo's own terms (there is no official API or data licence behind
-  the endpoints the app uses), so it starts switched off. A first-run dialog, and the Data providers screen, show what that
-  means with a link to Yahoo's terms, and Yahoo is turned on only when you choose to; until then no request reaches Yahoo,
-  and new charts open on a crypto pair. The app is not affiliated with Yahoo. Existing installs see the dialog once.
 - **Crypto symbols show a two-letter badge instead of a coin logo.** The logos came from Ledger's icon server, a third
   party you never chose to contact. The web view no longer loads images from the internet at all.
-- **Requests to Yahoo identify the app** (`ProTradeChart/<version>` with a link to this repository) instead of posing as a
-  web browser.
-- The README, About and third-party notices now spell out each data source's terms: Yahoo for personal use, the crypto
-  exchanges' own terms, and broker data being licensed to you alone.
+- The README, About and third-party notices now spell out each data source's terms: the crypto exchanges' own terms, and
+  broker data being licensed to you alone.
 - **About** now credits the developer, Swapnil Pawar of ProTradeJournal, with links to their X and GitHub profiles.
 - **New logo and app icon.** The README carries the full logo, and the app icon (window, taskbar, installers), the favicon
   and the About dialog use its P mark on a light rounded plate, so they stay legible on dark taskbars and docks.
@@ -85,16 +86,18 @@ project uses [Semantic Versioning](https://semver.org).
   same licence with the source available.
 - The Content-Security-Policy now allows `'unsafe-eval'`, which PineTS needs to compile scripts. Scripts run in a Web
   Worker with no access to the page or the backend.
-- Asking Yahoo for a window before a symbol's first trade, or an intraday window past what it keeps, now counts as "no
-  data there" (an empty result) instead of an error.
+- **Binance is the default data source.** New charts, symbols typed without a provider, and the starter watchlist (crypto
+  pairs from Binance, Coinbase and Hyperliquid) use sources that need no account. Importing a watchlist sends a bare
+  ticker to the default provider, NSE/BSE symbols to your Dhan or Zerodha account when one is set up, and reports any
+  symbol no source can chart as skipped.
 
-- **Kinder to Yahoo Finance.** Yahoo publishes no rate limits, so every request is now paced (at least 250 ms apart, at
-  most 60 a minute) and the app stops sending anything for 30 seconds — doubling on repeated failures, up to 15 minutes —
-  as soon as Yahoo answers *429 Too Many Requests*, drawing charts from the local cache meanwhile.
-- Watchlist prices are fetched 20 symbols to a request instead of one request per symbol, and reused for 20 seconds;
-  symbol searches are cached for 5 minutes.
-- Charts showing the same Yahoo symbol and timeframe now share one live poll, and a failing poll backs off instead of
-  retrying at full speed. Regaining window focus no longer refreshes prices fetched in the last 10 seconds.
+### Removed
+
+- **Yahoo Finance is no longer a data source.** The provider, its rate limiter, the opt-in terms dialog and the first-run
+  intro are gone, and the app makes no request to Yahoo. US and world stocks, FX, indices and futures are no longer available
+  (Indian markets remain available through Dhan or Zerodha). Watchlists, layouts and alerts you saved with `yahoo:`
+  symbols are left as they are — a layout opened with such a tab swaps it for Bitcoin and says so — and the cached Yahoo
+  bars and settings are deleted once, on first launch.
 
 ## [0.1.0] — initial release
 

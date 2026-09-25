@@ -1,7 +1,7 @@
 # Architecture
 
 A [Tauri 2](https://tauri.app) desktop app: a **React + TypeScript** frontend running in the OS webview, and a small
-**Rust** backend that owns the database, holds broker credentials, and talks to Yahoo Finance and broker APIs. Charts
+**Rust** backend that owns the database, holds broker credentials, and talks to the broker APIs. Charts
 are drawn by [Vela](https://luxalgo.com/vela).
 
 ```
@@ -14,17 +14,18 @@ are drawn by [Vela](https://luxalgo.com/vela).
    (Binance / Coinbase /       │                                              │ │
     Hyperliquid, over HTTPS    ▼                                              ▼ ▼
     and WebSocket)        ┌──────────── Rust backend (src-tauri) ────────────────────┐
-                          │ commands.rs ─ market.rs ─ yahoo.rs   ── Yahoo Finance   │
+                          │ commands.rs ─ dhan/ ─ zerodha/      ── broker APIs        │
                           │      └────── store/* ── SQLite (charting.db)             │
                           └───────────────────────────────────────────────────────────┘
 ```
 
-Dhan follows the same shape as Yahoo, with two additions: its commands live in `provider_commands.rs` and `dhan/`, and its
-live feed is a single WebSocket owned by Rust that pushes `dhan-tick` and `dhan-status` events to every window.
+Dhan and Zerodha sit behind Rust: their commands live in `provider_commands.rs` / `dhan/` and `zerodha_commands.rs` /
+`zerodha/`, and each live feed is a single WebSocket owned by Rust that pushes `dhan-tick` / `dhan-status` (and
+`zerodha-tick` / `zerodha-status`) events to every window.
 
 ## Symbols and providers
 
-A chart symbol is always `provider:TICKER` (`yahoo:AAPL`, `binance:BTCUSDT`, `csv:MY_DATA`). The prefix is what
+A chart symbol is always `provider:TICKER` (`binance:BTCUSDT`, `dhan:NSE:RELIANCE`, `csv:MY_DATA`). The prefix is what
 selects the data source: it's Vela's own routing rule, and `lib/symbols.ts` holds the helpers for it.
 
 A provider is a Vela [`DataProvider`](../node_modules/@luxalgo/vela/dist/DataProvider-DLeFs1gE.d.ts): an object with
@@ -34,53 +35,33 @@ so search and watchlist quotes use the same instance the charts do.
 
 | Provider | Where | Notes |
 | --- | --- | --- |
-| `yahoo` | `data/providers/yahoo.ts` + `src-tauri/src/{yahoo,market}.rs` | Fetched by Rust (no browser CORS, cacheable). |
 | `dhan` | `data/providers/dhan.ts` + `src-tauri/src/dhan/` | The user's own Dhan account. All calls go through Rust, which holds the credentials. |
+| `zerodha` | `data/providers/zerodha.ts` + `src-tauri/src/zerodha/` | The user's own Kite Connect account, the same shape as Dhan. |
 | `csv` | `data/providers/csv.ts` + `src-tauri/src/store/datasets.rs` | User-imported files, served from SQLite. |
 | `binance`, `coinbase`, `hyperliquid` | Vela's bundled providers | Fetched directly from the webview; they also stream live. |
 
-### Yahoo Finance is opt-in
+### Yahoo Finance was removed
 
-There is no official API or data licence behind the Yahoo Finance endpoints this app uses, and Yahoo's terms of service
-limit automated access and commercial use. So the app treats Yahoo as the user's choice, not its own:
+Yahoo Finance used to be a data source, through its unofficial public endpoints. It was removed entirely — provider,
+backend client, rate limiter and the terms/opt-in UI that existed only for it — so the app has **no source for US and most
+world stocks, ETFs, FX or indices**; those need an imported CSV. What it left behind, and how that is handled:
 
-- **It starts off.** A provider with `terms` in `providers.rs` (Yahoo is the only one) defaults to off, like a broker, and
-  the user turns it on after reading the notice: in the first-run `MarketDataIntro` dialog or under Data providers, where
-  the switch asks for confirmation. Both render the notice and link from the backend's catalogue (`TermsNotice`), so the
-  wording lives in one place. A future source with terms of its own only needs `terms` set.
-- **The backend enforces it.** Every Yahoo command refuses before touching the network while Yahoo is off
-  (`yahoo_is_on` in `commands.rs`), so a second window with stale settings can't reach Yahoo either.
-- **It says who it is.** Requests carry `ProTradeChart/<version> (+repository URL)` as the User-Agent rather than a
-  browser's, so Yahoo can see, and refuse if it wants, exactly this client. (Yahoo rejects a request with no User-Agent.)
-- **Keep it non-commercial and local.** No ads, paid tiers, sponsorships or referral links in a build that fetches Yahoo
-  data (Binance's terms likewise forbid profiting from its market data, including through advertising or referral
-  fees), and no feature that exports, syncs or shares Yahoo data off the user's computer.
+- **Saved symbols.** Watchlists, layouts and alerts keep their `yahoo:…` symbols (user data isn't rewritten), but nothing
+  can load them. `isSupportedSymbol` (`lib/symbols.ts`) recognises them. Opening a layout moves each affected tab, and
+  each affected cell of a grid, to the starter symbol and says so (`withoutUnsupportedSymbols`, in `Workspace`);
+  clicking such a watchlist row says the source is gone; their quotes and alerts stay empty. Saving the layout again
+  drops the old symbols.
+- **Stored cache and settings.** `store/retired.rs` runs once at startup and deletes what Yahoo put in SQLite: every
+  `bars_cache` row whose key isn't a broker's (`dhan:…` / `zerodha:…`), the `symbol_meta` and `symbol_names` tables, its
+  `provider_settings` and the preferences only it used. Nothing the user wrote is touched.
+- **Defaults.** A bare ticker means Binance (`DEFAULT_PROVIDER`), which needs no account; a brand-new chart and the
+  starter watchlist are crypto. The TradingView watchlist importer maps the crypto exchanges and, with a broker set up,
+  NSE/BSE; everything else is reported as skipped.
+- **Company names** now come only from the brokers' instrument lists (`store/symbol_names.rs`); crypto and imported data
+  have none.
 
-### Yahoo Finance and rate limits
-
-Yahoo publishes **no rate limits** for the endpoints this app uses, and what users report varies with time and IP
-address. So the app doesn't aim at a number it can't verify; it keeps well below any reported figure and stops the
-moment Yahoo says stop. All of it lives in the Rust backend, in `gate.rs` and `market.rs`:
-
-- **Every Yahoo request goes through a `Gate`** (`gate.rs`, a pure state machine that takes the time as an argument, so
-  it is unit-tested without sleeping). It spaces request starts at least 250 ms apart, caps them at 60 per rolling
-  minute (our own ceiling, not Yahoo's), and *refuses* a request that would have to queue for more than 12 s instead of
-  building an unbounded backlog. A refused chart request falls back to the local bar cache.
-- **On HTTP 429 the gate closes**: nothing is sent to Yahoo until the pause ends — 30 s, doubling for each consecutive
-  429 up to 15 min, or the server's `Retry-After` if that is longer. Requests already queued are dropped when the 429
-  lands, and a stray success from before the pause doesn't reopen or reset it. Continuing to hit a limiter that has said
-  "stop" is what turns a short throttle into a block that lasts hours.
-- **Fewer requests.** Watchlist prices use `/v8/finance/spark`, which takes 20 symbols per request (a longer list is
-  chunked), instead of one chart request per symbol; results are reused for 20 s and symbol searches for 5 min.
-- **Merged history requests.** Simultaneous identical history requests share one fetch (`data/inflight.ts`) — a grid of
-  charts that all boot on the same symbol makes one request, not sixteen. It is not a cache: it only merges requests that
-  overlap in time.
-- **Shared polling.** Yahoo has no push feed, so live bars are polled. `data/livePoll.ts` gives every chart showing the
-  same symbol and timeframe one shared timer and one request per tick. Polling is skipped while the window is hidden,
-  slows down when the market is quiet, and backs off exponentially when polls fail.
-
-The knobs are the constants in `gate.rs` (`Limits::default`) and `market.rs` (`QUOTE_TTL`, `SEARCH_TTL`). Run a debug build
-and each request logs `yahoo request: <path>`, which is the easiest way to count what the app really sends.
+Don't bring back a source that reads an unofficial endpoint, and keep `yahoo` out of every provider list
+(`providers::spec("yahoo")` is tested to be absent).
 
 ### History on demand
 
@@ -99,12 +80,11 @@ by itself; scrolling past the oldest bar just shows empty space. `chart/historyB
 
 What the providers must do for this to work: Vela asks for "`limit` bars ending at `to`" with no start time
 (`isBackfillRequest`), and reads an *empty* answer as the start of history. So `lookbackMs` never uses a window shorter
-than the longest market closure (a chunk ending just after a weekend must not come back empty), and the backend turns
-Yahoo's "no data before the first trade" answers (HTTP 400 `Data doesn't exist for startDate…`, HTTP 422 for intraday
-windows past what Yahoo keeps) into an empty result rather than an error (`yahoo::is_window_without_data`). A real
-failure during a backfill is thrown, not toasted: Vela keeps what it has and the watcher retries later.
+than the longest market closure (a chunk ending just after a weekend must not come back empty), and a provider answers
+"nothing older" with an empty result rather than an error. A real failure during a backfill is thrown, not toasted: Vela
+keeps what it has and the watcher retries later.
 
-Each step is one request through the Yahoo `Gate`, so it stays inside the rate limits.
+Each step is one request, paced by the broker client's own throttle (`throttle.rs`), so it stays inside the broker's limits.
 
 ### Price alerts
 
@@ -230,8 +210,8 @@ be the moment to extract the shared connect/backoff/refcount loop into one.
 
 Vela speaks canonical timeframes — minutes as bare digits (`"5"`, `"60"`), and `D` / `W` / `M`. `lib/timeframes.ts`:
 
-- parses them, and maps one to a Yahoo interval plus, when Yahoo doesn't serve it natively, a group size (4h = four 60m
-  bars);
+- parses them, and maps one to what a broker serves natively plus, when it doesn't serve it, a group size
+  (`toDhanPlan`, `toKitePlan`: 4h = four 60m bars);
 - builds coarser bars from finer ones. Intraday grouping **restarts at every session open** (a 4h chart on a US stock
   is 09:30–13:30 then 13:30–close, not a fixed clock split), and uses the exchange's timezone offset to decide where
   a day begins.
@@ -250,7 +230,7 @@ One SQLite file (`charting.db`, in the OS's per-user app data folder), opened by
 | `pine_scripts` | The user's Pine Script library: name, kind (`indicator` / `strategy`) and source |
 | `watchlists`, `watchlist_items` | Lists and their symbols |
 | `datasets`, `dataset_bars` | Imported CSV data |
-| `bars_cache`, `symbol_meta` | Offline fallback for Yahoo and Dhan bars, and each symbol's exchange timezone |
+| `bars_cache` | Offline fallback for the brokers' bars (keys start `dhan:` / `zerodha:`) |
 | `provider_settings` | Per-provider `enabled` flag and non-secret configuration |
 | `provider_secrets_fallback` | Credentials, **only** when no OS keychain exists (unencrypted; the UI says so) |
 | `dhan_instruments` | Dhan's instrument list, for symbol search and `SecurityId` lookup |
@@ -274,7 +254,7 @@ With more than one cell, code must not assume "the chart": `ws.chart` is the *ac
 `market:changed` subscription on `cell:active`, `layout:changed` and `cell:created` — and per-chart tweaks (the softened
 grid lines) are applied to `ws.cells()`, not to one chart. Symbol picks from the search box or watchlist go to the
 active cell. Because new cells boot on the tab's symbol, a large grid asks for the same history many times at once;
-`data/inflight.ts` merges those into one request (see "Yahoo Finance and rate limits").
+the brokers' clients pace their own requests (`throttle.rs`), so the burst is spread out.
 
 **A layout never carries the theme.** The theme is an app-wide preference, so saving records no theme name and loading
 changes none. Vela's state would otherwise smuggle one in: `rendererConfig` holds the chart's background, text, grid and
@@ -345,5 +325,3 @@ properties on `<html>` and persists the choice. To add a theme, append one entry
   browser's file picker.
 - Broker credentials live in the OS keychain and are read only by the Rust backend; the web view never receives an access
   token, and the settings screen can't read one back.
-- Yahoo symbols are percent-encoded as a single URL path segment on the Rust side, so a hostile ticker can't alter the
-  request path.

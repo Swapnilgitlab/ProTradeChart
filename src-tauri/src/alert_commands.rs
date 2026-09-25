@@ -84,7 +84,7 @@ mod tests {
     fn valid() -> PriceAlert {
         PriceAlert {
             id: "a1".into(),
-            symbol: "yahoo:AAPL".into(),
+            symbol: "binance:BTCUSDT".into(),
             condition: "crossing_up".into(),
             price: 250.0,
             base_price: Some(240.0),

@@ -11,7 +11,7 @@ import {
 } from '../../lib/timeframes';
 
 /** Helpers shared by the providers that fetch bars through the Rust backend
- *  (Yahoo, Dhan): sizing a request, converting the response into what Vela
+ *  (Dhan, Zerodha): sizing a request, converting the response into what Vela
  *  draws, and clipping to the range Vela asked for. */
 
 export const DAY_MS = 24 * 60 * 60 * 1000;

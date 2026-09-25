@@ -1,4 +1,4 @@
-//! Plain data shapes shared between the store, the market client and the
+//! Plain data shapes shared between the store, the brokers' clients and the
 //! Tauri command layer. Everything serializes as camelCase so the TypeScript
 //! side never needs a mapping layer.
 
@@ -61,7 +61,7 @@ pub struct WatchlistSummary {
 #[serde(rename_all = "camelCase")]
 pub struct WatchlistItem {
     pub id: i64,
-    /// Fully-qualified chart symbol, e.g. `yahoo:AAPL` or `binance:BTCUSDT`.
+    /// Fully-qualified chart symbol, e.g. `binance:BTCUSDT` or `dhan:NSE:RELIANCE`.
     pub symbol: String,
     pub name: Option<String>,
 }
@@ -201,9 +201,6 @@ pub struct ProviderInfo {
     pub docs_url: Option<String>,
     /// `keychain` or `database` when any credential is stored.
     pub secret_storage: Option<String>,
-    /// Shown before the provider can be switched on, with a link to the terms themselves.
-    pub terms_notice: Option<String>,
-    pub terms_url: Option<String>,
 }
 
 // ---- Price alerts ----------------------------------------------------------

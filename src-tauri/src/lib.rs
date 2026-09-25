@@ -2,8 +2,6 @@ mod alert_commands;
 mod commands;
 mod db;
 mod dhan;
-mod gate;
-mod market;
 mod models;
 mod provider_commands;
 mod providers;
@@ -12,7 +10,6 @@ mod secrets;
 mod store;
 mod throttle;
 mod update_commands;
-mod yahoo;
 mod zerodha;
 mod zerodha_commands;
 
@@ -23,7 +20,6 @@ use tauri::{Emitter, Manager};
 use crate::db::Database;
 use crate::dhan::client::DhanClient;
 use crate::dhan::feed::{Feed, FeedConfig};
-use crate::market::Market;
 use crate::secrets::Secrets;
 use crate::zerodha::client::ZerodhaClient;
 use crate::zerodha::feed::{Feed as ZerodhaFeed, FeedConfig as ZerodhaFeedConfig};
@@ -64,12 +60,12 @@ pub fn run() {
             {
                 let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
                 store::watchlists::seed_starter_list_once(&mut conn)?;
+                store::retired::purge_yahoo_leftovers_once(&mut conn)?;
             }
             log::info!("database ready at {}", data_dir.display());
 
             app.manage(db);
             app.manage(Secrets::os());
-            app.manage(Market::new());
 
             let broker_http = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
@@ -149,9 +145,7 @@ pub fn run() {
             commands::save_dataset,
             commands::delete_dataset,
             commands::get_dataset_bars,
-            commands::fetch_bars,
-            commands::search_symbols,
-            commands::fetch_quotes,
+            commands::symbol_names,
             provider_commands::list_providers,
             provider_commands::save_provider_config,
             provider_commands::clear_provider_config,
@@ -168,6 +162,8 @@ pub fn run() {
             zerodha_commands::zerodha_status,
             zerodha_commands::zerodha_login_url,
             zerodha_commands::zerodha_complete_login,
+            zerodha_commands::zerodha_login_in_browser,
+            zerodha_commands::zerodha_redirect_url,
             zerodha_commands::zerodha_update_instruments,
             zerodha_commands::zerodha_search_instruments,
             zerodha_commands::zerodha_fetch_bars,

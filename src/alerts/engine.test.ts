@@ -13,7 +13,7 @@ const { AlertEngine } = await import('./engine');
 
 const alert = (over: Partial<PriceAlert> = {}): PriceAlert => ({
   id: 'a1',
-  symbol: 'yahoo:AAPL',
+  symbol: 'binance:BTCUSDT',
   condition: 'crossing_up',
   price: 100,
   basePrice: 90,
@@ -53,11 +53,11 @@ function setup(initial: PriceAlert[]) {
 describe('AlertEngine', () => {
   it('fires when the price crosses the level, and records it', async () => {
     const t = setup([alert()]);
-    t.prices.set('yahoo:AAPL', 99);
+    t.prices.set('binance:BTCUSDT', 99);
     await t.engine.poll();
     expect(t.fired).toHaveLength(0);
 
-    t.prices.set('yahoo:AAPL', 101);
+    t.prices.set('binance:BTCUSDT', 101);
     await t.engine.poll();
     expect(t.fired).toHaveLength(1);
     expect(t.fired[0][1]).toBe(101);
@@ -66,10 +66,10 @@ describe('AlertEngine', () => {
 
   it('fires a once-only alert one time, however long the price stays past the level', async () => {
     const t = setup([alert()]);
-    t.prices.set('yahoo:AAPL', 99);
+    t.prices.set('binance:BTCUSDT', 99);
     await t.engine.poll();
     for (const p of [101, 105, 110, 90, 101]) {
-      t.prices.set('yahoo:AAPL', p);
+      t.prices.set('binance:BTCUSDT', p);
       await t.engine.poll();
     }
     expect(t.fired).toHaveLength(1);
@@ -78,14 +78,14 @@ describe('AlertEngine', () => {
   it('measures the first sample against the price stored with the alert', async () => {
     // Created at 90; the app was closed while the price ran to 105.
     const t = setup([alert({ basePrice: 90 })]);
-    t.prices.set('yahoo:AAPL', 105);
+    t.prices.set('binance:BTCUSDT', 105);
     await t.engine.poll();
     expect(t.fired).toHaveLength(1);
   });
 
   it('does not fire on the first sample when the alert has no base price, and remembers where it started', async () => {
     const t = setup([alert({ basePrice: null })]);
-    t.prices.set('yahoo:AAPL', 105);
+    t.prices.set('binance:BTCUSDT', 105);
     await t.engine.poll();
     expect(t.fired).toHaveLength(0);
     expect(t.store.get('a1')?.basePrice).toBe(105);
@@ -93,50 +93,50 @@ describe('AlertEngine', () => {
 
   it('does not fire when the price was already past the level from the start', async () => {
     const t = setup([alert({ basePrice: 120 })]);
-    t.prices.set('yahoo:AAPL', 125);
+    t.prices.set('binance:BTCUSDT', 125);
     await t.engine.poll();
     expect(t.fired).toHaveLength(0);
   });
 
   it('leaves paused and already-triggered alerts alone, and does not even ask for their prices', async () => {
     const t = setup([alert({ id: 'p', status: 'paused' }), alert({ id: 't', status: 'triggered' })]);
-    t.prices.set('yahoo:AAPL', 105);
+    t.prices.set('binance:BTCUSDT', 105);
     await t.engine.poll();
     expect(t.fired).toHaveLength(0);
     expect(t.priceRequests).toHaveLength(0);
   });
 
   it('asks for each symbol once, however many alerts watch it', async () => {
-    const t = setup([alert({ id: '1' }), alert({ id: '2', price: 110 }), alert({ id: '3', symbol: 'yahoo:MSFT' })]);
+    const t = setup([alert({ id: '1' }), alert({ id: '2', price: 110 }), alert({ id: '3', symbol: 'binance:ETHUSDT' })]);
     await t.engine.poll();
-    expect(t.priceRequests).toEqual([['yahoo:AAPL', 'yahoo:MSFT']]);
+    expect(t.priceRequests).toEqual([['binance:BTCUSDT', 'binance:ETHUSDT']]);
   });
 
   it('skips a symbol that cannot be priced without disturbing the others', async () => {
     const t = setup([alert({ id: 'a', symbol: 'dhan:NSE:X' }), alert({ id: 'b' })]);
-    t.prices.set('yahoo:AAPL', 105); // dhan:NSE:X has no price
+    t.prices.set('binance:BTCUSDT', 105); // dhan:NSE:X has no price
     await t.engine.poll();
     expect(t.fired.map(([a]) => a.id)).toEqual(['b']);
   });
 
   it('re-arms an every-time alert and fires it again on the next crossing once the cooldown has passed', async () => {
     const t = setup([alert({ mode: 'every', condition: 'crossing' })]);
-    t.prices.set('yahoo:AAPL', 99);
+    t.prices.set('binance:BTCUSDT', 99);
     await t.engine.poll();
-    t.prices.set('yahoo:AAPL', 101);
+    t.prices.set('binance:BTCUSDT', 101);
     await t.engine.poll();
     expect(t.fired).toHaveLength(1);
     expect(t.store.get('a1')?.status).toBe('active');
 
     // Back below the level straight away: inside the cooldown, so no second ring.
     t.clock.now += 5_000;
-    t.prices.set('yahoo:AAPL', 99);
+    t.prices.set('binance:BTCUSDT', 99);
     await t.engine.poll();
     expect(t.fired).toHaveLength(1);
 
     // Above again after the cooldown: fires.
     t.clock.now += 120_000;
-    t.prices.set('yahoo:AAPL', 101);
+    t.prices.set('binance:BTCUSDT', 101);
     await t.engine.poll();
     expect(t.fired).toHaveLength(2);
     expect(t.store.get('a1')?.triggerCount).toBe(2);
@@ -144,11 +144,11 @@ describe('AlertEngine', () => {
 
   it('does not announce an alert it failed to save, and tries the same crossing again', async () => {
     const t = setup([alert()]);
-    t.prices.set('yahoo:AAPL', 99);
+    t.prices.set('binance:BTCUSDT', 99);
     await t.engine.poll();
 
     t.save.mockRejectedValueOnce(new Error('database is locked'));
-    t.prices.set('yahoo:AAPL', 101);
+    t.prices.set('binance:BTCUSDT', 101);
     await t.engine.poll();
     expect(t.fired).toHaveLength(0);
     expect(t.store.get('a1')?.status).toBe('active');
@@ -205,13 +205,13 @@ describe('AlertEngine', () => {
 
   it('forgets the last price of an alert that is deleted or paused', async () => {
     const t = setup([alert()]);
-    t.prices.set('yahoo:AAPL', 99);
+    t.prices.set('binance:BTCUSDT', 99);
     await t.engine.poll(); // remembers 99
     t.store.set('a1', alert({ status: 'paused' }));
     await t.engine.poll();
     // Resumed after the price moved on: measured from the stored base again, not from the stale 99.
     t.store.set('a1', alert({ basePrice: 120 }));
-    t.prices.set('yahoo:AAPL', 125);
+    t.prices.set('binance:BTCUSDT', 125);
     await t.engine.poll();
     expect(t.fired).toHaveLength(0);
   });

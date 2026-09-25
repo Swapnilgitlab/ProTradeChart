@@ -7,5 +7,7 @@ pub mod datasets;
 pub mod layouts;
 pub mod preferences;
 pub mod provider_settings;
+pub mod retired;
 pub mod scripts;
+pub mod symbol_names;
 pub mod watchlists;

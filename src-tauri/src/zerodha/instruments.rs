@@ -189,14 +189,45 @@ fn from_row(r: &rusqlite::Row) -> rusqlite::Result<Instrument> {
     })
 }
 
-/// Looks an instrument up by chart ticker (`NSE:RELIANCE`, or just `RELIANCE`).
-pub fn resolve(conn: &Connection, ticker: &str) -> rusqlite::Result<Option<Instrument>> {
+/// A stock NSE trades in a special segment is listed with its series after a
+/// hyphen — `HFCL` is `NSE:HFCL-BE`, `KODYTECH` is `NSE:KODYTECH-ST` — while lists,
+/// imports and people use the bare name. Only a two-letter series counts, so `BAJAJ`
+/// is not taken for `BAJAJ-AUTO`, a different company. `-BE` wins if there are several.
+fn nse_series_ticker(conn: &Connection, symbol: &str) -> rusqlite::Result<Option<String>> {
+    conn.query_row(
+        "SELECT ticker FROM zerodha_instruments
+         WHERE exchange = 'NSE' AND instrument = 'EQUITY' AND ticker LIKE ?1 ESCAPE '\\'
+         ORDER BY (ticker LIKE '%-BE') DESC, ticker LIMIT 1",
+        params![format!("NSE:{}-__", escape_like(symbol))],
+        |r| r.get(0),
+    )
+    .optional()
+}
+
+fn by_ticker(conn: &Connection, ticker: &str) -> rusqlite::Result<Option<Instrument>> {
     conn.query_row(
         &format!("SELECT {COLUMNS} FROM zerodha_instruments WHERE ticker = ?1"),
-        params![normalize_ticker(ticker)],
+        params![ticker],
         from_row,
     )
     .optional()
+}
+
+/// Looks an instrument up by chart ticker (`NSE:RELIANCE`, or just `RELIANCE`). A stock
+/// NSE lists under a series (`NSE:HFCL-BE`) is found by its bare name too, so a list or
+/// an import that says `NSE:HFCL` charts, quotes and streams the same as any other.
+pub fn resolve(conn: &Connection, ticker: &str) -> rusqlite::Result<Option<Instrument>> {
+    let key = normalize_ticker(ticker);
+    if let Some(found) = by_ticker(conn, &key)? {
+        return Ok(Some(found));
+    }
+    match key.strip_prefix("NSE:") {
+        Some(symbol) => match nse_series_ticker(conn, symbol)? {
+            Some(series) => by_ticker(conn, &series),
+            None => Ok(None),
+        },
+        None => Ok(None),
+    }
 }
 
 /// Lists up to this long are "short": they leave room for other providers' results.
@@ -302,6 +333,71 @@ mod tests {
             r#"146251783,571296,ALUMINI26SEPFUT,"ALUMINI",0,2026-09-30,0,0.05,1,FUT,MCX-FUT,MCX"#,
         ]
         .join("\n")
+    }
+
+    /// The sample list plus stocks NSE trades in special series.
+    fn with_series_stocks() -> Database {
+        let extra = [
+            HEADER,
+            r#"1000001,3001,HFCL-BE,"HFCL LIMITED",0,,0,0.05,1,EQ,NSE,NSE"#,
+            r#"1000002,3002,KODYTECH-ST,"KODY TECHNOLAB",0,,0,0.05,1,EQ,NSE,NSE"#,
+            r#"1000003,3003,HFCL-BZ,"HFCL LIMITED (OTHER SERIES)",0,,0,0.05,1,EQ,NSE,NSE"#,
+            r#"1000004,3004,BAJAJ,"BAJAJ LIMITED",0,,0,0.05,1,EQ,BSE,BSE"#,
+        ]
+        .join("\n");
+        let mut all = parsed();
+        all.extend(parse_master(extra.as_bytes(), "2026-09-19").unwrap());
+        let db = Database::open_in_memory().unwrap();
+        replace_all(&mut db.conn.lock().unwrap(), &all).unwrap();
+        db
+    }
+
+    fn found(db: &Database, ticker: &str) -> Option<String> {
+        resolve(&db.conn.lock().unwrap(), ticker).unwrap().map(|i| i.ticker)
+    }
+
+    #[test]
+    fn a_stock_listed_under_an_nse_series_is_found_by_its_bare_name() {
+        let db = with_series_stocks();
+        assert_eq!(found(&db, "NSE:KODYTECH").as_deref(), Some("NSE:KODYTECH-ST"));
+        assert_eq!(
+            found(&db, "kodytech").as_deref(),
+            Some("NSE:KODYTECH-ST"),
+            "bare and lower-case"
+        );
+        // The bare name and the full one are the same instrument.
+        let bare = resolve(&db.conn.lock().unwrap(), "NSE:KODYTECH").unwrap().unwrap();
+        let full = resolve(&db.conn.lock().unwrap(), "NSE:KODYTECH-ST").unwrap().unwrap();
+        assert_eq!(bare.token, full.token);
+    }
+
+    #[test]
+    fn with_several_series_the_be_one_is_taken() {
+        assert_eq!(found(&with_series_stocks(), "NSE:HFCL").as_deref(), Some("NSE:HFCL-BE"));
+    }
+
+    #[test]
+    fn an_exact_match_always_beats_a_series_one() {
+        let db = with_series_stocks();
+        assert_eq!(found(&db, "NSE:RELIANCE").as_deref(), Some("NSE:RELIANCE"));
+        assert_eq!(found(&db, "NSE:BAJAJ-AUTO").as_deref(), Some("NSE:BAJAJ-AUTO"));
+    }
+
+    #[test]
+    fn a_series_match_never_borrows_a_different_company_that_shares_a_prefix() {
+        let db = with_series_stocks();
+        // NSE:BAJAJ-AUTO exists, but it is not NSE:BAJAJ, whose only listing is BSE's.
+        assert_eq!(found(&db, "NSE:BAJAJ"), None);
+        assert_eq!(found(&db, "BSE:BAJAJ").as_deref(), Some("BSE:BAJAJ"));
+        assert_eq!(found(&db, "NSE:BAJ"), None);
+    }
+
+    #[test]
+    fn only_nse_stocks_get_the_series_fallback() {
+        let db = with_series_stocks();
+        assert_eq!(found(&db, "BSE:HFCL"), None);
+        assert_eq!(found(&db, "NFO:HFCL"), None);
+        assert_eq!(found(&db, "NSE:NOSUCHSTOCK"), None);
     }
 
     fn parsed() -> Vec<Instrument> {

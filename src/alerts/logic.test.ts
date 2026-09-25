@@ -16,7 +16,7 @@ import {
 
 const alert = (over: Partial<PriceAlert> = {}): PriceAlert => ({
   id: 'a1',
-  symbol: 'yahoo:AAPL',
+  symbol: 'binance:BTCUSDT',
   condition: 'crossing_up',
   price: 100,
   basePrice: 90,
@@ -136,7 +136,7 @@ describe('afterFiring', () => {
 describe('newAlert', () => {
   it('starts active, unfired, and measuring from the current price', () => {
     const a = newAlert({
-      id: 'x', symbol: 'yahoo:AAPL', condition: 'crossing_up', price: 250, basePrice: 240,
+      id: 'x', symbol: 'binance:BTCUSDT', condition: 'crossing_up', price: 250, basePrice: 240,
       message: '  earnings  ', mode: 'once', now: 42,
     });
     expect(a).toMatchObject({
@@ -147,7 +147,7 @@ describe('newAlert', () => {
 });
 
 describe('draftProblem and parsePrice', () => {
-  const ok = { symbol: 'yahoo:AAPL', price: '250.5', message: '' };
+  const ok = { symbol: 'binance:BTCUSDT', price: '250.5', message: '' };
 
   it('accepts a good draft', () => {
     expect(draftProblem(ok)).toBeNull();

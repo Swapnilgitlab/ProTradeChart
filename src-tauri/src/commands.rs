@@ -1,17 +1,15 @@
 //! Tauri command layer: thin wrappers that lock the database, call into
 //! `store` / `market`, and flatten errors to strings for the frontend.
 
+use std::collections::HashMap;
 use std::sync::MutexGuard;
 
 use rusqlite::Connection;
 use tauri::{AppHandle, Manager, State};
 
-use crate::db::{now_ms, Database};
-use crate::market::Market;
+use crate::db::Database;
 use crate::models::*;
-use crate::providers;
-use crate::store::{bars_cache, datasets, layouts, preferences, scripts, watchlists};
-use crate::yahoo;
+use crate::store::{datasets, layouts, preferences, scripts, symbol_names, watchlists};
 
 fn lock(db: &Database) -> Result<MutexGuard<'_, Connection>, String> {
     db.conn.lock().map_err(|e| e.to_string())
@@ -169,126 +167,11 @@ pub fn get_dataset_bars(
     sql(datasets::bars(&*lock(&db)?, &ticker, from_ms, to_ms, limit))
 }
 
-// ---- Market data (Yahoo Finance) -------------------------------------------
+// ---- Symbol names ----------------------------------------------------------
 
-/// Yahoo Finance is opt-in: its data comes under Yahoo's terms, which the user
-/// reads before switching it on. The check is made here, before any request,
-/// so no window — however stale its idea of the settings — can reach Yahoo
-/// while it is off.
-const YAHOO_OFF: &str = "Yahoo Finance is off. Turn it on in Data providers (the plug icon) to chart Yahoo symbols.";
-
-fn yahoo_is_on(db: &Database) -> Result<bool, String> {
-    providers::is_on(&*lock(db)?, "yahoo")
-}
-
-/// Bars for `symbol` at a Yahoo `interval` (`1m`…`1mo`). The requested window
-/// is clamped to what Yahoo serves for that interval. If the network request
-/// fails, whatever is in the local cache is returned instead (flagged
-/// `from_cache`) so the chart still draws offline.
+/// Company names already known for `symbols` (`provider:TICKER`): the brokers'
+/// instrument lists carry them. A symbol with no known name is simply absent.
 #[tauri::command]
-pub async fn fetch_bars(
-    symbol: String,
-    interval: String,
-    from_ms: Option<i64>,
-    to_ms: Option<i64>,
-    db: State<'_, Database>,
-    market: State<'_, Market>,
-) -> Result<BarsResponse, String> {
-    if !yahoo_is_on(&db)? {
-        return Err(YAHOO_OFF.to_string());
-    }
-    if yahoo::interval_limits(&interval).is_none() {
-        return Err(format!("Yahoo Finance doesn't serve a '{interval}' interval"));
-    }
-    // A window entirely outside Yahoo's history for this interval is simply empty.
-    let Some((period1, period2)) = yahoo::plan_window(&interval, from_ms, to_ms, now_ms()) else {
-        return Ok(BarsResponse {
-            bars: Vec::new(),
-            gmt_offset: 0,
-            timezone: None,
-            from_cache: false,
-        });
-    };
-
-    match market.fetch_chart(&symbol, &interval, period1, period2).await {
-        Ok(data) => {
-            log::debug!(
-                "fetch_bars {symbol} {interval} requested {period1}..{period2} -> {} bars (first {:?}, last {:?})",
-                data.bars.len(),
-                data.bars.first().map(|b| b.time / 1000),
-                data.bars.last().map(|b| b.time / 1000)
-            );
-            {
-                let mut conn = lock(&db)?;
-                if let Err(e) = bars_cache::put_meta(&conn, &symbol, data.gmt_offset, data.timezone.as_deref()) {
-                    log::warn!("could not remember the timezone for {symbol}: {e}");
-                }
-                if let Err(e) = bars_cache::put(&mut conn, &symbol, &interval, &data.bars) {
-                    log::warn!("could not cache bars for {symbol}: {e}");
-                }
-            }
-            Ok(BarsResponse {
-                bars: data.bars,
-                gmt_offset: data.gmt_offset,
-                timezone: data.timezone,
-                from_cache: false,
-            })
-        }
-        // Scrolling back past the start of a symbol's history asks for a window
-        // with nothing in it. That's an answer (no older bars), not a failure to
-        // report or to paper over with cached data.
-        Err(fetch_error) if yahoo::is_window_without_data(&fetch_error) => Ok(BarsResponse {
-            bars: Vec::new(),
-            gmt_offset: 0,
-            timezone: None,
-            from_cache: false,
-        }),
-        Err(fetch_error) => {
-            let conn = lock(&db)?;
-            let cached = sql(bars_cache::get(&conn, &symbol, &interval, from_ms, to_ms, None))?;
-            if cached.is_empty() {
-                return Err(fetch_error);
-            }
-            let (gmt_offset, timezone) = sql(bars_cache::get_meta(&conn, &symbol))?.unwrap_or((0, None));
-            log::info!(
-                "serving {} cached {interval} bars for {symbol}: {fetch_error}",
-                cached.len()
-            );
-            Ok(BarsResponse {
-                bars: cached,
-                gmt_offset,
-                timezone,
-                from_cache: true,
-            })
-        }
-    }
-}
-
-#[tauri::command]
-pub async fn search_symbols(
-    query: String,
-    limit: Option<u32>,
-    db: State<'_, Database>,
-    market: State<'_, Market>,
-) -> Result<Vec<SymbolMatch>, String> {
-    let query = query.trim();
-    if query.is_empty() || !yahoo_is_on(&db)? {
-        return Ok(Vec::new());
-    }
-    market.search(query, limit.unwrap_or(8).clamp(1, 25)).await
-}
-
-#[tauri::command]
-pub async fn fetch_quotes(
-    symbols: Vec<String>,
-    db: State<'_, Database>,
-    market: State<'_, Market>,
-) -> Result<Vec<Quote>, String> {
-    if !yahoo_is_on(&db)? {
-        return Ok(symbols
-            .iter()
-            .map(|s| yahoo::quote_error(s, "Yahoo Finance is off"))
-            .collect());
-    }
-    Ok(market.quotes(&symbols).await)
+pub fn symbol_names(symbols: Vec<String>, db: State<Database>) -> Result<HashMap<String, String>, String> {
+    sql(symbol_names::known(&*lock(&db)?, &symbols))
 }

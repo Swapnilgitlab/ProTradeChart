@@ -16,6 +16,7 @@
 //! credentials during the WebSocket handshake, where Dhan accepts the socket
 //! and silently drops it.
 
+pub mod callback;
 pub mod client;
 pub mod feed;
 pub mod instruments;

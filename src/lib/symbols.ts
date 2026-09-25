@@ -1,12 +1,12 @@
 /** A chart symbol is always `provider:TICKER` — the provider prefix is what
  *  tells Vela (and this app) which data source serves it. */
 
-export type ProviderId = 'yahoo' | 'binance' | 'coinbase' | 'hyperliquid' | 'csv' | 'dhan' | 'zerodha';
+export type ProviderId = 'binance' | 'coinbase' | 'hyperliquid' | 'csv' | 'dhan' | 'zerodha';
 
-export const DEFAULT_PROVIDER: ProviderId = 'yahoo';
+/** What a bare ticker means. It needs no account and no setup, so it always works. */
+export const DEFAULT_PROVIDER: ProviderId = 'binance';
 
 export const PROVIDER_LABELS: Record<ProviderId, string> = {
-  yahoo: 'Yahoo Finance',
   binance: 'Binance',
   coinbase: 'Coinbase',
   hyperliquid: 'Hyperliquid',
@@ -46,6 +46,16 @@ export function displayTicker(symbol: string): string {
 
 export function providerLabel(provider: string): string {
   return PROVIDER_LABELS[provider as ProviderId] ?? provider;
+}
+
+/** Whether the app has a data source of this name. A saved layout, watchlist or alert can
+ *  hold a symbol from a source that has since been removed; it can't be loaded. */
+export function isSupportedProvider(provider: string): provider is ProviderId {
+  return provider in PROVIDER_LABELS;
+}
+
+export function isSupportedSymbol(symbol: string): boolean {
+  return isSupportedProvider(splitSymbol(symbol).provider);
 }
 
 /** Turns whatever a user typed into a `provider:TICKER` symbol. A bare ticker

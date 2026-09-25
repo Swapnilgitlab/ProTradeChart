@@ -10,7 +10,6 @@ import {
   timeframeToString,
   toDhanPlan,
   toKitePlan,
-  toYahooPlan,
 } from './timeframes';
 
 const utc = exchangeDayKey(0);
@@ -48,32 +47,6 @@ describe('parseTimeframe', () => {
     for (const tf of ['1', '60', 'D', 'W', 'M']) {
       expect(timeframeToString(parseTimeframe(tf)!)).toBe(tf);
     }
-  });
-});
-
-describe('toYahooPlan', () => {
-  const plan = (tf: string) => toYahooPlan(parseTimeframe(tf)!);
-
-  it('uses native intervals directly', () => {
-    expect(plan('1')).toEqual({ interval: '1m' });
-    expect(plan('15')).toEqual({ interval: '15m' });
-    expect(plan('60')).toEqual({ interval: '60m' });
-    expect(plan('90')).toEqual({ interval: '90m' });
-    expect(plan('D')).toEqual({ interval: '1d' });
-    expect(plan('W')).toEqual({ interval: '1wk' });
-    expect(plan('M')).toEqual({ interval: '1mo' });
-  });
-
-  it('builds non-native intraday timeframes from the coarsest divisor', () => {
-    expect(plan('240')).toEqual({ interval: '60m', groupSize: 4 });
-    expect(plan('120')).toEqual({ interval: '60m', groupSize: 2 });
-    expect(plan('45')).toEqual({ interval: '15m', groupSize: 3 });
-    expect(plan('10')).toEqual({ interval: '5m', groupSize: 2 });
-    expect(plan('3')).toEqual({ interval: '1m', groupSize: 3 });
-  });
-
-  it('refuses anything longer than a trading day', () => {
-    expect(plan('2880')).toBeNull();
   });
 });
 

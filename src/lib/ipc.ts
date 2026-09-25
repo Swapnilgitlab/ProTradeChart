@@ -44,7 +44,7 @@ export interface WatchlistSummary {
 
 export interface WatchlistItem {
   id: number;
-  /** Fully-qualified chart symbol, e.g. `yahoo:AAPL`. */
+  /** Fully-qualified chart symbol, e.g. `binance:BTCUSDT`. */
   symbol: string;
   name: string | null;
 }
@@ -170,14 +170,11 @@ export const deleteDataset = (ticker: string) => invoke<void>('delete_dataset', 
 export const getDatasetBars = (ticker: string, fromMs?: number, toMs?: number, limit?: number) =>
   invoke<DatasetBars | null>('get_dataset_bars', { ticker, fromMs, toMs, limit });
 
-// ---- Market data (Yahoo Finance) -------------------------------------------
+// ---- Symbol names ----------------------------------------------------------
 
-export const fetchBars = (symbol: string, interval: string, fromMs?: number, toMs?: number) =>
-  invoke<BarsResponse>('fetch_bars', { symbol, interval, fromMs, toMs });
-
-export const searchYahooSymbols = (query: string, limit = 8) => invoke<SymbolMatch[]>('search_symbols', { query, limit });
-
-export const fetchYahooQuotes = (symbols: string[]) => invoke<Quote[]>('fetch_quotes', { symbols });
+/** Company names for `symbols` (`provider:TICKER`), keyed by symbol; a symbol with no known
+ *  name is absent. Only the brokers' instrument lists carry names. */
+export const getSymbolNames = (symbols: string[]) => invoke<Record<string, string>>('symbol_names', { symbols });
 
 // ---- Data providers --------------------------------------------------------
 
@@ -214,10 +211,6 @@ export interface ProviderInfo {
   docsUrl: string | null;
   /** Where credentials are kept: the OS `keychain`, or (unencrypted) the `database`. */
   secretStorage: 'keychain' | 'database' | null;
-  /** Set for a source whose data comes under someone else's terms: shown, and
-   *  accepted, before it can be switched on. */
-  termsNotice: string | null;
-  termsUrl: string | null;
 }
 
 export interface TestResult {
@@ -319,6 +312,14 @@ export const dhanUnsubscribe = (ticker: string) => invoke<void>('dhan_unsubscrib
 export const zerodhaStatus = () => invoke<ZerodhaStatus>('zerodha_status');
 
 export const zerodhaLoginUrl = () => invoke<string>('zerodha_login_url');
+
+/** The redirect URL to register on the Kite app so the app can catch the login itself. */
+export const zerodhaRedirectUrl = () => invoke<string>('zerodha_redirect_url');
+
+/** Opens Zerodha's login page and waits for the browser to come back with a
+ *  request token, then saves the day's access token. Rejects if the login is
+ *  never finished, or the Kite app redirects somewhere else. */
+export const zerodhaLoginInBrowser = () => invoke<{ tokenExpiresAt: number }>('zerodha_login_in_browser');
 
 /** `pasted` is the address Zerodha redirected to after login, or just its request token. */
 export const zerodhaCompleteLogin = (pasted: string) =>

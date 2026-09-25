@@ -130,10 +130,9 @@ export function AboutDialog({ onClose }: Props) {
         </button>
       </p>
       <p className="notice">
-        Market data comes from the sources you turn on: Binance, Coinbase and Hyperliquid for crypto; Yahoo Finance&rsquo;s
-        public endpoints, if you enable them (ProTradeChart is not affiliated with Yahoo, and Yahoo&rsquo;s terms apply); and
-        Dhan or Zerodha with your own account. Prices can be delayed or wrong. Everything here is for information only and
-        is not financial advice.
+        Market data comes from the sources you turn on: Binance, Coinbase and Hyperliquid for crypto, and Dhan or Zerodha
+        with your own account. Prices can be delayed or wrong. Everything here is for information only and is not
+        financial advice.
       </p>
     </Dialog>
   );

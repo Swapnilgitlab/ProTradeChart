@@ -4,7 +4,6 @@ import { CoinbaseProvider } from '@luxalgo/vela/providers/coinbase';
 import { HyperliquidProvider } from '@luxalgo/vela/providers/hyperliquid';
 import { CsvProvider } from './csv';
 import { DhanProvider } from './dhan';
-import { YahooProvider } from './yahoo';
 import { ZerodhaProvider } from './zerodha';
 import type { ProviderId } from '../../lib/symbols';
 
@@ -19,7 +18,6 @@ import type { ProviderId } from '../../lib/symbols';
  *  fail to resolve. Whether a provider is *offered* — in search, watchlists —
  *  is decided by `data/providerStatus`. */
 const instances: Record<ProviderId, DataProvider> = {
-  yahoo: new YahooProvider(),
   binance: withoutRemoteIcons(new BinanceProvider()),
   coinbase: withoutRemoteIcons(new CoinbaseProvider()),
   hyperliquid: withoutRemoteIcons(new HyperliquidProvider()),
@@ -31,7 +29,6 @@ const instances: Record<ProviderId, DataProvider> = {
 /** Registered with every VelaWorkspace as `providers` — the keys are the
  *  `provider:` prefixes symbols carry. */
 export const providerFactories: Record<ProviderId, () => DataProvider> = {
-  yahoo: () => instances.yahoo,
   binance: () => instances.binance,
   coinbase: () => instances.coinbase,
   hyperliquid: () => instances.hyperliquid,

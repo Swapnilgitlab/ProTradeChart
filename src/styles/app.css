@@ -112,6 +112,27 @@ a {
 .btn:hover:not(:disabled) {
   background: var(--surface-hover);
 }
+/* A button small enough to sit inside a line of help text. */
+.btn-tiny {
+  height: 20px;
+  padding: 0 7px;
+  gap: 4px;
+  font-size: 11px;
+  vertical-align: baseline;
+}
+
+/* The fold-away manual login, for a Kite app that redirects elsewhere. */
+.prov-manual {
+  margin-top: 12px;
+}
+.prov-manual > summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+.prov-manual > summary:hover {
+  color: var(--text-primary);
+}
+
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
@@ -551,6 +572,22 @@ a {
   min-height: 34px;
   cursor: pointer;
 }
+/* The company name beneath Vela's symbol watermark (chart/watermarkName.ts). It
+   sits inside the mark, so it shares its colour, faintness and fitted size. */
+.watermark-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.36em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.watchlist-note {
+  margin: 0;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+}
 .watchlist-row:hover {
   background: var(--surface-hover);
 }
@@ -703,15 +740,6 @@ a {
   margin: 4px 0 0;
   padding-left: 18px;
 }
-.terms-notice p,
-.terms-confirm p {
-  margin: 0 0 6px;
-  line-height: 1.5;
-}
-.terms-confirm {
-  border-color: var(--accent);
-}
-
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

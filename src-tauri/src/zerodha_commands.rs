@@ -7,7 +7,8 @@ use std::sync::MutexGuard;
 
 use rusqlite::Connection;
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::db::{now_ms, Database};
 use crate::dhan::protocol::ist_date;
@@ -17,6 +18,7 @@ use crate::providers;
 use crate::secrets::Secrets;
 use crate::store::bars_cache;
 use crate::store::provider_settings::{self as settings, Table};
+use crate::zerodha::callback;
 use crate::zerodha::client::{Credentials, ZerodhaClient};
 use crate::zerodha::feed::{Feed, StatusEvent};
 use crate::zerodha::instruments::{self, Instrument};
@@ -128,6 +130,36 @@ pub struct LoginResult {
     pub token_expires_at: i64,
 }
 
+/// The URL the user registers as their Kite app's redirect URL, so the app can
+/// catch the login itself.
+#[tauri::command]
+pub fn zerodha_redirect_url() -> String {
+    callback::redirect_url()
+}
+
+/// The whole login, without copy-and-paste: opens Zerodha's page in the
+/// browser, catches the redirect it comes back to, and saves the access token.
+/// Only works when the Kite app's redirect URL is [`callback::redirect_url`];
+/// `zerodha_complete_login` remains for anyone whose is something else.
+#[tauri::command]
+pub async fn zerodha_login_in_browser(
+    app: AppHandle,
+    db: State<'_, Database>,
+    secrets: State<'_, Secrets>,
+    client: State<'_, ZerodhaClient>,
+    feed: State<'_, Feed>,
+) -> Result<LoginResult, String> {
+    let (api_key, api_secret) = login_credentials(&db, &secrets)?;
+    // Listening starts before the browser does, so a fast login can't arrive
+    // before there is anything to catch it.
+    let listener = callback::listen().await?;
+    app.opener()
+        .open_url(login_url(&api_key), None::<&str>)
+        .map_err(|e| format!("Couldn't open your browser: {e}"))?;
+    let request_token = callback::wait_for_request_token(listener, callback::WAIT).await?;
+    save_access_token(&api_key, &api_secret, &request_token, &db, &secrets, &client, &feed).await
+}
+
 /// Finishes a login: trades the `request_token` Zerodha sent the browser to
 /// (pasted as the whole address or bare) for an access token, and saves it.
 #[tauri::command]
@@ -139,21 +171,37 @@ pub async fn zerodha_complete_login(
     feed: State<'_, Feed>,
 ) -> Result<LoginResult, String> {
     let request_token = extract_request_token(&pasted)?;
-    let (api_key, api_secret) = {
-        let conn = lock(&db)?;
-        let get =
-            |key: &str| sql(providers::credential(&conn, &secrets, ZERODHA, key)).map(|v| v.filter(|s| !s.is_empty()));
-        (
-            get("apiKey")?.ok_or("Enter and save your API key first.")?,
-            get("apiSecret")?.ok_or("Enter and save your API secret first — it is needed to log in from here.")?,
-        )
-    };
+    let (api_key, api_secret) = login_credentials(&db, &secrets)?;
+    save_access_token(&api_key, &api_secret, &request_token, &db, &secrets, &client, &feed).await
+}
+
+/// The API key and secret a login needs. The secret never leaves Rust: it is
+/// only ever used here, to sign the token exchange.
+fn login_credentials(db: &Database, secrets: &Secrets) -> Result<(String, String), String> {
+    let conn = lock(db)?;
+    let get = |key: &str| sql(providers::credential(&conn, secrets, ZERODHA, key)).map(|v| v.filter(|s| !s.is_empty()));
+    Ok((
+        get("apiKey")?.ok_or("Enter and save your API key first.")?,
+        get("apiSecret")?.ok_or("Enter and save your API secret first — it is needed to log in from here.")?,
+    ))
+}
+
+/// Trades a one-time request token for the day's access token and saves it.
+async fn save_access_token(
+    api_key: &str,
+    api_secret: &str,
+    request_token: &str,
+    db: &Database,
+    secrets: &Secrets,
+    client: &ZerodhaClient,
+    feed: &Feed,
+) -> Result<LoginResult, String> {
     let access_token = client
-        .exchange_token(&api_key, &api_secret, &request_token)
+        .exchange_token(api_key, api_secret, request_token)
         .await
         .map_err(|e| login_error(&e))?;
     {
-        let conn = lock(&db)?;
+        let conn = lock(db)?;
         sql(secrets.set(&conn, ZERODHA, "accessToken", &access_token))?;
         sql(note_token_saved(&conn))?;
     }

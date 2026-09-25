@@ -82,8 +82,8 @@ export class AlertEngine {
   }
 }
 
-/** How often prices are sampled. Yahoo quotes are cached for 20 s in the
- *  backend, so sampling faster would mostly re-read the same numbers. */
+/** How often prices are sampled: the same cadence the watchlist refreshes at, so a
+ *  data source isn't asked more often than the numbers change. */
 const POLL_MS = 20_000;
 /** Saving an alert (which the engine itself does when one fires) announces a
  *  change; wait for the burst to settle before looking again. */

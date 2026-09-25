@@ -57,40 +57,6 @@ export function timeframeMs(tf: Timeframe): number {
   }
 }
 
-/** How Yahoo Finance should be asked for a timeframe. `groupSize` is set when
- *  the timeframe isn't native to Yahoo and must be built by grouping that many
- *  consecutive native bars within a trading day (e.g. 4h = 4 × 60m). */
-export interface YahooPlan {
-  interval: string;
-  groupSize?: number;
-}
-
-/** Yahoo's native intraday bar sizes, largest first so the coarsest divisor
- *  wins. 90m is deliberately absent: it only reaches back 60 days, so it's used
- *  for an exact 90m request and never as a stepping stone to something else
- *  that 60m (730 days of history) could build. */
-const NATIVE_MINUTES = [60, 30, 15, 5, 2, 1];
-
-export function toYahooPlan(tf: Timeframe): YahooPlan | null {
-  switch (tf.kind) {
-    case 'day':
-      return { interval: '1d' };
-    case 'week':
-      return { interval: '1wk' };
-    case 'month':
-      return { interval: '1mo' };
-    case 'minutes': {
-      // Anything past a trading day can't be built from intraday bars.
-      if (tf.minutes > 24 * 60) return null;
-      if (tf.minutes === 90) return { interval: '90m' };
-      const base = NATIVE_MINUTES.find((m) => tf.minutes % m === 0);
-      if (base === undefined) return null;
-      const interval = `${base}m`;
-      return base === tf.minutes ? { interval } : { interval, groupSize: tf.minutes / base };
-    }
-  }
-}
-
 // ---- Resampling ------------------------------------------------------------
 
 export type DayKeyFn = (timeMs: number) => string;

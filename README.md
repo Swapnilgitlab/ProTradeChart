@@ -17,9 +17,9 @@ subscription.
 - **Serious charts.** Candles, bars, line, area, baseline and Heikin Ashi; a full drawing toolbar (lines, shapes, text
   annotations and more); 70+ built-in indicators; multiple panes; a WebGL2 renderer with a canvas fallback.
   Drawn by [Vela](https://luxalgo.com/vela).
-- **Many markets.** Live-streaming crypto from Binance, Coinbase and Hyperliquid, ready to use. Stocks, ETFs, indices, FX
-  and futures from Yahoo Finance's public endpoints if you choose to turn that source on — it comes under Yahoo's own
-  terms, so it starts off (see [Data sources](#data-sources)).
+- **Crypto out of the box, stocks through your own broker.** Live-streaming crypto from Binance, Coinbase and Hyperliquid
+  works right away, with no account. For Indian equities, indices, futures and commodities, connect your own Dhan or
+  Zerodha account, or chart your own files (see [Data sources](#data-sources)).
 - **Bring your own broker.** Connect a [Dhan](#connecting-dhan) or [Zerodha](#connecting-zerodha) account for
   exchange-grade Indian market data — intraday history and a live tick feed. Credentials go in your operating system's
   keychain. More brokers plug into the same system.
@@ -107,12 +107,11 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib    # backend unit tests
 
 ### Symbols
 
-Every symbol is `provider:TICKER`. Typing a bare ticker means the default source: Yahoo Finance (once you've turned it
-on), unless you make another one the default under *Data providers*.
+Every symbol is `provider:TICKER`. Typing a bare ticker means the default source, Binance, unless you make another one
+the default under *Data providers*.
 
 | Prefix | Examples |
 | --- | --- |
-| `yahoo:` | `yahoo:AAPL`, `yahoo:RELIANCE.NS`, `yahoo:^GSPC`, `yahoo:EURUSD=X`, `yahoo:BTC-USD` |
 | `binance:` | `binance:BTCUSDT`, `binance:ETHUSDT.P` (perpetual futures) |
 | `coinbase:` | `coinbase:BTC-USD` |
 | `hyperliquid:` | `hyperliquid:BTC` |
@@ -143,7 +142,6 @@ time,open,high,low,close,volume
 
 | Source | Covers | Timeframes | Live? |
 | --- | --- | --- | --- |
-| **Yahoo Finance** *(off until you turn it on)* | Stocks, ETFs, indices, FX, futures, crypto — most world exchanges | 1m, 5m, 15m, 30m, 1h, 90m, D, W, M, plus anything buildable from those (2m, 2h, 3h, 4h…) | Polled every 15 s (intraday) / 60 s (daily) |
 | **Binance** | Spot and perpetual crypto | 1 minute to monthly | Live stream |
 | **Coinbase** | Spot crypto | 1 minute to monthly | Live stream |
 | **Hyperliquid** | Perpetual and spot crypto | 1 minute to monthly | Live stream |
@@ -153,24 +151,13 @@ time,open,high,low,close,volume
 
 A few things worth knowing:
 
-- **Yahoo Finance is off until you turn it on.** ProTradeChart is not affiliated with, endorsed by or sponsored by Yahoo,
-  and there is no official API or data licence behind the endpoints it reads; your computer fetches them directly. Yahoo's
-  [terms of service](https://legal.yahoo.com/us/en/yahoo/terms/otos/index.html) govern that use, including their limits on
-  automated access and commercial use, so the app shows you a notice first (on first launch, and under *Data providers*)
-  and leaves the choice to you. If you use it, use the data for your own information only: don't republish, resell or
-  redistribute it. The endpoints can be rate-limited, change without notice, or return delayed prices for some exchanges. Yahoo only keeps a limited intraday history (about 30 days of 1-minute bars, 60 days
-  of 2–90-minute bars, 2 years of hourly bars); daily and longer go back to the listing date.
+- **Yahoo Finance is no longer a data source.** It was removed, and with it the app's only source for US and most world
+  stocks, ETFs, FX and indices. To chart those, import your own OHLCV file (*Import data*). Symbols saved earlier as
+  `yahoo:…` stay in your watchlists and layouts but can't be loaded; opening a layout that holds one moves that tab to
+  Bitcoin and says so, and saving the layout again drops the old symbol.
 - A chart opens with about 500 bars (two years of daily candles). **Scroll or zoom back and older candles load
-  automatically**, for as long as the source has them: a daily Yahoo chart goes back to the stock's listing, while
-  intraday charts stop at the limits above. Nothing extra to click.
-- Recently loaded Yahoo bars are cached locally so a chart still draws if you go offline.
-- **Yahoo rate limits.** Yahoo publishes none for these endpoints, and unofficial reports vary by IP address and time of
-  day, so the app doesn't rely on a guessed number. It keeps far below any reported figure and stops the moment Yahoo
-  says stop: requests are spaced at least 250 ms apart and capped at 60 a minute (our own ceiling, not Yahoo's);
-  watchlist prices are fetched 20 symbols to a request and reused for 20 seconds; charts on the same symbol share one
-  live poll; and on *429 Too Many Requests* the app sends nothing for 30 seconds (doubling on repeats, up to 15 minutes)
-  and draws charts from the local cache in the meantime. Details in
-  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#yahoo-finance-and-rate-limits).
+  automatically**, for as long as the source has them. Nothing extra to click.
+- Recently loaded broker bars are cached locally so a chart still draws if you go offline.
 - **Crypto** comes from the exchanges' public market-data APIs, under their own terms
   ([Binance](https://www.binance.com/en/terms), [Coinbase](https://www.coinbase.com/legal/market_data),
   [Hyperliquid](https://app.hyperliquid.xyz/terms)). The app only reads prices — it never trades. Where binance.com is
@@ -183,8 +170,7 @@ A few things worth knowing:
 ## Connecting Dhan
 
 [Dhan](https://dhan.co) is an Indian broker with an API for exchange data. Connecting it gives charts up to five years of
-intraday history and a live feed for NSE and BSE equities, indices, futures and MCX commodities — data Yahoo either
-delays or doesn't have.
+intraday history and a live feed for NSE and BSE equities, indices, futures and MCX commodities.
 
 1. **You need Dhan's Data API access.** Dhan's *trading* APIs are free, but market data is a separate paid plan; without it
    the app will say so (`Data APIs not subscribed`).
@@ -219,18 +205,25 @@ for NSE, BSE, NFO, MCX and currency markets. Connecting it gives charts Zerodha'
 1. **You need a Kite Connect app with market data.** Zerodha's data APIs (historical candles and quotes) are part of its
    paid Kite Connect subscription; without it the app will say so (*Your Kite Connect plan doesn't include this data*).
    Create the app at [developers.kite.trade](https://developers.kite.trade) and note its **API key** and **API secret**.
-2. In the app, open **Data providers → Zerodha**, enter the key and secret, and press **Save**.
-3. **Log in.** Press *Open Zerodha login*, sign in on Zerodha's page, and Zerodha sends your browser to the redirect URL
-   registered on your Kite app. Copy that whole address (it contains `request_token=…`) from the address bar, paste it into
-   the box, and press *Finish login*. Zerodha switches on, downloads its instrument list, and **Test connection** confirms
-   everything works.
-4. Search as usual, or type `NSE:RELIANCE` / `NSE:NIFTY_50`. Use **Make default** if you'd rather type a bare `RELIANCE`.
+2. **Point the Kite app at ProTradeChart.** On your app at [developers.kite.trade](https://developers.kite.trade), set
+   the **redirect URL** to `http://127.0.0.1:47821`. That is how the app collects the login for you; it is shown with a
+   Copy button beside the login button, and must match exactly.
+3. In the app, open **Data providers → Zerodha**, enter the key and secret, and press **Save**.
+4. **Log in.** Press *Log in with Zerodha* and sign in on the page that opens. The app catches Zerodha's reply itself and
+   fills in the access token — there is nothing to copy. Zerodha switches on, downloads its instrument list, and
+   **Test connection** confirms everything works.
+5. Search as usual, or type `NSE:RELIANCE` / `NSE:NIFTY_50`. Use **Make default** if you'd rather type a bare `RELIANCE`.
 
 Things worth knowing:
 
 - **Kite tokens expire every morning (around 6 AM).** That is Zerodha's rule, not the app's: each day's first session
-  needs a fresh login (step 3). The dialog shows roughly how long today's token has left, and charts say so when it has
-  gone. A request token works once and only for a few minutes, so paste it straight away.
+  needs a fresh login (step 4) — one button, a few seconds. The dialog shows roughly how long today's token has left, and
+  charts say so when it has gone.
+- **If your Kite app has to redirect somewhere else** (a website of your own, say), open *Paste the address instead*
+  under the login button: sign in, then paste the whole address Zerodha sent your browser to (it contains
+  `request_token=…`). A request token works once and only for a few minutes, so paste it straight away.
+- **Nothing is opened to the network.** While you log in, the app listens on `127.0.0.1:47821` for that one reply, which
+  only programs on this computer can reach; it stops as soon as the token arrives, or after five minutes.
 - **Your credentials stay out of the database.** The API secret and access token are kept in your operating system's
   keychain and used only by the app's Rust backend. The secret is used for one thing — signing the login — and is never
   sent anywhere itself.
@@ -273,15 +266,13 @@ When one fires you get a system notification (so it reaches you with the app min
 ```
 src/                     React + TypeScript frontend
   chart/                 The Vela wrapper (a grid of one to sixteen charts per tab)
-  data/                  Data providers (Yahoo, CSV), symbol search, watchlist quotes
+  data/                  Data providers (crypto, brokers, CSV), symbol search, watchlist quotes
   features/              Workspace (tabs), layouts, watchlist, search, providers, dataset import, about, Pine dock
   pine/                  Pine Script: engine wiring, layout persistence, backtest report maths (pure, unit-tested)
   lib/                   Pure helpers: timeframes & resampling, CSV and watchlist parsers, IPC wrappers
   theme/                 Theme registry and provider
 src-tauri/               Rust backend
   src/store/             SQLite persistence (layouts, watchlists, datasets, Pine scripts, bar cache)
-  src/yahoo.rs           Yahoo request planning and response parsing (pure, unit-tested)
-  src/market.rs          HTTP client
   src/providers.rs       The catalogue of data providers and their settings
   src/secrets.rs         Credentials: OS keychain, with an explicit fallback
   src/dhan/              Dhan: protocol, instrument list, HTTP client, live feed
