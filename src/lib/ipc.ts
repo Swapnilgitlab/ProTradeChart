@@ -635,3 +635,48 @@ export const setNotebookItemNote = (itemId: number, note: string) => invoke<void
 
 /** Puts a notebook's entries in this order. */
 export const setNotebookOrder = (notebookId: string, itemIds: number[]) => invoke<void>('set_notebook_order', { notebookId, itemIds });
+
+// ---- AI Study Builder (Claude, with the user's own Anthropic API key) ----------------------------
+
+/** Whether an Anthropic API key is saved (mirrors `AiKeyStatus`). The key itself never leaves Rust. */
+export interface AiKeyStatus {
+  configured: boolean;
+  /** `keychain`, or `database` when there is no OS credential store (unencrypted). */
+  storage: 'keychain' | 'database' | null;
+}
+
+/** Claude's structured answer, unvalidated (`studies/assistant.ts` reads it), and the model that gave it. */
+export interface AiAnswer {
+  answer: unknown;
+  model: string;
+}
+
+/** Mirrors `DraftRequest` in `ai/prompts.rs`. */
+export interface AiDraftRequest {
+  question: string;
+  reference: string;
+  specSchema: object;
+  currentSpec: object | null;
+  history: { role: 'user' | 'assistant'; text: string }[];
+  today: string;
+}
+
+/** Mirrors `ExplainRequest` in `ai/prompts.rs`. */
+export interface AiExplainRequest {
+  spec: object;
+  summary: object;
+  warnings: string[];
+}
+
+export const aiKeyStatus = () => invoke<AiKeyStatus>('ai_key_status');
+
+/** Checks the key with Anthropic, then saves it in the OS keychain. */
+export const aiSetKey = (key: string) => invoke<AiKeyStatus>('ai_set_key', { key });
+
+export const aiDeleteKey = () => invoke<void>('ai_delete_key');
+
+/** Sends a question (or a revision of `currentSpec`) to Claude. Billed to the user's Anthropic account. */
+export const aiDraftStudy = (request: AiDraftRequest) => invoke<AiAnswer>('ai_draft_study', { request });
+
+/** Asks Claude to explain a stored result's summary. Billed to the user's Anthropic account. */
+export const aiExplainResult = (request: AiExplainRequest) => invoke<AiAnswer>('ai_explain_result', { request });

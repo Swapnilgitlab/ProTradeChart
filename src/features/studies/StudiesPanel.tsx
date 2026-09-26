@@ -40,6 +40,7 @@ import { normalizeSpec, specProblem, type StudySpec } from '../../studies/spec';
 import { fromTemplate, TEMPLATES } from '../../studies/templates';
 import { useProviderState } from '../providers/useProviderState';
 import { AddToWatchlistDialog } from '../python/AddToWatchlistDialog';
+import { AssistantPanel, ResultExplainer } from './AssistantPanel';
 import { CompareView, type ComparedRun } from './CompareView';
 import { NotebookView } from './NotebookView';
 import { PythonDialog } from './PythonDialog';
@@ -322,6 +323,18 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
   const openTemplate = async (id: string) => {
     if (!(await canLeave())) return;
     setCurrent(fresh(id));
+    setView('build');
+    setResult(null);
+    setFailed(null);
+  };
+
+  // The builder is what shows whenever the chosen view has nothing to show.
+  const builderShown = !((view === 'compare' && comparing) || (view === 'notebook' && openNotebook) || (view === 'results' && result));
+
+  /** A proposal from Claude, opened as a new Study that isn't saved until Save is pressed. */
+  const openProposal = async (spec: StudySpec) => {
+    if (!(await canLeave())) return;
+    setCurrent({ id: crypto.randomUUID(), spec, baseline: null, isSaved: false });
     setView('build');
     setResult(null);
     setFailed(null);
@@ -716,6 +729,15 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
           </div>
         )}
         <div className="studies-body">
+          {/* Kept mounted while results are shown, so the conversation survives a look at them. */}
+          <div hidden={!builderShown}>
+            <AssistantPanel
+              current={problem ? null : normalizeSpec(current.spec)}
+              onUseNew={(spec) => void openProposal(spec)}
+              onUseRevision={(spec) => setCurrent((c) => ({ ...c, spec }))}
+              say={toast}
+            />
+          </div>
           {view === 'compare' && comparing ? (
             <CompareView
               a={comparing.a}
@@ -747,7 +769,10 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
               say={(text, kind) => toast(text, kind)}
             />
           ) : view === 'results' && result ? (
-            <StudyResults result={result.data} onOpenEvent={onOpenEvent} onAddToWatchlist={setAdding} />
+            <>
+              <ResultExplainer key={result.id ?? 'unsaved'} result={result.data} say={toast} />
+              <StudyResults result={result.data} onOpenEvent={onOpenEvent} onAddToWatchlist={setAdding} />
+            </>
           ) : (
             <>
               {studyRuns.length > 0 && !result && (

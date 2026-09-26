@@ -3,7 +3,7 @@
 
 import { featureLabel, featureUnit, windowLabel, type Unit } from './metrics';
 import type { StudyResultData } from './result';
-import { interpret } from './spec';
+import { interpret, type StudySpec } from './spec';
 
 export interface SpecDifference {
   part: string;
@@ -11,15 +11,20 @@ export interface SpecDifference {
   b: string;
 }
 
-/** The parts of the two specs that differ, in the builder's own words (`interpret`). */
-export function specDifferences(a: StudyResultData, b: StudyResultData): SpecDifference[] {
-  const read = (r: StudyResultData) => new Map(interpret(r.spec).map((p) => [p.heading, p.lines.join('; ')]));
+/** The parts of two specs that differ, in the builder's own words (`interpret`). */
+export function specChanges(a: StudySpec, b: StudySpec): SpecDifference[] {
+  const read = (spec: StudySpec) => new Map(interpret(spec).map((p) => [p.heading, p.lines.join('; ')]));
   const ia = read(a);
   const ib = read(b);
   const parts = [...new Set([...ia.keys(), ...ib.keys()])];
   return parts
     .map((part) => ({ part, a: ia.get(part) ?? '—', b: ib.get(part) ?? '—' }))
     .filter((d) => d.a !== d.b);
+}
+
+/** How two runs' specifications differ. */
+export function specDifferences(a: StudyResultData, b: StudyResultData): SpecDifference[] {
+  return specChanges(a.spec, b.spec);
 }
 
 export interface CompareRow {

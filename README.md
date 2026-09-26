@@ -334,6 +334,14 @@ A Study measures what stocks looked like around historical events. Open **Studie
    a Study makes; *What stands out* lists the clear differences in words. Pick two results under **Recent results** to compare
    them side by side, and group Studies and results with your notes in a **Research Notebook**.
 
+7. **Ask Claude (optional).** *Ask Claude to draft or change this Study* turns a question in plain words — “what did stocks look
+   like 3 months before a 52-week-high breakout on double volume?” — into a Study Specification, or changes the current one
+   (“use NSE and BSE, and add ADX”). You see what it proposes, what it changed, what it assumed and what can't be studied with
+   the data available, and nothing runs until you press Run Study. **Explain with Claude** on a result writes a plain-language
+   reading of it. This uses your own Anthropic API key (click the key icon), kept in your operating system's keychain; your
+   question, the spec and a summary of the result (never the events or prices) are sent to Anthropic under your account and
+   billed to it.
+
 - **Every event, not just today's.** An event is each date the conditions *first* hold, across the whole history, with a
   cooldown so one move is one event. Filters are judged at the time, with no later data.
 - **Association, not causation.** The results describe what winners looked like; they don't show that any trait caused a move.
@@ -371,7 +379,7 @@ src/                     React + TypeScript frontend
   data/                  Data providers (crypto, brokers, CSV), symbol search, watchlist quotes
   features/              Workspace (chart, Python and Studies tabs), layouts, watchlist, search, providers, import, about, Pine dock
   features/python/       The Python tab: script list, editor, console, results
-  features/studies/      The Studies tab: builder, data readiness, results page
+  features/studies/      The Studies tab: builder, data readiness, results page, Ask Claude
   studies/               Study Specification, feature grammar, templates, readiness, exports (pure, unit-tested)
   pine/                  Pine Script: engine wiring, layout persistence, backtest report maths (pure, unit-tested)
   lib/                   Pure helpers: timeframes & resampling, CSV and watchlist parsers, IPC wrappers
@@ -384,6 +392,7 @@ src-tauri/               Rust backend
   src/commands.rs        Tauri commands exposed to the frontend
   src/pyapi/             The local data API Python scripts use (read-only, loopback, token-protected)
   src/python/            Finding Python, running and stopping scripts, the scripts folder
+  src/ai/                The AI Study Builder's Claude client (the user's own API key; calls made from Rust)
 pine/                    Pine indicators bundled with the app (see pine/README.md)
 python/                  The `protrade` package (incl. the Study engine), example scripts and their tests (see python/README.md)
 docs/                    Architecture notes and screenshots

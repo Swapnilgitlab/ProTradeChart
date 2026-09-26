@@ -62,6 +62,12 @@ project uses [Semantic Versioning](https://semver.org).
   in plain words, still as historical association. Two stored results can be compared side by side, with how their Studies
   differ spelled out. Research Notebooks group Studies and results with your notes; a result kept in a notebook is never pruned.
   The CSV and the report include the tests.
+- **Studies: an AI Study Builder, with your own Claude API key.** Describe a research question in plain words and Claude drafts a
+  Study Specification — or changes the current one on request — showing what changed, what it assumed and what can't be studied
+  with the data available (it never substitutes data that doesn't exist). Every proposal is checked like any spec and only loaded
+  into the builder when you choose; nothing runs until you press Run Study. **Explain with Claude** reads a result back in plain
+  words, as historical association. The key is checked with Anthropic and kept in the OS keychain; requests are made by the app's
+  backend, not the web view.
 
 ### Fixed
 

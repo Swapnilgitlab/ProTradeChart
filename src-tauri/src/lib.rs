@@ -1,3 +1,5 @@
+mod ai;
+mod ai_commands;
 mod alert_commands;
 mod commands;
 mod db;
@@ -83,6 +85,12 @@ pub fn run() {
                 .build()?;
             app.manage(DhanClient::new(broker_http.clone()));
             app.manage(ZerodhaClient::new(broker_http));
+            // The AI Study Builder's own client: its requests set their own, longer, timeouts.
+            app.manage(ai::client::ClaudeClient::new(
+                reqwest::Client::builder()
+                    .user_agent(concat!("protradechart/", env!("CARGO_PKG_VERSION")))
+                    .build()?,
+            ));
 
             // One live-feed connection for the whole app; ticks and status go
             // to every window as events. Credentials are read at each connect.
@@ -220,6 +228,11 @@ pub fn run() {
             study_commands::set_notebook_item_note,
             study_commands::set_notebook_order,
             study_commands::export_study_file,
+            ai_commands::ai_key_status,
+            ai_commands::ai_set_key,
+            ai_commands::ai_delete_key,
+            ai_commands::ai_draft_study,
+            ai_commands::ai_explain_result,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the application");

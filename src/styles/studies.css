@@ -637,3 +637,135 @@
   padding-top: 6px;
   padding-bottom: 6px;
 }
+
+/* ---- AI Study Builder ------------------------------------------------------------------- */
+
+.study-ai {
+  margin: 12px 16px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+}
+.study-ai-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 4px;
+}
+.study-ai-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.study-ai-toggle svg {
+  color: var(--accent);
+}
+.study-ai-setup,
+.study-ai-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 12px 12px;
+  border-top: 1px solid var(--border-soft);
+}
+.study-ai-setup p,
+.study-ai-body p {
+  margin: 0;
+}
+.study-ai-setup > .btn {
+  align-self: flex-start;
+}
+.study-ai-mode {
+  display: flex;
+  gap: 16px;
+  padding-top: 8px;
+  font-size: 12px;
+}
+.study-ai-mode label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.study-ai-exchange {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.study-ai-question {
+  align-self: flex-end;
+  max-width: 85%;
+  padding: 6px 10px;
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.study-ai-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+.study-ai-list h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.study-ai-list ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+.study-ai-list li + li {
+  margin-top: 3px;
+}
+.study-ai-list.warning {
+  padding: 6px 10px;
+  border-radius: var(--r-md);
+  background: var(--loss-soft);
+}
+.study-ai-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.study-ai-ask {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.study-ai-ask textarea {
+  flex: 1;
+  min-height: 44px;
+  resize: vertical;
+  font: inherit;
+}
+.study-ai-explain {
+  padding: 12px 16px 0;
+}
+.study-ai-explain .study-card p {
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+.spin {
+  animation: study-spin 1s linear infinite;
+}
+@keyframes study-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}

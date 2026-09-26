@@ -147,6 +147,14 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   run that needs it, and offer an alternative only for the user to pick — never substitute silently. Events are the first bar
   their conditions hold, filters are judged at the time (no look-ahead), prices are used as the broker supplied them (no
   corporate-action adjustment), and results are labelled historical association, never causation.
+- The AI Study Builder's Anthropic API key is a secret like a broker's: saved through `Secrets` (`anthropic` / `apiKey`) only
+  after Anthropic accepts it, read only in `ai_commands.rs`, never sent to the webview or logged. Claude is called from Rust
+  (`ai/`), never the webview. What it returns is an untrusted *proposal*: `parseDraft` re-validates the spec with
+  `normalizeSpec`, the user reviews it, and it never starts a run; an explanation is drawn as text only and worded as
+  association. Explanations get `explainSummary` (counts, medians, tests), never event rows, symbols or prices. The system
+  prompts (`ai/prompts.rs`) forbid substituting unavailable data; `SPEC_SCHEMA` / `specReference` (`studies/assistant.ts`)
+  describe the spec and must change with it (a test checks the schema against every template). See "AI Study Builder" in
+  `docs/ARCHITECTURE.md`.
 - **Yahoo Finance is not a data source, and shouldn't come back without the owner's say-so.** It was removed entirely: its
   provider, backend client and rate limiter, its terms/opt-in UI, and its `yahoo:` symbols. Symbols saved from it stay in
   users' watchlists, layouts and alerts but can't load: `isSupportedSymbol` (`lib/symbols.ts`) recognises them, and

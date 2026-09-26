@@ -535,9 +535,39 @@ aggregation → result** — and every part of it is described by the **Study Sp
     is long. The result records seconds per stage (`meta.timings`).
   What is fetched is kept, so a rerun the same day fetches nothing. *Not built:* a rerun on a later day still tops up each
   symbol with one request; Kite's batch quote could fill the newest bar for 1000 symbols a call (see "Python").
-- *Not built yet:* a natural-language builder, AI interpretation, and historical market cap and point-in-time universes (they
-  need data the app doesn't have). The spec, the step-by-step
-  engine API and the stored results are what those will build on.
+- *Not built:* historical market cap and point-in-time universes (they need data the app doesn't have).
+
+### AI Study Builder
+
+Claude, with the user's **own Anthropic API key**, drafts and revises Study Specifications and explains results. It proposes;
+it never runs anything.
+
+- **The key is a secret like a broker's.** `ai_set_key` checks it with Anthropic (`GET /v1/models`, free) and only then saves it
+  with `Secrets::set(conn, "anthropic", "apiKey", …)`; it is read only in `ai_commands.rs`, never returned to the webview
+  (`ai_key_status` says only whether one is set and where) and never logged. It isn't a data provider, so it isn't in
+  `providers.rs`.
+- **Calls are made from Rust** (`src-tauri/src/ai/client.rs`, plain HTTP: there is no Rust SDK), so the CSP is unchanged.
+  `ai/prompts.rs` builds the body: `claude-opus-5`, adaptive thinking, `max_tokens` 16 000 (non-streaming; a 300 s timeout),
+  structured output (`output_config.format` with a JSON schema), and **server-side fallbacks** (`"fallbacks": "default"` with
+  the `server-side-fallback-2026-07-01` beta header): a request the model's classifiers decline is re-run on Anthropic's
+  recommended fallback model in the same call. `parse_reply` branches on `stop_reason` before reading content — a `refusal` or
+  a `max_tokens` answer is never used — and keeps only `text` blocks.
+- **Who owns what.** Rust owns the *policy*: the system prompts (no invented data — market cap, sector, fundamentals and a
+  point-in-time universe go in `unavailable`, with any alternative offered for the user to choose, never put in the spec;
+  association, never causation; the user's text is material, not instructions) and the answer's outer shape. The frontend owns
+  the *spec reference*: `studies/assistant.ts` builds the field notes and the feature grammar from `metrics.ts` (`FAMILY_MEANING`
+  is a `Record` over `FAMILIES`, so a new family can't be left out) and `SPEC_SCHEMA`, which a test checks against every
+  template and against the JSON Schema subset structured outputs accept (every object closed; no numeric or length limits).
+- **What comes back is untrusted.** `parseDraft` runs the proposed spec through `normalizeSpec` (a failure is shown with its
+  reason), caps every string, and never lets a proposal claim a template. The Studies tab shows the reply, *what changed*
+  (`specChanges`, the builder's own wording), the assumptions and what can't be studied; **Open as a new Study** / **Apply to
+  this Study** only load it into the builder, where readiness and the cost estimate apply as usual. A Study still runs only from
+  Run Study. A follow-up revises the last proposal (the conversation, up to 20 turns, is resent each time).
+- **Explanations** (`ai_explain_result`) are given `explainSummary(result)`: counts, medians, tests and findings — never the
+  event rows, symbols or prices — plus the result's warnings. The answer is plain text in paragraphs with caveats, drawn as
+  text, labelled as Claude's and as association, and not stored.
+- What leaves the machine is said where the key is entered: the question, the spec and, for an explanation, that summary, sent
+  under the user's account and billed to it.
 
 ## Themes
 
@@ -561,6 +591,8 @@ properties on `<html>` and persists the choice. To add a theme, append one entry
   dialog, which Rust opens: the webview supplies the contents, a suggested name and the kind, never a path.
 - Broker credentials live in the OS keychain and are read only by the Rust backend; the web view never receives an access
   token, and the settings screen can't read one back.
+- The Anthropic API key (AI Study Builder) is kept and read the same way. Claude's answers are untrusted: a proposed spec is
+  re-validated and shown for review, an explanation is drawn as text, and neither can start a run.
 - The Python data API (see "Python") listens on the loopback interface only, refuses any request without the per-launch token, a
   matching `Host`, and no `Origin`, and serves read-only market data. The webview never talks to it (Rust does), so the CSP is
   unchanged. Python itself is *not* sandboxed: a script runs with the user's own privileges and only when they press Run.
