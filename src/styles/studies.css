@@ -527,3 +527,113 @@
   white-space: nowrap;
   flex-shrink: 0;
 }
+
+/* ---- Significance ------------------------------------------------------------------------ */
+
+.study-findings {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: var(--bg-base);
+}
+.study-findings-head {
+  font-weight: 600;
+  font-size: 12px;
+}
+.study-findings ul {
+  margin: 6px 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+.study-findings li + li {
+  margin-top: 3px;
+}
+.study-significant {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* ---- Compare and notebooks --------------------------------------------------------------- */
+
+.study-compare-title {
+  margin: 0;
+  font-size: 16px;
+}
+.study-compare-runs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.study-compare-runs .btn {
+  margin-top: 6px;
+}
+.python-table td.study-wrap {
+  white-space: normal;
+  min-width: 200px;
+}
+.study-notebook-name {
+  flex: 1;
+  max-width: 480px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.study-notebook-notes {
+  width: 100%;
+}
+.study-notebook-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.study-notebook-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+}
+.study-notebook-item-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.study-notebook-item-title {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.study-notebook-item .study-textarea {
+  width: 100%;
+}
+.study-pick-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--accent-soft);
+  font-size: 12px;
+}
+/* The compare view's tables share one grid, so their columns line up down the page. */
+.study-compare-table {
+  table-layout: fixed;
+}
+.study-compare-table th:first-child,
+.study-compare-table td:first-child {
+  width: 34%;
+}
+/* The Studies toolbar has more buttons than the Script Editor's: it wraps rather than hiding Run. */
+.studies-panel .pine-toolbar {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 40px;
+  row-gap: 6px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}

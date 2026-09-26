@@ -65,6 +65,27 @@ export interface StudyMeta {
   timings: Record<string, number>;
 }
 
+/** A test of events against the comparison group. `p` is the test's own p-value and `q` the same
+ *  adjusted for the Study's many comparisons (Benjamini–Hochberg), which is the one to read. */
+export interface TestResult {
+  p: number | null;
+  q: number | null;
+  n_events: number;
+  n_control: number;
+  /** Measurements: Cliff's delta, −1…1 (positive: events higher). */
+  effect: number | null;
+  /** Characteristics: the difference in shares (events − comparison) and its 95% interval. */
+  diff: number | null;
+  low: number | null;
+  high: number | null;
+}
+
+/** A difference that stands out: q < 0.05 (and, for a measurement, at least a small effect). */
+export type Finding =
+  | { kind: 'metric'; metric: string; offset: number; test: TestResult }
+  | { kind: 'characteristic'; label: string; offset: number; test: TestResult }
+  | { kind: 'forward'; window: number; test: TestResult };
+
 export interface StudySummary {
   events: number;
   unique_symbols: number;
@@ -76,6 +97,7 @@ export interface StudySummary {
   control_samples: number;
   control_kind: 'random' | 'outcome' | 'none';
   outcome: { met: number; not_met: number; unknown: number } | null;
+  findings: Finding[];
 }
 
 export interface StudyResultData {
@@ -87,9 +109,9 @@ export interface StudyResultData {
   summary: StudySummary;
   offsets: number[];
   events: { columns: string[]; rows: Cell[][]; total: number };
-  stats: { metric: string; offset: number; events: Stat; control: Stat | null }[];
-  characteristics: { index: number; label: string; offset: number; events: Share; control: Share | null }[];
-  forward: { window: number; events: ForwardStat; control: ForwardStat | null }[];
+  stats: { metric: string; offset: number; events: Stat; control: Stat | null; test: TestResult | null }[];
+  characteristics: { index: number; label: string; offset: number; events: Share; control: Share | null; test: TestResult | null }[];
+  forward: { window: number; events: ForwardStat; control: ForwardStat | null; test: TestResult | null }[];
   histograms: { metric: string; offset: number; edges: number[]; events: number[]; control: number[] }[];
   path: PathBand | null;
   control_path: PathBand | null;
@@ -129,6 +151,49 @@ function share(v: unknown): Share {
 function forwardStat(v: unknown): ForwardStat {
   const r = isRecord(v) ? v : {};
   return { ...stat(r), positive: share(r.positive), max_gain_median: n(r.max_gain_median), max_drawdown_median: n(r.max_drawdown_median) };
+}
+
+function unit(v: unknown): number | null {
+  const x = n(v);
+  return x === null ? null : Math.min(Math.max(x, 0), 1);
+}
+
+function testResult(v: unknown): TestResult | null {
+  if (!isRecord(v)) return null;
+  const effect = n(v.effect);
+  const diff = n(v.diff);
+  const low = n(v.low);
+  const high = n(v.high);
+  return {
+    p: unit(v.p),
+    q: unit(v.q),
+    n_events: count(v.n_events),
+    n_control: count(v.n_control),
+    effect: effect === null ? null : Math.min(Math.max(effect, -1), 1),
+    diff: diff === null ? null : Math.min(Math.max(diff, -1), 1),
+    low,
+    high,
+  };
+}
+
+function finding(v: unknown): Finding | null {
+  if (!isRecord(v)) return null;
+  const test = testResult(v.test);
+  if (!test) return null;
+  const offset = int(v.offset);
+  if (v.kind === 'metric') {
+    const metric = text(v.metric);
+    return metric && offset !== null ? { kind: 'metric', metric, offset, test } : null;
+  }
+  if (v.kind === 'characteristic') {
+    const label = text(v.label);
+    return label && offset !== null ? { kind: 'characteristic', label, offset, test } : null;
+  }
+  if (v.kind === 'forward') {
+    const window = int(v.window);
+    return window !== null ? { kind: 'forward', window, test } : null;
+  }
+  return null;
 }
 
 function band(v: unknown): PathBand | null {
@@ -225,6 +290,10 @@ export function parseStudyResult(data: unknown): StudyResultData | null {
       control_samples: count(summary.control_samples),
       control_kind: kind === 'random' || kind === 'outcome' ? kind : 'none',
       outcome: outcome ? { met: count(outcome.met), not_met: count(outcome.not_met), unknown: count(outcome.unknown) } : null,
+      findings: list(summary.findings)
+        .slice(0, 20)
+        .map(finding)
+        .filter((f): f is Finding => f !== null),
     },
     offsets,
     events: { columns, rows, total: Math.max(count(events.total), rows.length) },
@@ -233,7 +302,7 @@ export function parseStudyResult(data: unknown): StudyResultData | null {
       .flatMap((s) => {
         const offset = int(s.offset);
         const metric = text(s.metric);
-        return metric && offset !== null ? [{ metric, offset, events: stat(s.events), control: s.control == null ? null : stat(s.control) }] : [];
+        return metric && offset !== null ? [{ metric, offset, events: stat(s.events), control: s.control == null ? null : stat(s.control), test: testResult(s.test) }] : [];
       }),
     characteristics: list(data.characteristics)
       .filter(isRecord)
@@ -241,14 +310,14 @@ export function parseStudyResult(data: unknown): StudyResultData | null {
         const offset = int(c.offset);
         const label = text(c.label);
         return label && offset !== null
-          ? [{ index: count(c.index), label, offset, events: share(c.events), control: c.control == null ? null : share(c.control) }]
+          ? [{ index: count(c.index), label, offset, events: share(c.events), control: c.control == null ? null : share(c.control), test: testResult(c.test) }]
           : [];
       }),
     forward: list(data.forward)
       .filter(isRecord)
       .flatMap((f) => {
         const window = int(f.window);
-        return window !== null ? [{ window, events: forwardStat(f.events), control: f.control == null ? null : forwardStat(f.control) }] : [];
+        return window !== null ? [{ window, events: forwardStat(f.events), control: f.control == null ? null : forwardStat(f.control), test: testResult(f.test) }] : [];
       }),
     histograms: list(data.histograms)
       .filter(isRecord)

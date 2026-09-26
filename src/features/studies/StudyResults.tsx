@@ -7,6 +7,7 @@ import { featureLabel, featureUnit, formatRupees, formatValue, offsetLabel, wind
 import { statFor, type Share, type Stat, type StudyResultData } from '../../studies/result';
 import { describeCondition } from '../../studies/spec';
 import { beforeAfterWindows, eventColumns, eventGrid, headline, liquidityBuckets, medianGap, type TableColumn } from '../../studies/views';
+import { describeFinding, formatEffect, formatQ, formatShareDiff, standsOut } from '../../studies/significance';
 import { Histogram, PathChart } from './charts';
 
 interface Props {
@@ -452,6 +453,26 @@ export function StudyResults({ result, onOpenEvent, onAddToWatchlist }: Props) {
                 : `${summary.control_samples} random dates from the same universe and period, passing the same filters, with no event within ${spec.event.cooldown_days} bars.`}{' '}
               A difference is a historical association only.
             </p>
+            <div className="study-findings">
+              <div className="study-findings-head">What stands out</div>
+              {summary.findings.length > 0 ? (
+                <ul>
+                  {summary.findings.map((f, i) => (
+                    <li key={i}>{describeFinding(f, groupLabel.toLowerCase(), controlLabel.toLowerCase())}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted small">
+                  {summary.events < 5 || summary.control_samples < 5
+                    ? 'Too few events or comparison dates to test the differences (at least 5 of each are needed).'
+                    : 'No difference is clear enough to stand out once the Study’s many comparisons are accounted for (q < 0.05).'}
+                </p>
+              )}
+              <p className="muted small">
+                Tests: Mann–Whitney for measurements (effect: Cliff’s δ, −1 to +1), two-proportion for characteristics; q-values are
+                adjusted for all of this Study’s comparisons (Benjamini–Hochberg). A difference that stands out is still an association, not a cause.
+              </p>
+            </div>
             <table className="python-table study-stats">
               <thead>
                 <tr>
@@ -459,6 +480,8 @@ export function StudyResults({ result, onOpenEvent, onAddToWatchlist }: Props) {
                   <th>{groupLabel}</th>
                   <th>{controlLabel}</th>
                   <th>Difference</th>
+                  <th>Effect</th>
+                  <th>q</th>
                 </tr>
               </thead>
               <tbody>
@@ -471,6 +494,8 @@ export function StudyResults({ result, onOpenEvent, onAddToWatchlist }: Props) {
                       <td className="numeric">{formatValue(s?.events.median, unit)}</td>
                       <td className="numeric">{formatValue(s?.control?.median, unit)}</td>
                       <td className="numeric muted">{formatGap(medianGap(s?.events, s?.control), unit)}</td>
+                      <td className="numeric">{formatEffect(s?.test?.effect)}</td>
+                      <td className={`numeric${standsOut(s?.test) ? ' study-significant' : ' muted'}`}>{formatQ(s?.test?.q)}</td>
                     </tr>
                   );
                 })}
@@ -482,8 +507,14 @@ export function StudyResults({ result, onOpenEvent, onAddToWatchlist }: Props) {
                       <td className="numeric">{pct(item?.events)}</td>
                       <td className="numeric">{pct(item?.control)}</td>
                       <td className="numeric muted">
-                        {item?.events.share != null && item.control?.share != null ? `${Math.round((item.events.share - item.control.share) * 100)} pts` : '—'}
+                        {item?.test
+                          ? formatShareDiff(item.test)
+                          : item?.events.share != null && item.control?.share != null
+                            ? `${Math.round((item.events.share - item.control.share) * 100)} pts`
+                            : '—'}
                       </td>
+                      <td className="numeric muted">—</td>
+                      <td className={`numeric${standsOut(item?.test) ? ' study-significant' : ' muted'}`}>{formatQ(item?.test?.q)}</td>
                     </tr>
                   );
                 })}

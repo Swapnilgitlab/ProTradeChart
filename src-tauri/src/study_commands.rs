@@ -10,12 +10,12 @@ use tauri_plugin_dialog::DialogExt;
 use tokio::sync::oneshot;
 
 use crate::db::Database;
-use crate::models::{Study, StudyResult, StudyResultInfo};
+use crate::models::{NotebookDetail, NotebookSummary, Study, StudyResult, StudyResultInfo};
 use crate::pyapi::valid_run_id;
 use crate::python::PythonState;
 use crate::python_commands::{paths, start_python, StartRun};
 use crate::store::instrument_list::{self, Filter, Source};
-use crate::store::{studies, study_universe};
+use crate::store::{notebooks, studies, study_universe};
 
 /// A spec is a few kilobytes; anything near this is not one.
 const MAX_SPEC_BYTES: usize = 1024 * 1024;
@@ -66,6 +66,60 @@ pub fn delete_study_result(id: String, db: State<Database>) -> Result<(), String
     sql(studies::delete_result(
         &*db.conn.lock().map_err(|e| e.to_string())?,
         &id,
+    ))
+}
+
+// ---- Research Notebooks ------------------------------------------------------
+
+#[tauri::command]
+pub fn list_notebooks(db: State<Database>) -> Result<Vec<NotebookSummary>, String> {
+    sql(notebooks::list(&*db.conn.lock().map_err(|e| e.to_string())?))
+}
+
+#[tauri::command]
+pub fn get_notebook(id: String, db: State<Database>) -> Result<Option<NotebookDetail>, String> {
+    sql(notebooks::get(&*db.conn.lock().map_err(|e| e.to_string())?, &id))
+}
+
+#[tauri::command]
+pub fn save_notebook(id: String, name: String, notes: String, db: State<Database>) -> Result<(), String> {
+    notebooks::save(&*db.conn.lock().map_err(|e| e.to_string())?, &id, &name, &notes)
+}
+
+#[tauri::command]
+pub fn delete_notebook(id: String, db: State<Database>) -> Result<(), String> {
+    sql(notebooks::delete(&*db.conn.lock().map_err(|e| e.to_string())?, &id))
+}
+
+#[tauri::command]
+pub fn add_notebook_item(notebook_id: String, kind: String, ref_id: String, db: State<Database>) -> Result<(), String> {
+    notebooks::add_item(
+        &mut *db.conn.lock().map_err(|e| e.to_string())?,
+        &notebook_id,
+        &kind,
+        &ref_id,
+    )
+}
+
+#[tauri::command]
+pub fn remove_notebook_item(item_id: i64, db: State<Database>) -> Result<(), String> {
+    sql(notebooks::remove_item(
+        &*db.conn.lock().map_err(|e| e.to_string())?,
+        item_id,
+    ))
+}
+
+#[tauri::command]
+pub fn set_notebook_item_note(item_id: i64, note: String, db: State<Database>) -> Result<(), String> {
+    notebooks::set_item_note(&*db.conn.lock().map_err(|e| e.to_string())?, item_id, &note)
+}
+
+#[tauri::command]
+pub fn set_notebook_order(notebook_id: String, item_ids: Vec<i64>, db: State<Database>) -> Result<(), String> {
+    sql(notebooks::set_order(
+        &mut *db.conn.lock().map_err(|e| e.to_string())?,
+        &notebook_id,
+        &item_ids,
     ))
 }
 

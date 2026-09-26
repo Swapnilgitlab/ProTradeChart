@@ -30,6 +30,7 @@ describe('CSV', () => {
     expect(metrics).toContain('return_63,-63,T-3M,control,2,');
     expect(metrics).toContain('share: Above 200 EMA');
     expect(metrics).toContain('fwd_return_63,63,T+3M,events');
+    expect(metrics.split('\r\n')[0].endsWith(',effect_or_share_diff,diff_ci_low,diff_ci_high,p,q')).toBe(true);
   });
 });
 

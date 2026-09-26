@@ -67,6 +67,40 @@ pub struct StudyResult {
     pub executed_at: String,
 }
 
+/// A Research Notebook as a list shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotebookSummary {
+    pub id: String,
+    pub name: String,
+    pub item_count: i64,
+    pub updated_at: String,
+}
+
+/// One entry of a notebook: a Study or a stored run, with the user's note. `title` and `detail` are
+/// `None` when what it refers to has since been deleted.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotebookItem {
+    pub id: i64,
+    pub kind: String,
+    pub ref_id: String,
+    pub note: String,
+    pub position: i64,
+    pub title: Option<String>,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotebookDetail {
+    pub id: String,
+    pub name: String,
+    pub notes: String,
+    pub updated_at: String,
+    pub items: Vec<NotebookItem>,
+}
+
 // ---- Pine scripts ----------------------------------------------------------
 
 /// A saved Pine Script. `kind` is `indicator` or `strategy` (enforced by the

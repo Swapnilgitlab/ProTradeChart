@@ -140,6 +140,9 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   (`listing_series` / `pick_listings`) exists in `protrade/study.py` and `store/study_universe.rs` (for the pre-run estimate):
   change both. A first run is bound by the broker's pace, so never fetch what can't be a stock, and keep the load a single
   pool rather than batches. See "Studies" in `docs/ARCHITECTURE.md`.
+- A Study's significance tests (`protrade/stats_tests.py`) are standard library + numpy/pandas — don't add scipy — and their
+  known-answer tests were computed with scipy/statsmodels; keep them. A q-value below 0.05 is still an association: never word
+  a finding as a cause (`studies/significance.ts`). A run in a Research Notebook is never pruned (`store/studies.rs`).
 - Studies never invent data. There is no market cap, sector or point-in-time universe: say so (`studies/readiness.ts`), block a
   run that needs it, and offer an alternative only for the user to pick — never substitute silently. Events are the first bar
   their conditions hold, filters are judged at the time (no look-ahead), prices are used as the broker supplied them (no

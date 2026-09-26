@@ -63,10 +63,17 @@ pub fn save(conn: &Connection, study: &Study) -> Result<(), String> {
     Ok(())
 }
 
-/// Deletes a Study and every run of it.
+/// Runs a Research Notebook refers to: kept when their Study is deleted or they fall out of the
+/// newest [`KEEP_RESULTS`], since someone chose to keep them.
+const IN_A_NOTEBOOK: &str = "SELECT ref_id FROM notebook_items WHERE kind = 'result'";
+
+/// Deletes a Study and every run of it that no notebook keeps.
 pub fn delete(conn: &mut Connection, id: &str) -> rusqlite::Result<()> {
     let tx = conn.transaction()?;
-    tx.execute("DELETE FROM study_results WHERE study_id = ?1", params![id])?;
+    tx.execute(
+        &format!("DELETE FROM study_results WHERE study_id = ?1 AND id NOT IN ({IN_A_NOTEBOOK})"),
+        params![id],
+    )?;
     tx.execute("DELETE FROM studies WHERE id = ?1", params![id])?;
     tx.commit()
 }
@@ -107,7 +114,8 @@ pub fn get_result(conn: &Connection, id: &str) -> rusqlite::Result<Option<StudyR
     .optional()
 }
 
-/// Keeps a completed run, then drops the Study's oldest runs past [`KEEP_RESULTS`].
+/// Keeps a completed run, then drops the Study's oldest runs past [`KEEP_RESULTS`] (except those a
+/// notebook keeps).
 pub fn save_result(conn: &mut Connection, result: &StudyResult) -> Result<(), String> {
     check_name(&result.name)?;
     check_json(&result.summary_json, "result summary", MAX_SPEC_BYTES)?;
@@ -127,9 +135,11 @@ pub fn save_result(conn: &mut Connection, result: &StudyResult) -> Result<(), St
     )
     .map_err(|e| e.to_string())?;
     tx.execute(
-        "DELETE FROM study_results WHERE study_id = ?1 AND id NOT IN (
-           SELECT id FROM study_results WHERE study_id = ?1
-           ORDER BY executed_at DESC, created_at DESC LIMIT ?2)",
+        &format!(
+            "DELETE FROM study_results WHERE study_id = ?1 AND id NOT IN ({IN_A_NOTEBOOK}) AND id NOT IN (
+               SELECT id FROM study_results WHERE study_id = ?1
+               ORDER BY executed_at DESC, created_at DESC LIMIT ?2)"
+        ),
         params![result.study_id, KEEP_RESULTS],
     )
     .map_err(|e| e.to_string())?;
@@ -235,6 +245,32 @@ mod tests {
             1,
             "another study's runs are untouched"
         );
+    }
+
+    #[test]
+    fn a_run_kept_in_a_notebook_survives_pruning_and_its_studys_deletion() {
+        let db = Database::open_in_memory().unwrap();
+        let mut conn = db.conn.lock().unwrap();
+        save_result(&mut conn, &result("kept", "s1", "2020-01-01T00:00:00+00:00")).unwrap();
+        crate::store::notebooks::save(&conn, "nb", "Research", "").unwrap();
+        crate::store::notebooks::add_item(&mut conn, "nb", "result", "kept").unwrap();
+        for i in 0..(KEEP_RESULTS + 2) {
+            save_result(
+                &mut conn,
+                &result(&format!("r{i}"), "s1", &format!("2026-01-01T10:{i:02}:00+00:00")),
+            )
+            .unwrap();
+        }
+        let ids: Vec<String> = list_results(&conn, Some("s1"))
+            .unwrap()
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert!(ids.contains(&"kept".to_string()), "the oldest run is in a notebook");
+        assert_eq!(ids.len() as i64, KEEP_RESULTS + 1);
+        delete(&mut conn, "s1").unwrap();
+        let left: Vec<String> = list_results(&conn, None).unwrap().into_iter().map(|r| r.id).collect();
+        assert_eq!(left, ["kept"]);
     }
 
     #[test]

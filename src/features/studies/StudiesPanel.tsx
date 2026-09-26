@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, CirclePlay, Code2, Copy, Download, FilePlus2, Pencil, Save, Square, Trash2 } from 'lucide-react';
+import { BookOpen, BookPlus, ChevronDown, CirclePlay, Code2, Copy, Download, FilePlus2, GitCompare, Pencil, Plus, Save, Square, Trash2, X } from 'lucide-react';
 import type { StudyEvent } from '../../chart/studyEvent';
 import { useDismiss } from '../../components/useDismiss';
 import { useToast } from '../../components/Toasts';
@@ -9,8 +9,11 @@ import {
   deleteStudyResult,
   errorMessage,
   exportStudyFile,
+  addNotebookItem,
   getStudyResult,
   getWatchlist,
+  listNotebooks,
+  saveNotebook,
   listStudies,
   listStudyResults,
   listWatchlists,
@@ -19,6 +22,8 @@ import {
   saveStudy,
   stopPythonRun,
   studyEstimate,
+  type NotebookItemKind,
+  type NotebookSummary,
   type PythonEnvStatus,
   type StudyExportKind,
   type StudyResultInfo,
@@ -35,6 +40,8 @@ import { normalizeSpec, specProblem, type StudySpec } from '../../studies/spec';
 import { fromTemplate, TEMPLATES } from '../../studies/templates';
 import { useProviderState } from '../providers/useProviderState';
 import { AddToWatchlistDialog } from '../python/AddToWatchlistDialog';
+import { CompareView, type ComparedRun } from './CompareView';
+import { NotebookView } from './NotebookView';
 import { PythonDialog } from './PythonDialog';
 import { storeStudyRun } from './storeRun';
 import { StudyBuilder } from './StudyBuilder';
@@ -90,7 +97,15 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
   const [estimate, setEstimate] = useState<UniverseEstimate | null>(null);
   const [env, setEnv] = useState<PythonEnvStatus | null>(null);
   const [current, setCurrent] = useState<Current>(() => fresh());
-  const [view, setView] = useState<'build' | 'results'>('build');
+  const [view, setView] = useState<'build' | 'results' | 'compare' | 'notebook'>('build');
+  const [notebooks, setNotebooks] = useState<NotebookSummary[]>([]);
+  const [openNotebook, setOpenNotebook] = useState<string | null>(null);
+  /** The first of two results picked to compare, waiting for the second. */
+  const [comparePick, setComparePick] = useState<{ id: string; name: string } | null>(null);
+  const [comparing, setComparing] = useState<{ a: ComparedRun; b: ComparedRun } | null>(null);
+  const [notebookMenu, setNotebookMenu] = useState(false);
+  const notebookRef = useRef<HTMLDivElement>(null);
+  useDismiss(notebookRef, notebookMenu, () => setNotebookMenu(false));
   const [result, setResult] = useState<{ id: string | null; data: StudyResultData } | null>(null);
   const [run, setRun] = useState<ActiveRun | null>(null);
   const [progress, setProgress] = useState<StudyProgress | null>(null);
@@ -167,9 +182,10 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
 
   const refresh = useCallback(async () => {
     try {
-      const [s, r] = await Promise.all([listStudies(), listStudyResults(null)]);
+      const [s, r, n] = await Promise.all([listStudies(), listStudyResults(null), listNotebooks()]);
       setStudies(s);
       setRuns(r);
+      setNotebooks(n);
     } catch (err) {
       toast(errorMessage(err), 'error');
     }
@@ -287,7 +303,11 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
   }, [current, problem, refresh, toast]);
 
   const openStudy = async (row: StudyRow) => {
-    if (row.id === current.id || !(await canLeave())) return;
+    if (row.id === current.id) {
+      setView('build');
+      return;
+    }
+    if (!(await canLeave())) return;
     try {
       const spec = normalizeSpec(JSON.parse(row.specJson));
       setCurrent({ id: row.id, spec, baseline: JSON.stringify(spec), isSaved: true });
@@ -322,6 +342,76 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
     } catch (err) {
       toast(errorMessage(err), 'error');
     }
+  };
+
+  /** A stored run, read and checked, for the compare view. */
+  const loadRun = async (id: string): Promise<ComparedRun | null> => {
+    const row = await getStudyResult(id);
+    const data = row ? parseStudyResult(JSON.parse(row.resultJson)) : null;
+    return row && data ? { id: row.id, name: row.name, executedAt: row.executedAt, data } : null;
+  };
+
+  /** Picks a result to compare: the first waits for a second, the second opens the comparison. */
+  const compareWith = async (id: string, name: string) => {
+    if (!comparePick || comparePick.id === id) {
+      setComparePick({ id, name });
+      return;
+    }
+    try {
+      const [a, b] = await Promise.all([loadRun(comparePick.id), loadRun(id)]);
+      if (!a || !b) {
+        toast('One of those results can’t be read by this version of the app.', 'error');
+        return;
+      }
+      setComparing({ a, b });
+      setComparePick(null);
+      setView('compare');
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    }
+  };
+
+  const newNotebook = async (): Promise<string | null> => {
+    const id = crypto.randomUUID();
+    try {
+      await saveNotebook(id, `Research notebook ${notebooks.length + 1}`, '');
+      await refresh();
+      return id;
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+      return null;
+    }
+  };
+
+  const showNotebook = (id: string) => {
+    setOpenNotebook(id);
+    setView('notebook');
+  };
+
+  /** Adds the open Study (it must be saved: a notebook refers to it by id) or the result on screen. */
+  const addToNotebook = async (notebookId: string | null, kind: NotebookItemKind) => {
+    setNotebookMenu(false);
+    const target = notebookId ?? (await newNotebook());
+    if (!target) return;
+    const refId = kind === 'result' ? result?.id : current.id;
+    if (!refId) return;
+    if (kind === 'study' && !current.isSaved) {
+      toast('Save the Study first, so the notebook can find it again.', 'info');
+      return;
+    }
+    try {
+      await addNotebookItem(target, kind, refId);
+      await refresh();
+      toast(`Added to “${notebooks.find((n) => n.id === target)?.name ?? 'the new notebook'}”.`, 'success');
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    }
+  };
+
+  const openStudyById = async (id: string) => {
+    const row = studies.find((s) => s.id === id);
+    if (row) await openStudy(row);
+    else toast('That Study no longer exists.', 'info');
   };
 
   const openRun = async (info: StudyResultInfo) => {
@@ -405,6 +495,32 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
               </button>
             </div>
           ))}
+          <div className="python-side-header studies-subhead">
+            <span>Notebooks</span>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="New notebook"
+              title="New notebook"
+              onClick={async () => {
+                const id = await newNotebook();
+                if (id) showNotebook(id);
+              }}
+            >
+              <Plus size={13} />
+            </button>
+          </div>
+          {notebooks.length === 0 && <div className="python-side-empty small muted">Group Studies and results with your notes.</div>}
+          {notebooks.map((n) => (
+            <div key={n.id} className={`python-script${view === 'notebook' && openNotebook === n.id ? ' active' : ''}`}>
+              <button type="button" className="python-script-name studies-run" title={n.name} onClick={() => showNotebook(n.id)}>
+                <span>{n.name}</span>
+                <span className="muted small">
+                  {n.itemCount} item{n.itemCount === 1 ? '' : 's'}
+                </span>
+              </button>
+            </div>
+          ))}
           <div className="python-side-header studies-subhead">Recent results</div>
           {runs.length === 0 && <div className="python-side-empty small muted">Results appear here after a run.</div>}
           {runs.slice(0, 30).map((r) => {
@@ -416,6 +532,15 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
                   <span className="muted small">
                     {r.executedAt.slice(0, 10)} · {summary?.events ?? '?'} events
                   </span>
+                </button>
+                <button
+                  type="button"
+                  className={`icon-button${comparePick?.id === r.id ? ' active' : ''}`}
+                  aria-label="Compare with another result"
+                  title={comparePick && comparePick.id !== r.id ? `Compare with “${comparePick.name}”` : 'Compare with another result'}
+                  onClick={() => void compareWith(r.id, r.name)}
+                >
+                  <GitCompare size={13} />
                 </button>
                 <button type="button" className="icon-button" aria-label="Delete this result" title="Delete" onClick={() => void removeRun(r)}>
                   <Trash2 size={13} />
@@ -433,7 +558,7 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
           </span>
           <span className={`pine-status${dirty ? ' dirty' : ''}`}>{!current.isSaved ? 'Not saved' : dirty ? 'Unsaved changes' : 'Saved'}</span>
           <div className="pine-toolbar-spacer" />
-          {view === 'results' ? (
+          {view !== 'build' ? (
             <button type="button" className="btn pine-btn" onClick={() => setView('build')} title="Edit the Study">
               <Pencil size={14} />
               Edit
@@ -445,6 +570,44 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
               </button>
             )
           )}
+          <div className="menu-anchor" ref={notebookRef}>
+            <button type="button" className="btn pine-btn" aria-expanded={notebookMenu} onClick={() => setNotebookMenu((v) => !v)} title="Add to a Research Notebook">
+              <BookPlus size={14} />
+              Notebook
+              <ChevronDown size={12} />
+            </button>
+            {notebookMenu && (
+              <div className="menu study-export-menu" role="menu">
+                {view === 'results' && result?.id && (
+                  <>
+                    <div className="menu-heading">Add this result to…</div>
+                    {notebooks.map((n) => (
+                      <button key={`r${n.id}`} type="button" className="menu-item" role="menuitem" onClick={() => void addToNotebook(n.id, 'result')}>
+                        <BookOpen size={13} />
+                        {n.name}
+                      </button>
+                    ))}
+                    <button type="button" className="menu-item" role="menuitem" onClick={() => void addToNotebook(null, 'result')}>
+                      <Plus size={13} />
+                      A new notebook
+                    </button>
+                    <div className="menu-divider" />
+                  </>
+                )}
+                <div className="menu-heading">Add this Study to…</div>
+                {notebooks.map((n) => (
+                  <button key={`s${n.id}`} type="button" className="menu-item" role="menuitem" onClick={() => void addToNotebook(n.id, 'study')}>
+                    <BookOpen size={13} />
+                    {n.name}
+                  </button>
+                ))}
+                <button type="button" className="menu-item" role="menuitem" onClick={() => void addToNotebook(null, 'study')}>
+                  <Plus size={13} />
+                  A new notebook
+                </button>
+              </div>
+            )}
+          </div>
           <button type="button" className="btn pine-btn" onClick={duplicate} title="Duplicate as a new Study">
             <Copy size={14} />
             Duplicate
@@ -543,8 +706,47 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
           </div>
         )}
 
+        {comparePick && (
+          <div className="study-pick-banner" role="status">
+            <GitCompare size={14} />
+            Pick another result under Recent results to compare with “{comparePick.name}”.
+            <button type="button" className="icon-button" aria-label="Cancel comparing" onClick={() => setComparePick(null)}>
+              <X size={13} />
+            </button>
+          </div>
+        )}
         <div className="studies-body">
-          {view === 'results' && result ? (
+          {view === 'compare' && comparing ? (
+            <CompareView
+              a={comparing.a}
+              b={comparing.b}
+              onOpen={(id) => {
+                const info = runs.find((r) => r.id === id);
+                if (info) void openRun(info);
+              }}
+              onClose={() => setView(result ? 'results' : 'build')}
+            />
+          ) : view === 'notebook' && openNotebook ? (
+            <NotebookView
+              key={openNotebook}
+              notebookId={openNotebook}
+              onOpenStudy={(id) => void openStudyById(id)}
+              onOpenResult={(id) => {
+                const info = runs.find((r) => r.id === id);
+                if (info) void openRun(info);
+                else toast('That result is no longer stored.', 'info');
+              }}
+              onCompareResult={(id) => void compareWith(id, runs.find((r) => r.id === id)?.name ?? 'this result')}
+              onChanged={() => void refresh()}
+              onDeleted={() => {
+                setOpenNotebook(null);
+                setView('build');
+                void refresh();
+              }}
+              onClose={() => setView(result ? 'results' : 'build')}
+              say={(text, kind) => toast(text, kind)}
+            />
+          ) : view === 'results' && result ? (
             <StudyResults result={result.data} onOpenEvent={onOpenEvent} onAddToWatchlist={setAdding} />
           ) : (
             <>

@@ -329,6 +329,11 @@ A Study measures what stocks looked like around historical events. Open **Studie
    an outcome set, the events that went on to a gain against those that didn't), and a stock explorer. Runs are stored and
    reopen from **Recent results**.
 
+6. **See what stands out, compare, and keep notes.** Against the comparison group, every measurement is tested (Mann–Whitney,
+   with an effect size) and every characteristic (a difference in shares with a 95% interval), adjusted for how many comparisons
+   a Study makes; *What stands out* lists the clear differences in words. Pick two results under **Recent results** to compare
+   them side by side, and group Studies and results with your notes in a **Research Notebook**.
+
 - **Every event, not just today's.** An event is each date the conditions *first* hold, across the whole history, with a
   cooldown so one move is one event. Filters are judged at the time, with no later data.
 - **Association, not causation.** The results describe what winners looked like; they don't show that any trait caused a move.

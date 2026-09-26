@@ -209,4 +209,26 @@ CREATE TABLE IF NOT EXISTS study_results (
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_study_results_study ON study_results(study_id, executed_at);
+
+-- Research Notebooks: named collections of Studies and results with the user's notes. Items refer to a
+-- Study or a run by id; one whose target has gone is still listed (as no longer available).
+-- `position` is numbered from 1.
+CREATE TABLE IF NOT EXISTS notebooks (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  notes       TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS notebook_items (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  notebook_id  TEXT NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL CHECK (kind IN ('study', 'result')),
+  ref_id       TEXT NOT NULL,
+  note         TEXT NOT NULL DEFAULT '',
+  position     INTEGER NOT NULL,
+  UNIQUE (notebook_id, kind, ref_id)
+);
+CREATE INDEX IF NOT EXISTS idx_notebook_items_ref ON notebook_items(kind, ref_id);
 "#;

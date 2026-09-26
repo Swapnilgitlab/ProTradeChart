@@ -3,7 +3,8 @@
 
 import type { Cell } from '../python/results';
 import { featureLabel, featureUnit, formatValue, offsetLabel, windowLabel } from './metrics';
-import type { StudyResultData } from './result';
+import type { StudyResultData, TestResult } from './result';
+import { describeFinding } from './significance';
 import { describeCondition } from './spec';
 
 /** One CSV field: quoted when it holds a comma, quote or line break, and with a leading `=`, `+`,
@@ -59,24 +60,30 @@ export function stocksCsv(result: StudyResultData): string {
 
 /** One row per metric and observation point: the distribution among events and in the control group. */
 export function metricsCsv(result: StudyResultData): string {
-  const header = ['metric', 'offset_bars', 'observation', 'group', 'count', 'mean', 'median', 'min', 'max', 'p25', 'p75'];
+  const header = [
+    'metric', 'offset_bars', 'observation', 'group', 'count', 'mean', 'median', 'min', 'max', 'p25', 'p75',
+    // The test of events against the comparison group, on the events row.
+    'effect_or_share_diff', 'diff_ci_low', 'diff_ci_high', 'p', 'q',
+  ];
+  const testCells = (t: TestResult | null, group: string): Cell[] =>
+    group === 'events' && t ? [t.effect ?? t.diff, t.low, t.high, t.p, t.q] : [null, null, null, null, null];
   const out: Cell[][] = [];
   for (const s of result.stats) {
     for (const [group, st] of [['events', s.events], ['control', s.control]] as const) {
       if (!st) continue;
-      out.push([s.metric, s.offset, offsetLabel(s.offset), group, st.count, st.mean, st.median, st.min, st.max, st.p25, st.p75]);
+      out.push([s.metric, s.offset, offsetLabel(s.offset), group, st.count, st.mean, st.median, st.min, st.max, st.p25, st.p75, ...testCells(s.test, group)]);
     }
   }
   for (const c of result.characteristics) {
     for (const [group, sh] of [['events', c.events], ['control', c.control]] as const) {
       if (!sh) continue;
-      out.push([`share: ${c.label}`, c.offset, offsetLabel(c.offset), group, sh.count, sh.share, null, null, null, null, null]);
+      out.push([`share: ${c.label}`, c.offset, offsetLabel(c.offset), group, sh.count, sh.share, null, null, null, null, null, ...testCells(c.test, group)]);
     }
   }
   for (const f of result.forward) {
     for (const [group, st] of [['events', f.events], ['control', f.control]] as const) {
       if (!st) continue;
-      out.push([`fwd_return_${f.window}`, f.window, `T+${windowLabel(f.window)}`, group, st.count, st.mean, st.median, st.min, st.max, st.p25, st.p75]);
+      out.push([`fwd_return_${f.window}`, f.window, `T+${windowLabel(f.window)}`, group, st.count, st.mean, st.median, st.min, st.max, st.p25, st.p75, ...testCells(f.test, group)]);
     }
   }
   return toCsv(header, out);
@@ -127,6 +134,12 @@ export function reportMarkdown(result: StudyResultData): string {
   }
   for (const f of result.forward) {
     lines.push(`- Return over the next ${windowLabel(f.window)}: median ${formatValue(f.events.median, 'percent')}, positive in ${pct(f.events.positive.share)}`);
+  }
+  if (result.summary.findings.length) {
+    const group = result.summary.control_kind === 'outcome' ? 'events that reached the outcome' : 'events';
+    const comparison = result.summary.control_kind === 'outcome' ? 'events that didn’t' : 'control dates';
+    lines.push('', '## What stands out', '', ...result.summary.findings.map((f) => `- ${describeFinding(f, group, comparison)}`));
+    lines.push('', 'q-values are adjusted for all of the Study’s comparisons (Benjamini–Hochberg).');
   }
   lines.push(
     '',

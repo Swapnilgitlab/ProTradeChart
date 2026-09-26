@@ -304,6 +304,7 @@ One SQLite file (`charting.db`, in the OS's per-user app data folder), opened by
 | `bars_cache` | Offline fallback for the brokers' bars (keys start `dhan:` / `zerodha:`) |
 | `research_bars`, `research_coverage` | The Python API's store of the brokers' bars, and which span of each series is complete (see "Python") |
 | `studies`, `study_results` | Saved Study Specifications and completed Study runs (see "Studies") |
+| `notebooks`, `notebook_items` | Research Notebooks: Studies and runs grouped with the user's notes |
 | `provider_settings` | Per-provider `enabled` flag and non-secret configuration |
 | `provider_secrets_fallback` | Credentials, **only** when no OS keychain exists (unencrypted; the UI says so) |
 | `dhan_instruments` | Dhan's instrument list, for symbol search and `SecurityId` lookup |
@@ -499,6 +500,18 @@ aggregation → result** — and every part of it is described by the **Study Sp
   the same filters, with no event within `cooldown_days` either side, so a run-up to an event isn't counted as "no event" — or,
   with an `outcome`, the events split by whether they went on to gain `min_return` within `window` bars. Everything is labelled
   a **historical association**; nothing in the UI or the report claims a cause.
+- **Is a difference more than noise?** With a comparison group, `analyze` tests every comparison (`protrade/stats_tests.py`,
+  standard library + numpy/pandas, checked against scipy/statsmodels): Mann–Whitney U for measurements and forward returns
+  (effect size: Cliff's δ, −1…+1), a two-proportion z-test with Newcombe's 95% interval for characteristics, and a
+  Benjamini–Hochberg adjustment across *all* of a Study's tests, since a Study makes dozens of comparisons and some would look
+  significant by chance. Each item carries `test: {p, q, effect | diff/low/high, n_events, n_control}`; `summary.findings` lists
+  up to ten that stand out (q < 0.05 and at least a small effect), one per measurement. Fewer than five on either side means no
+  test. The results page words them as associations (`studies/significance.ts`).
+- **Comparing runs.** `studies/compare.ts` sets two stored runs side by side: their spec differences in the builder's own words
+  (`interpret`) and their figures where both measured the same thing. Nothing reruns.
+- **Research Notebooks** (`store/notebooks.rs`; `notebooks`, `notebook_items`) group Studies and runs with the user's notes, in
+  their order (positions from 1). An entry refers by id and outlives its target ("no longer available"); a run in a notebook is
+  never pruned, and survives its Study's deletion (`store/studies.rs`). Notes are plain text, drawn as text.
 - **Data the app doesn't have is said, not invented.** No source supplies market cap (current or historical), sectors, or a
   point-in-time list of listings. `studies/readiness.ts` reports each as unavailable before a run; a market-cap filter **blocks**
   the run (and the engine refuses one too) and the builder offers the honest alternative — a floor on 50-day average traded
@@ -522,8 +535,8 @@ aggregation → result** — and every part of it is described by the **Study Sp
     is long. The result records seconds per stage (`meta.timings`).
   What is fetched is kept, so a rerun the same day fetches nothing. *Not built:* a rerun on a later day still tops up each
   symbol with one request; Kite's batch quote could fill the newest bar for 1000 symbols a call (see "Python").
-- *Not built yet:* a natural-language builder, AI interpretation, a research notebook, historical market cap and point-in-time
-  universes (they need data the app doesn't have), and statistical tests beyond distributions. The spec, the step-by-step
+- *Not built yet:* a natural-language builder, AI interpretation, and historical market cap and point-in-time universes (they
+  need data the app doesn't have). The spec, the step-by-step
   engine API and the stored results are what those will build on.
 
 ## Themes

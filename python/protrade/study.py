@@ -43,7 +43,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 import pandas as pd
 
-from . import api, client, features as feat, results
+from . import api, client, features as feat, results, stats_tests as tests_mod
 
 SPEC_VERSION = 1
 ENGINE_VERSION = "1.0"
@@ -71,6 +71,9 @@ MAX_CONTROL = 20_000
 HISTOGRAM_BINS = 20
 PATH_POINTS = 120
 LIQUIDITY_FEATURE = "avg_traded_value_50"
+# A difference "stands out" below this false-discovery rate; at most this many are listed.
+FINDING_Q = 0.05
+MAX_FINDINGS = 10
 # Requests kept in flight to the app. It paces the broker itself; this only has to be enough that
 # a request is always waiting at that pace, whatever each round trip costs.
 LOAD_WORKERS = 8
@@ -926,6 +929,8 @@ class ResearchStudy:
                 }
             )
 
+        findings = self._test_differences(measured, control, stats, characteristics, forward) if has_control else []
+
         max_events = spec["output"]["max_events"]
         table_columns = ["symbol", "name", "event_date", "event_value", "price", "market_cap", "avg_traded_value"]
         table_columns += [column(m, o) for m in spec["metrics"] for o in points]
@@ -956,6 +961,7 @@ class ResearchStudy:
             "median_event_value": _round(_median(measured.get("event_value"))),
             "control_samples": int(len(control)),
             "control_kind": "outcome" if spec["outcome"] is not None else ("random" if has_control else "none"),
+            "findings": findings,
             "outcome": self.outcome_counts,
         }
         meta = {
@@ -1034,6 +1040,58 @@ class ResearchStudy:
         missed = events[reached == 0].reset_index(drop=True)
         return met, missed
 
+    def _test_differences(self, measured, control, stats, characteristics, forward) -> list[dict]:
+        """Tests every comparison of the events with the comparison group, in place: a Mann–Whitney
+        test for each measurement and forward return, a two-proportion test for each characteristic.
+        The p-values are adjusted together (Benjamini–Hochberg), since a Study makes dozens of
+        comparisons and some would look significant by chance. Returns the differences that stand
+        out: q < 0.05 and at least a small effect, strongest first."""
+        tests: list[dict] = []
+        for item in stats:
+            name = column(item["metric"], item["offset"])
+            result = tests_mod.mann_whitney(measured.get(name, []), control.get(name, []))
+            item["test"] = _test_json(result, "effect")
+            if item["test"]:
+                tests.append({"kind": "metric", "metric": item["metric"], "offset": item["offset"], "test": item["test"]})
+        for item in characteristics:
+            e, c = item["events"], item["control"] or {}
+            result = tests_mod.two_proportions(e["true"], e["count"], c.get("true", 0), c.get("count", 0))
+            item["test"] = _test_json(result, "diff")
+            if item["test"]:
+                tests.append({"kind": "characteristic", "label": item["label"], "offset": item["offset"], "test": item["test"]})
+        for item in forward:
+            name = f"fwd_return_{item['window']}"
+            result = tests_mod.mann_whitney(measured.get(name, []), control.get(name, []))
+            item["test"] = _test_json(result, "effect")
+            if item["test"]:
+                tests.append({"kind": "forward", "window": item["window"], "test": item["test"]})
+        qs = tests_mod.benjamini_hochberg([t["test"]["p"] for t in tests])
+        for t, q in zip(tests, qs):
+            t["test"]["q"] = _round(q)
+
+        def strength(t: dict) -> float:
+            if t["kind"] == "characteristic":
+                return abs(t["test"]["diff"] or 0)
+            return abs(t["test"]["effect"] or 0)
+
+        notable = [
+            t
+            for t in tests
+            if t["test"]["q"] is not None
+            and t["test"]["q"] < FINDING_Q
+            and (t["kind"] == "characteristic" or abs(t["test"]["effect"] or 0) >= tests_mod.SMALL)
+        ]
+        notable.sort(key=strength, reverse=True)
+        # One line per measurement: the observation point where it differs most, so the list shows
+        # several traits rather than one trait at every point.
+        seen, out = set(), []
+        for t in notable:
+            key = (t["kind"], t.get("metric") or t.get("label") or t.get("window"))
+            if key not in seen:
+                seen.add(key)
+                out.append(t)
+        return out[:MAX_FINDINGS]
+
     def run(self) -> dict:
         """Every step, as the spec describes them. What the app's Run Study does."""
         symbols = self.universe()
@@ -1067,6 +1125,18 @@ def _median(series) -> float | None:
         return None
     values = pd.to_numeric(pd.Series(series), errors="coerce").dropna()
     return float(values.median()) if len(values) else None
+
+
+def _test_json(result: dict | None, key: str) -> dict | None:
+    """A test's result for the payload: rounded, with the group sizes, and a q-value filled in later."""
+    if result is None:
+        return None
+    out = {"p": _round(result["p"]), "q": None, "n_events": int(result["n1"]), "n_control": int(result["n2"])}
+    if key == "effect":
+        out["effect"] = _round(result["effect"])
+    else:
+        out.update(diff=_round(result["diff"]), low=_round(result["low"]), high=_round(result["high"]))
+    return out
 
 
 def _positive(series: pd.Series) -> pd.Series:

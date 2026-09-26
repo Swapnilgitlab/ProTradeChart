@@ -32,6 +32,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../../../python/protrade/run_study.py"),
     ),
     ("protrade/stats.py", include_str!("../../../python/protrade/stats.py")),
+    (
+        "protrade/stats_tests.py",
+        include_str!("../../../python/protrade/stats_tests.py"),
+    ),
     ("protrade/study.py", include_str!("../../../python/protrade/study.py")),
 ];
 

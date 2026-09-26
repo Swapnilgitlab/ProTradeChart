@@ -230,6 +230,42 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(len(measured), 120)
         self.assertEqual(out.getvalue().count("Calculating metrics"), 3, "at symbols 0, 50 and 100")
 
+    def test_differences_from_the_control_group_are_tested_and_the_clear_ones_listed(self):
+        # Thirty stocks that double (each at a different date) and thirty that drift: before the
+        # event the winners were climbing, the control dates weren't.
+        days = pd.Timestamp("2019-03-01")
+        data = {f"zerodha:NSE:W{i}": features_of(doubler(f"{days + pd.offsets.BDay(7 * i):%Y-%m-%d}")) for i in range(30)}
+        data.update({f"zerodha:NSE:F{i}": features_of(wobble(i)) for i in range(30)})
+        s = study.ResearchStudy(spec(), progress=False)
+        events = s.detect_events(data)
+        measured = s.measure(events, data)
+        control = s.measure(s.control_group(data, events), data)
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            result = s.analyze(measured, control, data, show=False)
+        tested = next(x for x in result["stats"] if x["metric"] == "return_63" and x["offset"] == -21)
+        self.assertLess(tested["test"]["q"], 0.05)
+        self.assertGreater(tested["test"]["effect"], 0.474, "winners were climbing far more than control dates")
+        self.assertEqual(tested["test"]["n_events"], 30)
+        character = next(x for x in result["characteristics"] if x["offset"] == -21)
+        self.assertGreater(character["test"]["diff"], 0)
+        self.assertLessEqual(character["test"]["low"], character["test"]["diff"])
+        findings = result["summary"]["findings"]
+        self.assertTrue(findings)
+        self.assertLessEqual(len(findings), study.MAX_FINDINGS)
+        self.assertTrue(all(f["test"]["q"] < study.FINDING_Q for f in findings))
+        keys = [(f["kind"], f.get("metric") or f.get("label") or f.get("window")) for f in findings]
+        self.assertEqual(len(keys), len(set(keys)), "one finding per measurement")
+        json.dumps(result)
+
+    def test_with_too_few_events_there_are_no_tests(self):
+        events = self.study.detect_events(self.data)
+        measured = self.study.measure(events, self.data)
+        control = self.study.measure(self.study.control_group(self.data, events), self.data)
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            result = self.study.analyze(measured, control, self.data, show=False)
+        self.assertTrue(all(x["test"] is None for x in result["stats"]))
+        self.assertEqual(result["summary"]["findings"], [])
+
     def test_a_point_outside_the_history_is_blank(self):
         events = self.study.detect_events(self.data)
         events.loc[0, "pos"] = 10

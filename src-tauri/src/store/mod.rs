@@ -6,6 +6,7 @@ pub mod bars_cache;
 pub mod datasets;
 pub mod instrument_list;
 pub mod layouts;
+pub mod notebooks;
 pub mod preferences;
 pub mod provider_settings;
 pub mod research_bars;

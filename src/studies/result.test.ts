@@ -29,6 +29,22 @@ describe('parseStudyResult', () => {
     expect(r.warnings.map((w) => w.code)).toContain('market_cap_unavailable');
   });
 
+  it('reads the tests and findings, clamped, and drops malformed findings', () => {
+    const raw = fresh();
+    const stats = raw.stats as Record<string, unknown>[];
+    stats[0].test = { p: 0.001, q: 0.004, n_events: 30, n_control: 60, effect: 1.7 };
+    (raw.summary as Record<string, unknown>).findings = [
+      { kind: 'metric', metric: 'return_63', offset: -63, test: { p: 0.001, q: 0.004, effect: 0.6, n_events: 30, n_control: 60 } },
+      { kind: 'characteristic', label: 'Above 200 EMA', offset: 0, test: { p: 0.01, q: 0.02, diff: 0.3, low: 0.1, high: 0.5 } },
+      { kind: 'metric', offset: 0, test: {} },
+      { kind: 'html', test: {} },
+    ];
+    const r = parseStudyResult(raw)!;
+    expect(r.stats[0].test).toMatchObject({ q: 0.004, effect: 1, n_events: 30 });
+    expect(r.stats[1].test).toBeNull();
+    expect(r.summary.findings.map((f) => f.kind)).toEqual(['metric', 'characteristic']);
+  });
+
   it('refuses what isn’t a study result', () => {
     expect(parseStudyResult(null)).toBeNull();
     expect(parseStudyResult({ ...fresh(), format: 2 })).toBeNull();

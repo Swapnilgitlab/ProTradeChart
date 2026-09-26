@@ -211,6 +211,14 @@ pub fn run() {
             study_commands::delete_study_result,
             study_commands::study_run,
             study_commands::study_estimate,
+            study_commands::list_notebooks,
+            study_commands::get_notebook,
+            study_commands::save_notebook,
+            study_commands::delete_notebook,
+            study_commands::add_notebook_item,
+            study_commands::remove_notebook_item,
+            study_commands::set_notebook_item_note,
+            study_commands::set_notebook_order,
             study_commands::export_study_file,
         ])
         .run(tauri::generate_context!())

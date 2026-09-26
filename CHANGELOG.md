@@ -56,6 +56,13 @@ project uses [Semantic Versioning](https://semver.org).
   will be loaded, how many are already stored and roughly how long the rest will take, and offers a trial on 100 stocks.
   New *Listings* choices add the trade-for-trade (BE) and SME series. Each result records how long each stage took.
 
+- **Studies: significance, comparisons and Research Notebooks.** Each Study now tests whether its events really differ from
+  the comparison group — a Mann–Whitney test with an effect size for every measurement and forward return, and a difference
+  in shares with a 95% interval for every characteristic, adjusted for the Study's many comparisons — and lists what stands out
+  in plain words, still as historical association. Two stored results can be compared side by side, with how their Studies
+  differ spelled out. Research Notebooks group Studies and results with your notes; a result kept in a notebook is never pruned.
+  The CSV and the report include the tests.
+
 ### Fixed
 
 - **Cached daily bars no longer vanish.** The offline cache trimmed old intraday data by comparing against interval names the

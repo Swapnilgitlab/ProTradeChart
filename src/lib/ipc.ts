@@ -585,3 +585,53 @@ export interface StudyEstimate {
 
 /** What a Study's data will cost to load. Reads the database only; asks no broker. */
 export const studyEstimate = (request: StudyEstimateRequest) => invoke<StudyEstimate>('study_estimate', { request });
+
+// ---- Research Notebooks -------------------------------------------------------
+
+export interface NotebookSummary {
+  id: string;
+  name: string;
+  itemCount: number;
+  updatedAt: string;
+}
+
+export type NotebookItemKind = 'study' | 'result';
+
+/** An entry of a notebook. `title`/`detail` (name, date) are null when its target has been deleted. */
+export interface NotebookItem {
+  id: number;
+  kind: NotebookItemKind;
+  refId: string;
+  note: string;
+  position: number;
+  title: string | null;
+  detail: string | null;
+}
+
+export interface NotebookDetail {
+  id: string;
+  name: string;
+  notes: string;
+  updatedAt: string;
+  items: NotebookItem[];
+}
+
+export const listNotebooks = () => invoke<NotebookSummary[]>('list_notebooks');
+
+export const getNotebook = (id: string) => invoke<NotebookDetail | null>('get_notebook', { id });
+
+/** Creates or renames a notebook and sets its notes. */
+export const saveNotebook = (id: string, name: string, notes: string) => invoke<void>('save_notebook', { id, name, notes });
+
+export const deleteNotebook = (id: string) => invoke<void>('delete_notebook', { id });
+
+/** Adds a Study or a stored result to the end of a notebook; one already there is left as it is. */
+export const addNotebookItem = (notebookId: string, kind: NotebookItemKind, refId: string) =>
+  invoke<void>('add_notebook_item', { notebookId, kind, refId });
+
+export const removeNotebookItem = (itemId: number) => invoke<void>('remove_notebook_item', { itemId });
+
+export const setNotebookItemNote = (itemId: number, note: string) => invoke<void>('set_notebook_item_note', { itemId, note });
+
+/** Puts a notebook's entries in this order. */
+export const setNotebookOrder = (notebookId: string, itemIds: number[]) => invoke<void>('set_notebook_order', { notebookId, itemIds });
