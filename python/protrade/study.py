@@ -789,10 +789,11 @@ class ResearchStudy:
             columns[name][i] = values
 
         groups = events.groupby("symbol", sort=False)
-        low, high = self._measure_band
-        for n, (symbol, group) in enumerate(groups):
-            if n % 50 == 0:
-                self.progress(low + int((high - low) * n / max(groups.ngroups, 1)), self._measure_stage)
+        # Named apart from the loop's own `n`, `high` and `low` (a symbol's length and prices).
+        band_low, band_high = self._measure_band
+        for done, (symbol, group) in enumerate(groups):
+            if done % 50 == 0:
+                self.progress(band_low + int((band_high - band_low) * done / max(groups.ngroups, 1)), self._measure_stage)
             features = data[symbol]
             n = len(features)
             rows = group.index.to_numpy()

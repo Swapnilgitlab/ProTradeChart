@@ -218,6 +218,18 @@ class EngineTests(unittest.TestCase):
             self.assertAlmostEqual(measured[f"fwd_max_gain_{window}"].iloc[0], after["high"].max() / close - 1)
             self.assertAlmostEqual(measured[f"fwd_max_drawdown_{window}"].iloc[0], after["low"].min() / close - 1)
 
+    def test_measuring_many_symbols_reports_progress_along_the_way(self):
+        # Progress is reported every 50 symbols; a report past the first once crashed because the
+        # loop reused the band's names for each symbol's high and low prices.
+        data = {f"zerodha:NSE:W{i}": features_of(doubler()) for i in range(120)}
+        s = study.ResearchStudy(spec(), progress=True)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            events = s.detect_events(data)
+            measured = s.measure(events, data)
+        self.assertEqual(len(measured), 120)
+        self.assertEqual(out.getvalue().count("Calculating metrics"), 3, "at symbols 0, 50 and 100")
+
     def test_a_point_outside_the_history_is_blank(self):
         events = self.study.detect_events(self.data)
         events.loc[0, "pos"] = 10
