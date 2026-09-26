@@ -1,20 +1,44 @@
 version: 2
+
+# Dependency updates arrive as pull requests against `develop`, like any other change: `main` only moves when the
+# owner says so. Dependabot reads this file from the default branch, so it takes effect once `main` has it.
+#
+# Monthly and capped at two open PRs per ecosystem, so the branch list stays short. Minor and patch updates share one
+# PR; a major version of a build-toolchain package is not proposed at all (see `ignore`), because taking one means
+# migrating config and types by hand — do that on purpose, in its own change.
 updates:
   - package-ecosystem: npm
     directory: /
+    target-branch: develop
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 2
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: vite
+        update-types: ["version-update:semver-major"]
+      - dependency-name: vitest
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitejs/plugin-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: lucide-react
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: cargo
     directory: /src-tauri
+    target-branch: develop
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 2
     groups:
       minor-and-patch:
         update-types: [minor, patch]
   - package-ecosystem: github-actions
     directory: /
+    target-branch: develop
     schedule:
       interval: monthly
+    open-pull-requests-limit: 2
