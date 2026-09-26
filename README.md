@@ -317,9 +317,12 @@ A Study measures what stocks looked like around historical events. Open **Studie
    Zerodha or Dhan), index data, and what isn't available. **Market cap, sectors and point-in-time universes are not available
    from these sources**: a market-cap filter can't run, and the builder offers a traded-value floor instead (only if you pick
    it); results warn about survivorship bias.
-4. **Run Study.** Python does the work (the same setup as the Python tab), with a progress bar. The first run over a whole
-   exchange fetches every symbol's history at your broker's rate limit, which can take a while; it is kept, so reruns are quick.
-   *Only the first N symbols* makes a quick trial.
+4. **Run Study.** Python does the work (the same setup as the Python tab), with a progress bar and the time left. The data
+   check says beforehand how many stocks will be loaded, how many are already stored and roughly how long the rest take:
+   the first run over a whole exchange fetches every stock's history at your broker's rate limit (Zerodha: about three stocks
+   a second, so NSE's ~2,000 shares take ~12 minutes; adding BSE takes several times longer). It is kept, so reruns are quick.
+   Bonds, gold bonds, T-bills and funds on an exchange's list are left out; tick *Trade-for-trade* or *SME* to include those
+   series. *Try it on the first 100 symbols* makes a quick trial.
 5. **Read the results.** A summary, the table of every event (click the chart icon to open that stock framed around the
    event, with a mark on it), the typical price path through the event, distributions of each metric at each observation
    point, before vs after, results by liquidity, the events against a **control group** of random non-event dates (or, with

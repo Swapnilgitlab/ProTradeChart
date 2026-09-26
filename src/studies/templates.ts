@@ -57,6 +57,7 @@ function base(name: string, template: string, description: string, event: StudyS
       source: 'instruments',
       provider: 'zerodha',
       exchanges: ['NSE'],
+      series: ['EQ'],
       watchlist: null,
       symbols: [],
       market_cap_min: null,

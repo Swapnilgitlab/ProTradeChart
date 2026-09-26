@@ -210,6 +210,7 @@ pub fn run() {
             study_commands::save_study_result,
             study_commands::delete_study_result,
             study_commands::study_run,
+            study_commands::study_estimate,
             study_commands::export_study_file,
         ])
         .run(tauri::generate_context!())

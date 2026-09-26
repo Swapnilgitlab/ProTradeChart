@@ -49,6 +49,13 @@ project uses [Semantic Versioning](https://semver.org).
   and software versions; **Generate Python** writes an editable step-by-step script, and **Export** saves the spec, Python,
   event / stock / metric CSVs, the full result or a report.
 
+- **Studies load much faster, and say how long they will take.** A Study now fetches only shares — an exchange's "equity"
+  list is mostly bonds, gold bonds, G-secs, T-bills and funds, and they were each costing a broker request — and studies a
+  company listed on NSE and BSE once. Loading keeps the broker's rate limit busy the whole time and finds events while the
+  rest is still arriving, with the rate and time left in the progress bar. Before a run, the data check shows how many stocks
+  will be loaded, how many are already stored and roughly how long the rest will take, and offers a trial on 100 stocks.
+  New *Listings* choices add the trade-for-trade (BE) and SME series. Each result records how long each stage took.
+
 ### Fixed
 
 - **Cached daily bars no longer vanish.** The offline cache trimmed old intraday data by comparing against interval names the

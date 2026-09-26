@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio::sync::oneshot;
@@ -13,7 +14,8 @@ use crate::models::{Study, StudyResult, StudyResultInfo};
 use crate::pyapi::valid_run_id;
 use crate::python::PythonState;
 use crate::python_commands::{paths, start_python, StartRun};
-use crate::store::studies;
+use crate::store::instrument_list::{self, Filter, Source};
+use crate::store::{studies, study_universe};
 
 /// A spec is a few kilobytes; anything near this is not one.
 const MAX_SPEC_BYTES: usize = 1024 * 1024;
@@ -65,6 +67,92 @@ pub fn delete_study_result(id: String, db: State<Database>) -> Result<(), String
         &*db.conn.lock().map_err(|e| e.to_string())?,
         &id,
     ))
+}
+
+/// The universe a Study would load, to price before it runs: a broker's instrument list, or symbols.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EstimateRequest {
+    /// The instrument list to read, when `symbols` is absent.
+    pub provider: String,
+    pub exchanges: Vec<String>,
+    pub series: Vec<String>,
+    /// A watchlist's or a list's symbols, used as they are.
+    pub symbols: Option<Vec<String>>,
+    /// The first bar the Study loads, epoch ms.
+    pub from_ms: i64,
+    /// Study only the first N symbols.
+    pub max_symbols: Option<usize>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudyEstimate {
+    pub symbols: usize,
+    pub stored: usize,
+    pub requests: usize,
+    pub seconds: f64,
+    /// Listings left out as not stocks (bonds, SGBs, funds…) or as a second listing of a company.
+    pub listings_skipped: usize,
+}
+
+/// How many symbols a Study would load, how many are already stored, and roughly how long the rest
+/// take at the broker's pace. Reads only the database; asks no broker.
+#[tauri::command]
+pub fn study_estimate(request: EstimateRequest, db: State<Database>) -> Result<StudyEstimate, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let (mut symbols, skipped) = match request.symbols {
+        Some(list) => {
+            let mut seen = std::collections::HashSet::new();
+            (
+                list.into_iter().filter(|s| seen.insert(s.clone())).collect::<Vec<_>>(),
+                0,
+            )
+        }
+        None => {
+            let source = Source::parse(&request.provider).ok_or("Studies read Zerodha or Dhan data only.")?;
+            let mut rows = Vec::new();
+            for exchange in &request.exchanges {
+                let filter = Filter {
+                    exchange: Some(exchange.clone()),
+                    kind: Some("EQUITY".into()),
+                    query: None,
+                };
+                for listed in instrument_list::list(&conn, source, &filter, 50_000).map_err(|e| e.to_string())? {
+                    rows.push((format!("{}:{}", request.provider, listed.ticker), listed.name));
+                }
+            }
+            let picked = study_universe::pick_listings(&rows, &request.series);
+            let skipped = rows.len() - picked.len();
+            (picked, skipped)
+        }
+    };
+    if let Some(max) = request.max_symbols {
+        symbols.truncate(max);
+    }
+    // Kite serves up to 2000 days of daily bars a call; Dhan's daily history is one call.
+    let all_dhan = symbols.iter().all(|s| s.starts_with("dhan:")) && !symbols.is_empty();
+    let (window_days, gap) = if all_dhan {
+        (100_000, crate::dhan::client::Pacing::default().data_gap)
+    } else {
+        (2_000, crate::zerodha::client::Pacing::default().data_gap)
+    };
+    let e = study_universe::estimate(
+        &conn,
+        &symbols,
+        request.from_ms,
+        crate::db::now_ms(),
+        window_days,
+        gap.as_millis() as u64,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(StudyEstimate {
+        symbols: e.symbols,
+        stored: e.stored,
+        requests: e.requests,
+        seconds: e.seconds,
+        listings_skipped: skipped,
+    })
 }
 
 /// Where a run's spec is written for the engine to read: named by the run, which is checked

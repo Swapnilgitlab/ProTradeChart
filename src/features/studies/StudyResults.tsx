@@ -149,7 +149,18 @@ export function StudyResults({ result, onOpenEvent, onAddToWatchlist }: Props) {
             ))}
           <Tile label="Median avg traded value" value={summary.median_avg_traded_value === null ? '—' : formatRupees(summary.median_avg_traded_value)} />
           <Tile label="Market cap" value="Unavailable" muted />
-          <Tile label="Data coverage" value={`${meta.symbols_loaded} of ${meta.symbols_requested} symbols`} hint={meta.symbols_short_history ? `${meta.symbols_short_history} with shorter history` : undefined} />
+          <Tile
+            label="Data coverage"
+            value={`${meta.symbols_loaded} of ${meta.symbols_requested} symbols`}
+            hint={
+              [
+                meta.symbols_short_history ? `${meta.symbols_short_history} with shorter history` : null,
+                meta.listings_skipped ? `${meta.listings_skipped} non-stock listings left out` : null,
+              ]
+                .filter(Boolean)
+                .join(' · ') || undefined
+            }
+          />
           <Tile label="Data through" value={meta.data_through ?? '—'} hint={meta.data_source ?? undefined} />
           <Tile label="Executed" value={meta.executed_at.replace('T', ' ').slice(0, 16)} hint={`data version ${meta.data_version ?? '—'}`} />
         </div>
@@ -534,7 +545,8 @@ export function StudyResults({ result, onOpenEvent, onAddToWatchlist }: Props) {
 
       <footer className="study-repro muted small">
         Reproducibility: spec v{spec.version} · engine {meta.engine_version ?? '?'} · app {meta.app_version ?? '?'} · Python {meta.python_version ?? '?'} · pandas{' '}
-        {meta.pandas_version ?? '?'} · data {meta.data_from ?? '?'} to {meta.data_through ?? '?'} ({meta.data_version ?? '?'}) · took {meta.elapsed_seconds ?? '?'} s. Prices
+        {meta.pandas_version ?? '?'} · data {meta.data_from ?? '?'} to {meta.data_through ?? '?'} ({meta.data_version ?? '?'}) · took {meta.elapsed_seconds ?? '?'} s
+        {Object.keys(meta.timings).length > 0 && ` (${Object.entries(meta.timings).map(([stage, sec]) => `${stage.replace(/_/g, ' ')} ${sec} s`).join(', ')})`}. Prices
         are used as the data source supplied them (adjusted for corporate actions at source).
       </footer>
     </div>

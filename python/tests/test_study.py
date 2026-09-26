@@ -117,6 +117,50 @@ class SpecTests(unittest.TestCase):
         self.assertLess(study.fetch_start(s), pd.Timestamp("2016-01-15").date())
 
 
+class UniverseTests(unittest.TestCase):
+    def test_only_shares_count_as_stocks(self):
+        cases = {
+            ("RELIANCE", "RELIANCE INDUSTRIES"): "EQ",
+            ("XYZ-BE", "XYZ"): "BE",
+            ("XYZ-BZ", "XYZ"): "BE",
+            ("ABC-SM", "ABC"): "SME",
+            ("ABC-ST", "ABC"): "SME",
+            ("IRFC-N2", "IRFC"): None,  # a bond
+            ("SGBAUG28V-GB", "SGB"): None,  # a sovereign gold bond
+            ("GS2030-GS", "GOI"): None,
+            ("364D210226", "TBILL"): None,
+            ("1030FC24", "ABC FINANCE NCD"): None,
+            ("NIFTYBEES", "NIPPON INDIA ETF NIFTY BEES"): None,
+            ("GOLDETF", None): None,
+            ("EMBASSY-RR", "EMBASSY OFFICE PARKS REIT"): None,
+            ("", None): None,
+        }
+        for (ticker, name), expected in cases.items():
+            self.assertEqual(study.listing_series(ticker, name), expected, ticker)
+
+    def test_a_company_on_two_exchanges_is_studied_once(self):
+        rows = [
+            ("zerodha:NSE:RELIANCE", "RELIANCE INDUSTRIES"),
+            ("zerodha:NSE:IRFC-N2", "IRFC"),
+            ("zerodha:NSE:XYZ-BE", "XYZ"),
+            ("zerodha:BSE:RELIANCE", "Reliance Industries Ltd."),
+            ("zerodha:BSE:RELIND", "RELIANCE INDUSTRIES LIMITED"),  # spelled differently on BSE
+            ("zerodha:BSE:XYZ", "XYZ Ltd"),
+            ("zerodha:BSE:BSEONLY", "BSE ONLY LTD"),
+        ]
+        self.assertEqual([s for s, _ in study.pick_listings(rows)], ["zerodha:NSE:RELIANCE", "zerodha:BSE:XYZ", "zerodha:BSE:BSEONLY"])
+        self.assertEqual(
+            [s for s, _ in study.pick_listings(rows, ["EQ", "BE"])],
+            ["zerodha:NSE:RELIANCE", "zerodha:NSE:XYZ-BE", "zerodha:BSE:BSEONLY"],
+        )
+
+    def test_the_series_are_part_of_the_spec(self):
+        self.assertEqual(study.normalize_spec(spec())["universe"]["series"], ["EQ"])
+        self.assertEqual(study.normalize_spec(spec(universe={"series": ["SME", "EQ"]}))["universe"]["series"], ["EQ", "SME"])
+        with self.assertRaises(study.SpecError):
+            study.normalize_spec(spec(universe={"series": ["GB"]}))
+
+
 class EngineTests(unittest.TestCase):
     def setUp(self):
         self.data = {"zerodha:NSE:WIN": features_of(doubler()), "zerodha:NSE:FLAT": features_of(wobble(3))}
@@ -162,6 +206,17 @@ class EngineTests(unittest.TestCase):
         self.assertAlmostEqual(measured["fwd_return_63"].iloc[0], f.get("close").iloc[pos + 63] / f.get("close").iloc[pos] - 1)
         self.assertLessEqual(measured["fwd_max_drawdown_63"].iloc[0], 0.0)
         self.assertEqual(measured["char_0@-21"].iloc[0], 1.0, "a climbing stock is above its 200 EMA")
+
+    def test_forward_gains_and_falls_are_the_best_and_worst_after_the_event(self):
+        events = self.study.detect_events(self.data)
+        measured = self.study.measure(events, self.data)
+        pos = int(events["pos"].iloc[0])
+        bars = self.data["zerodha:NSE:WIN"].bars
+        close = bars["close"].iloc[pos]
+        for window in (63, 126):
+            after = bars.iloc[pos + 1: pos + window + 1]
+            self.assertAlmostEqual(measured[f"fwd_max_gain_{window}"].iloc[0], after["high"].max() / close - 1)
+            self.assertAlmostEqual(measured[f"fwd_max_drawdown_{window}"].iloc[0], after["low"].min() / close - 1)
 
     def test_a_point_outside_the_history_is_blank(self):
         events = self.study.detect_events(self.data)
@@ -301,6 +356,49 @@ class RunTests(Case):
         # The fetch reached back far enough for a 52-week high 12 months before a 2018 event.
         starts = sorted(int(r["query"]["from"]) for r in self.stub.requests if r["path"] == "/v1/bars")
         self.assertLessEqual(starts[0], ms("2016-01-20"))
+
+    def test_loading_keeps_many_requests_in_flight_and_reports_time_left(self):
+        # The app paces the broker; the engine's job is to always have requests waiting at that
+        # pace, so a slow round trip never leaves the pace idle.
+        import threading
+        import time as _time
+
+        state = {"now": 0, "most": 0}
+        lock = threading.Lock()
+        many = {f"zerodha:NSE:S{i}": wobble(i) for i in range(40)}
+
+        def slow(query):
+            with lock:
+                state["now"] += 1
+                state["most"] = max(state["most"], state["now"])
+            _time.sleep(0.05)
+            with lock:
+                state["now"] -= 1
+            closes = many[query["symbol"]]
+            return 200, body(query["symbol"], closes[-300:])
+
+        self.stub.routes["/v1/bars"] = slow
+        s = study.ResearchStudy(spec(universe={"source": "symbols", "symbols": list(many)}), progress=True)
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            data = s.load(list(many))
+        self.assertEqual(len(data), 40)
+        self.assertGreaterEqual(state["most"], study.LOAD_WORKERS - 1)
+        self.assertIn("Loading historical data (40/40)", out.getvalue())
+        self.assertIn("load", s.timings)
+
+    def test_symbols_that_can_never_qualify_are_not_kept(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "spec.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(spec(universe={"source": "instruments", "min_avg_traded_value": 1.2e7}), f)
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                self.assertEqual(run_study.main(["run_study", path]), 0)
+        meta = self.stub.posted()[0]["data"]["meta"]
+        # All three series were loaded and fingerprinted; only the one liquid enough is kept.
+        self.assertEqual(meta["symbols_loaded"], 3)
+        self.assertLess(meta["symbols_kept"], 3)
+        self.assertIn("load_and_detect", meta["timings"])
 
     def test_a_problem_the_user_can_fix_is_said_without_a_traceback(self):
         with tempfile.TemporaryDirectory() as folder:

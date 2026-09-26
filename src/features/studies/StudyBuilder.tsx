@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from 'react';
 import { AlertTriangle, CheckCircle2, CircleSlash, Info, Plus, X } from 'lucide-react';
 import { canonicalFeature, featureLabel, SUGGESTED_METRICS, windowLabel } from '../../studies/metrics';
 import type { Readiness, ReadinessFix } from '../../studies/readiness';
-import { interpret, normalizeSpec, type Condition, type PreEventFilter, type StudySpec } from '../../studies/spec';
+import { interpret, normalizeSpec, type Condition, type PreEventFilter, type Series, type StudySpec } from '../../studies/spec';
 import { ConditionList } from './ConditionList';
 
 interface Props {
@@ -16,6 +16,12 @@ interface Props {
 }
 
 const CRORE = 1e7;
+
+const SERIES_CHOICES: [Series, string][] = [
+  ['EQ', 'Ordinary shares'],
+  ['BE', 'Trade-for-trade (BE)'],
+  ['SME', 'SME'],
+];
 
 /** A number field that keeps what is being typed and reports a number, or null when empty. */
 function NumberField({ value, onChange, scale = 1, label, min, placeholder }: {
@@ -142,6 +148,19 @@ export function StudyBuilder({ draft, onChange, problem, readiness, onApplyFix, 
                         }
                       />
                       {ex}
+                    </label>
+                  ))}
+                </fieldset>
+                <fieldset className="study-field study-checks" title="Bonds, SGBs, G-secs, T-bills and funds are always left out">
+                  <legend>Listings</legend>
+                  {SERIES_CHOICES.map(([id, label]) => (
+                    <label key={id}>
+                      <input
+                        type="checkbox"
+                        checked={u.series.includes(id)}
+                        onChange={(e) => setUniverse({ series: e.currentTarget.checked ? [...u.series, id] : u.series.filter((x) => x !== id) })}
+                      />
+                      {label}
                     </label>
                   ))}
                 </fieldset>

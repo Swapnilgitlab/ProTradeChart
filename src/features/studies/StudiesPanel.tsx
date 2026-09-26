@@ -10,6 +10,7 @@ import {
   errorMessage,
   exportStudyFile,
   getStudyResult,
+  getWatchlist,
   listStudies,
   listStudyResults,
   listWatchlists,
@@ -17,6 +18,7 @@ import {
   runStudy,
   saveStudy,
   stopPythonRun,
+  studyEstimate,
   type PythonEnvStatus,
   type StudyExportKind,
   type StudyResultInfo,
@@ -27,7 +29,7 @@ import { formatElapsed } from '../../python/format';
 import { generatePython, scriptName } from '../../studies/codegen';
 import { eventsCsv, metricsCsv, reportMarkdown, resultJson, specJson, stocksCsv } from '../../studies/exports';
 import { parseProgress, type StudyProgress } from '../../studies/progress';
-import { applyFix, checkReadiness, type ReadinessFix } from '../../studies/readiness';
+import { applyFix, checkReadiness, loadFrom, type ReadinessFix, type UniverseEstimate } from '../../studies/readiness';
 import { parseRunSummary, parseStudyResult, type StudyResultData } from '../../studies/result';
 import { normalizeSpec, specProblem, type StudySpec } from '../../studies/spec';
 import { fromTemplate, TEMPLATES } from '../../studies/templates';
@@ -83,7 +85,9 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
   const { providers } = useProviderState();
   const [studies, setStudies] = useState<StudyRow[]>([]);
   const [runs, setRuns] = useState<StudyResultInfo[]>([]);
-  const [watchlists, setWatchlists] = useState<string[]>([]);
+  const [watchlistRows, setWatchlistRows] = useState<{ id: number; name: string }[]>([]);
+  const watchlists = useMemo(() => watchlistRows.map((w) => w.name), [watchlistRows]);
+  const [estimate, setEstimate] = useState<UniverseEstimate | null>(null);
   const [env, setEnv] = useState<PythonEnvStatus | null>(null);
   const [current, setCurrent] = useState<Current>(() => fresh());
   const [view, setView] = useState<'build' | 'results'>('build');
@@ -105,6 +109,50 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
 
   const problem = useMemo(() => specProblem(current.spec), [current.spec]);
   const dirty = savedForm(current.spec) !== current.baseline;
+  // What the universe will cost to load, re-read as the spec changes (after a pause in typing).
+  // Only the parts it depends on are keyed, so editing a metric doesn't ask again.
+  const estimateKey = useMemo(() => {
+    if (problem) return null;
+    const spec = normalizeSpec(current.spec);
+    return JSON.stringify({ universe: spec.universe, from: loadFrom(spec) });
+  }, [problem, current.spec]);
+  useEffect(() => {
+    if (!visible || !estimateKey) {
+      setEstimate(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const { universe: u, from } = JSON.parse(estimateKey) as { universe: StudySpec['universe']; from: string };
+        let symbols: string[] | null = null;
+        if (u.source === 'symbols') symbols = u.symbols;
+        if (u.source === 'watchlist') {
+          const row = watchlistRows.find((w) => w.name.toLowerCase() === (u.watchlist ?? '').toLowerCase());
+          if (!row) return;
+          symbols = (await getWatchlist(row.id)).items.map((i) => i.symbol).filter((sym) => /^(zerodha|dhan):/.test(sym));
+        }
+        const result = await studyEstimate({
+          provider: u.provider,
+          exchanges: u.exchanges,
+          series: u.series,
+          symbols,
+          // The first bar loaded, at midnight IST, as the engine asks for it.
+          fromMs: Date.parse(`${from}T00:00:00+05:30`),
+          maxSymbols: u.max_symbols,
+        });
+        if (!cancelled) setEstimate(result);
+      } catch {
+        if (!cancelled) setEstimate(null);
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // A finished run changes what is stored, so the estimate is read again then too.
+  }, [visible, estimateKey, watchlistRows, run === null]);
+
   const readiness = useMemo(() => {
     if (problem) return null;
     return checkReadiness(normalizeSpec(current.spec), {
@@ -113,8 +161,9 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
       pythonMessage: env?.message ?? 'Looking for Python…',
       watchlists,
       today: new Date().toISOString().slice(0, 10),
+      estimate,
     });
-  }, [problem, current.spec, providers, env, watchlists]);
+  }, [problem, current.spec, providers, env, watchlists, estimate]);
 
   const refresh = useCallback(async () => {
     try {
@@ -132,7 +181,7 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
     void refresh();
     pythonEnvStatus().then(setEnv).catch(() => {});
     listWatchlists()
-      .then((lists) => setWatchlists(lists.map((l) => l.name)))
+      .then((lists) => setWatchlistRows(lists.map((l) => ({ id: l.id, name: l.name }))))
       .catch(() => {});
   }, [visible, refresh]);
 

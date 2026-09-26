@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyFix, checkReadiness, historyBars, loadFrom, type ReadinessFacts } from './readiness';
+import { applyFix, checkReadiness, formatDuration, historyBars, loadFrom, TRIAL_SYMBOLS, type ReadinessFacts } from './readiness';
 import { normalizeSpec } from './spec';
 import { fromTemplate } from './templates';
 
@@ -66,5 +66,35 @@ describe('checkReadiness', () => {
     // 252 bars of look-back plus a 252-bar max drawdown measured there (twice its window).
     expect(historyBars(spec)).toBe(252 + 504 + 5);
     expect(loadFrom(spec) < '2015-01-01').toBe(true);
+  });
+
+  it('says what the data will cost and offers a trial run when it is long', () => {
+    const spec = fromTemplate('winners_100');
+    spec.universe.exchanges = ['NSE', 'BSE'];
+    const r = checkReadiness(spec, facts({ estimate: { symbols: 4200, stored: 200, requests: 4000, seconds: 1400, listingsSkipped: 9000 } }));
+    const cost = item(r, 'Data to load');
+    expect(cost.status).toBe('warning');
+    expect(cost.detail).toContain('4,200 symbols');
+    expect(cost.detail).toContain('9,000 other listings left out');
+    expect(cost.detail).toContain('200 already stored');
+    expect(cost.detail).toContain('about 23 min');
+    expect(cost.fix?.id).toBe('trial_run');
+    expect(applyFix(spec, 'trial_run').universe.max_symbols).toBe(TRIAL_SYMBOLS);
+    expect(r.notes.join(' ')).toContain('BSE lists several times as many');
+    expect(r.ready).toBe(true);
+  });
+
+  it('calls a quick load quick and an empty universe a problem', () => {
+    const quick = checkReadiness(fromTemplate('winners_100'), facts({ estimate: { symbols: 2000, stored: 2000, requests: 0, seconds: 0, listingsSkipped: 0 } }));
+    expect(item(quick, 'Data to load')).toMatchObject({ status: 'available', fix: undefined });
+    expect(item(quick, 'Data to load').detail).toContain('nothing to fetch');
+    const empty = checkReadiness(fromTemplate('winners_100'), facts({ estimate: { symbols: 0, stored: 0, requests: 0, seconds: 0, listingsSkipped: 12 } }));
+    expect(empty.ready).toBe(false);
+  });
+
+  it('writes durations as people read them', () => {
+    expect(formatDuration(12)).toBe('about 12 s');
+    expect(formatDuration(725)).toBe('about 12 min');
+    expect(formatDuration(4800)).toBe('about 1 h 20 min');
   });
 });

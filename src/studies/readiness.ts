@@ -12,7 +12,7 @@ import { DEFAULT_MIN_TRADED_VALUE } from './templates';
 
 export type ReadinessStatus = 'available' | 'unavailable' | 'warning' | 'unused';
 
-export type ReadinessFix = 'use_traded_value' | 'drop_benchmark';
+export type ReadinessFix = 'use_traded_value' | 'drop_benchmark' | 'trial_run';
 
 export interface ReadinessItem {
   field: string;
@@ -31,6 +31,30 @@ export interface ReadinessFacts {
   watchlists: readonly string[];
   /** Today, `YYYY-MM-DD`. */
   today: string;
+  /** What loading the universe will cost (`study_estimate`), once known. */
+  estimate?: UniverseEstimate | null;
+}
+
+/** The backend's `StudyEstimate`. */
+export interface UniverseEstimate {
+  symbols: number;
+  stored: number;
+  requests: number;
+  seconds: number;
+  listingsSkipped: number;
+}
+
+/** Symbols in a quick trial run. */
+export const TRIAL_SYMBOLS = 100;
+/** Above this many minutes of fetching, a trial run is offered. */
+const LONG_FETCH_MINUTES = 5;
+
+/** A duration as people read it: "about 40 s", "about 12 min", "about 1 h 20 min". */
+export function formatDuration(seconds: number): string {
+  if (seconds < 60) return `about ${Math.max(1, Math.round(seconds))} s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `about ${minutes} min`;
+  return `about ${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
 export interface Readiness {
@@ -158,6 +182,36 @@ export function checkReadiness(spec: StudySpec, facts: ReadinessFacts): Readines
     blocking: false,
   });
 
+  if (facts.estimate) {
+    const e = facts.estimate;
+    const long = e.seconds / 60 > LONG_FETCH_MINUTES;
+    const parts = [
+      `${e.symbols.toLocaleString()} symbol${e.symbols === 1 ? '' : 's'}`,
+      e.listingsSkipped ? `${e.listingsSkipped.toLocaleString()} other listings left out (bonds, SGBs, funds, second listings)` : null,
+      `${e.stored.toLocaleString()} already stored`,
+      e.requests === 0 ? 'nothing to fetch' : `${e.requests.toLocaleString()} broker requests, ${formatDuration(e.seconds)} at the broker's limit`,
+    ].filter(Boolean);
+    items.push({
+      field: 'Data to load',
+      status: e.symbols === 0 ? 'unavailable' : long ? 'warning' : 'available',
+      detail:
+        e.symbols === 0
+          ? 'No stocks in this universe. Update the instrument list in Data providers, or widen the listings.'
+          : `${parts.join('; ')}.`,
+      blocking: e.symbols === 0 && spec.universe.source === 'instruments',
+      fix:
+        long && spec.universe.max_symbols === null
+          ? { id: 'trial_run', label: `Try it on the first ${TRIAL_SYMBOLS} symbols first` }
+          : undefined,
+    });
+  }
+  if (spec.universe.source === 'instruments' && spec.universe.exchanges.includes('BSE')) {
+    notes.push(
+      'BSE lists several times as many companies as NSE, most of them small and thinly traded: including it multiplies the ' +
+        'first run’s time. A company listed on both is studied once.',
+    );
+  }
+
   const bars = historyBars(spec);
   const from = loadFrom(spec);
   const until = spec.period.end ?? facts.today;
@@ -166,7 +220,7 @@ export function checkReadiness(spec: StudySpec, facts: ReadinessFacts): Readines
     `Required history: from ${from} (${bars} trading days before the first event date), about ${years.toFixed(1)} years in all. ` +
       'How far back each symbol’s history really goes is checked as the Study runs; the result reports any with less.',
   );
-  if (spec.universe.source === 'instruments' && spec.universe.max_symbols === null) {
+  if (!facts.estimate && spec.universe.source === 'instruments' && spec.universe.max_symbols === null) {
     notes.push(
       'The first run over a whole exchange fetches every symbol’s history at the broker’s rate limit, which can take tens of minutes. ' +
         'What is fetched is kept, so later runs are quick. Set a symbol limit for a quick trial first.',
@@ -185,6 +239,8 @@ export function applyFix(spec: StudySpec, fix: ReadinessFix): StudySpec {
   if (fix === 'use_traded_value') {
     next.universe.market_cap_min = null;
     next.universe.min_avg_traded_value ??= DEFAULT_MIN_TRADED_VALUE;
+  } else if (fix === 'trial_run') {
+    next.universe.max_symbols = TRIAL_SYMBOLS;
   } else if (fix === 'drop_benchmark') {
     next.benchmark = null;
     const usesRs = (c: { left: string; right: number | string }) => c.left.startsWith('rs_') || (typeof c.right === 'string' && c.right.startsWith('rs_'));

@@ -12,5 +12,6 @@ pub mod research_bars;
 pub mod retired;
 pub mod scripts;
 pub mod studies;
+pub mod study_universe;
 pub mod symbol_names;
 pub mod watchlists;

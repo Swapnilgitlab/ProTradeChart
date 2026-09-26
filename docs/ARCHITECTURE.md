@@ -507,9 +507,21 @@ aggregation → result** — and every part of it is described by the **Study Sp
 - **Prices are used as supplied.** The broker's OHLCV is taken as already adjusted for corporate actions; nothing adjusts it.
 - **Reproducibility.** A result carries its normalised spec, the engine, app, Python and pandas versions, the data span and a
   *data version* (a hash of each series' span, length and last close), the execution time and how long it took.
-- **Performance.** Nothing heavy runs in the webview: the engine computes, the webview draws. The first run over a whole exchange
-  is bound by the broker's rate limit like any script (see "Python"); what it fetches is kept, so reruns are quick.
-  `universe.max_symbols` makes a quick trial of a large universe.
+- **Performance.** Nothing heavy runs in the webview: the engine computes, the webview draws. A first run is bound by the
+  broker's pace — one shared `Throttle` (Kite ≈ 2.9 history requests a second), one request per new symbol (a daily request
+  spans up to 2000 days) — so what matters is how many symbols are fetched and that the pace is never idle:
+  - **Only stocks are fetched.** A broker's "equity" list is mostly not shares (bonds, SGBs, G-secs, T-bills, ETFs, REIT/InvIT
+    units; on BSE, thousands more). `listing_series` / `pick_listings` (`protrade/study.py`, mirrored in
+    `store/study_universe.rs` for the estimate — keep them in step) keep ordinary shares, plus the BE and SME series when
+    `universe.series` asks, and study a company listed on both exchanges once (matched by ticker or by name).
+  - **The pace is kept busy.** `load` keeps `LOAD_WORKERS` requests in flight over the whole universe (the app queues them at
+    the broker's pace) and detects each symbol's events as it arrives, so computing overlaps fetching. A symbol with no bar
+    that passes the filters in the period is dropped once seen; its span still counts toward coverage and the data version.
+  - **The cost is shown before the run.** `study_estimate` (reads the database only) counts the symbols, how many the research
+    store already holds far enough back, and the requests left; readiness shows it and offers a trial on 100 symbols when it
+    is long. The result records seconds per stage (`meta.timings`).
+  What is fetched is kept, so a rerun the same day fetches nothing. *Not built:* a rerun on a later day still tops up each
+  symbol with one request; Kite's batch quote could fill the newest bar for 1000 symbols a call (see "Python").
 - *Not built yet:* a natural-language builder, AI interpretation, a research notebook, historical market cap and point-in-time
   universes (they need data the app doesn't have), and statistical tests beyond distributions. The spec, the step-by-step
   engine API and the stored results are what those will build on.

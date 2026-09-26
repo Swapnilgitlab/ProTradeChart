@@ -30,6 +30,7 @@ estimates or substitutes.
 from __future__ import annotations
 
 import datetime as _dt
+import re
 import hashlib
 import json
 import math
@@ -37,6 +38,7 @@ import platform
 import sys
 import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
@@ -50,6 +52,13 @@ RESULT_FORMAT = 1
 PROVIDERS = ("zerodha", "dhan")
 EXCHANGES = ("NSE", "BSE")
 UNIVERSE_SOURCES = ("instruments", "watchlist", "symbols")
+# Which listings of an instrument list count as stocks: ordinary shares ("EQ"), the trade-for-trade
+# series ("BE", Kite's -BE/-BZ) and the SME platforms ("SME", -SM/-ST/-SZ). Everything else an
+# exchange lists as "equity" (bonds, SGBs, G-secs, T-bills, ETFs, REIT/InvIT units) is never a stock.
+SERIES = ("EQ", "BE", "SME")
+_SERIES_SUFFIX = {"BE": "BE", "BZ": "BE", "SM": "SME", "ST": "SME", "SZ": "SME"}
+_FUND_NAME = re.compile(r"\b(ETF|FOF|FUND|BEES|INVIT|REIT)\b|BEES$|ETF$", re.IGNORECASE)
+_COMPANY_NOISE = re.compile(r"\b(LIMITED|LTD|THE)\b|[^A-Z0-9]")
 MAX_CONDITIONS = 8
 MAX_FILTERS = 12
 MAX_WINDOWS = 8
@@ -62,8 +71,9 @@ MAX_CONTROL = 20_000
 HISTOGRAM_BINS = 20
 PATH_POINTS = 120
 LIQUIDITY_FEATURE = "avg_traded_value_50"
-# Symbols fetched per call to the app, so progress can be reported between calls.
-LOAD_CHUNK = 25
+# Requests kept in flight to the app. It paces the broker itself; this only has to be enough that
+# a request is always waiting at that pace, whatever each round trip costs.
+LOAD_WORKERS = 8
 
 
 class SpecError(ValueError):
@@ -182,10 +192,14 @@ def normalize_spec(spec: dict) -> dict:
     if len(symbols) > MAX_SYMBOLS:
         raise SpecError(f"universe.symbols can hold at most {MAX_SYMBOLS} symbols.")
     max_symbols = raw.get("max_symbols")
+    series = raw.get("series", ["EQ"])
+    if not isinstance(series, list) or not series or any(x not in SERIES for x in series):
+        raise SpecError(f"universe.series must list one or more of {', '.join(SERIES)}.")
     universe = {
         "source": source,
         "provider": provider,
         "exchanges": list(dict.fromkeys(exchanges)),
+        "series": [x for x in SERIES if x in series],
         "watchlist": watchlist.strip() if isinstance(watchlist, str) and watchlist.strip() else None,
         "symbols": list(dict.fromkeys(s.strip() for s in symbols)),
         "market_cap_min": _number(raw.get("market_cap_min"), "universe.market_cap_min", 0),
@@ -375,6 +389,61 @@ def _title_case_offset(offset: int) -> str:
     return "T0" if offset == 0 else f"T{offset:+d}"
 
 
+# ---- The universe ---------------------------------------------------------------------------------
+
+
+def listing_series(ticker: str, name: str | None) -> str | None:
+    """Which kind of stock a listing is — ``"EQ"``, ``"BE"`` or ``"SME"`` — or None when it isn't a
+    stock at all. ``ticker`` is without its exchange (``RELIANCE``, ``XYZ-BE``, ``SGBAUG28V-GB``).
+
+    Brokers list every exchange "equity" row, which is mostly not shares: an NSE list holds thousands
+    of bonds, SGBs, G-secs and T-bills, and a BSE list many more. Each would cost a broker request
+    for a series that can never be an event, so they are left out before anything is fetched.
+    """
+    ticker = ticker.strip().upper()
+    if not ticker:
+        return None
+    if "-" in ticker:
+        return _SERIES_SUFFIX.get(ticker.rsplit("-", 1)[1])
+    # Debt and T-bills are spelled from their coupon or tenor: 1030FC24, 364D210226.
+    if ticker[0].isdigit():
+        return None
+    if _FUND_NAME.search(ticker) or (isinstance(name, str) and _FUND_NAME.search(name)):
+        return None
+    return "EQ"
+
+
+def company_key(name: str | None) -> str | None:
+    """A company's name reduced to what two exchanges' lists agree on: ``Reliance Industries Ltd.``
+    and ``RELIANCE INDUSTRIES`` are one key."""
+    if not isinstance(name, str):
+        return None
+    key = _COMPANY_NOISE.sub("", name.upper())
+    return key or None
+
+
+def pick_listings(rows, series=("EQ",)) -> list[tuple[str, str | None]]:
+    """``(symbol, name)`` rows of one or more exchanges' lists, in order, reduced to one listing per
+    company among the chosen ``series``. A company on two exchanges is kept on the first one seen,
+    matched by ticker or by name, since the two exchanges don't always spell its ticker alike."""
+    wanted = set(series)
+    out, tickers, companies = [], set(), set()
+    for symbol, name in rows:
+        ticker = symbol.rsplit(":", 1)[-1]
+        kind = listing_series(ticker, name)
+        if kind is None or kind not in wanted:
+            continue
+        base = ticker.rsplit("-", 1)[0] if kind != "EQ" else ticker
+        company = company_key(name)
+        if base in tickers or (company is not None and company in companies):
+            continue
+        tickers.add(base)
+        if company is not None:
+            companies.add(company)
+        out.append((symbol, name if isinstance(name, str) and name else None))
+    return out
+
+
 # ---- The engine ------------------------------------------------------------------------------------
 
 
@@ -395,6 +464,11 @@ class ResearchStudy:
         self.benchmark_close: pd.Series | None = None
         self.started = time.monotonic()
         self.outcome_counts: dict | None = None
+        self.skipped_listings = 0
+        # symbol -> (first bar, last bar, bars, last close) of every series loaded, kept even when
+        # its bars are dropped, for the result's coverage and data version.
+        self._series_info: dict[str, tuple] = {}
+        self.timings: dict[str, float] = {}
         # Where measure() reports its progress, and as what; run() sets it for each group it measures.
         self._measure_band = (75, 90)
         self._measure_stage = "Calculating metrics"
@@ -462,18 +536,14 @@ class ResearchStudy:
                 raise client.NotFoundError(f"The watchlist {u['watchlist']!r} has no Zerodha or Dhan symbols on it.")
             self.warn("hindsight_universe", "The universe is a watchlist chosen today, so it may carry hindsight (survivorship or selection bias).")
         else:
-            chosen, seen = [], set()
+            rows = []
             for exchange in u["exchanges"]:
                 listed = api.instruments(u["provider"], exchange=exchange, kind="EQUITY", limit=50_000)
-                for symbol, name in zip(listed["symbol"], listed["name"]):
-                    ticker = symbol.rsplit(":", 1)[-1]
-                    # A company listed on both exchanges is one stock: the first exchange named wins.
-                    if ticker in seen:
-                        continue
-                    seen.add(ticker)
-                    chosen.append(symbol)
-                    if isinstance(name, str) and name:
-                        self.names[symbol] = name
+                rows += list(zip(listed["symbol"], listed["name"]))
+            picked = pick_listings(rows, u["series"])
+            self.skipped_listings = len(rows) - len(picked)
+            chosen = [symbol for symbol, _ in picked]
+            self.names.update({symbol: name for symbol, name in picked if name})
             if not chosen:
                 raise client.NotFoundError(
                     f"{u['provider'].title()}'s instrument list has no equities for {', '.join(u['exchanges'])}. "
@@ -481,6 +551,8 @@ class ResearchStudy:
                 )
             if len(u["exchanges"]) > 1:
                 self.warn("dual_listing", "A stock listed on more than one exchange is studied once, on the first exchange named.")
+            if u["series"] != ["EQ"]:
+                self.warn("series", f"The universe includes the {', '.join(x for x in u['series'] if x != 'EQ')} series as well as ordinary shares.")
             self.warn(
                 "survivorship",
                 "Historical universe data is incomplete: the universe is today's instrument list, so stocks that were "
@@ -494,8 +566,11 @@ class ResearchStudy:
 
     # -- 2. historical data
 
-    def load(self, symbols) -> dict[str, feat.Features]:
-        """Daily bars for each symbol (and the benchmark), from the study's first needed date."""
+    def load(self, symbols, on_symbol=None) -> dict[str, feat.Features]:
+        """Daily bars for each symbol (and the benchmark), from the study's first needed date.
+
+        ``on_symbol(symbol, features)`` is called as each symbol arrives, while the rest are still
+        being fetched; a falsy answer leaves that symbol out of the result (it can never be used)."""
         spec = self.spec
         start, end = fetch_start(spec), spec["period"]["end"]
         symbols = list(dict.fromkeys(symbols))
@@ -513,19 +588,47 @@ class ResearchStudy:
 
         data: dict[str, feat.Features] = {}
         total = len(symbols)
-        for at in range(0, total, LOAD_CHUNK):
-            chunk = symbols[at: at + LOAD_CHUNK]
-            fetched = api.bars_many(chunk, "D", start=start, end=end, errors="skip", progress=False, naive=True)
-            for symbol, error in fetched.errors.items():
-                self.failed[symbol] = str(error)
-            for symbol, frame in fetched.items():
-                if len(frame):
-                    data[symbol] = feat.Features(frame, self.benchmark_close)
-            done = min(total, at + LOAD_CHUNK)
-            self.progress(2 + int(58 * done / max(total, 1)), f"Loading historical data ({done}/{total})")
+        started = time.monotonic()
+        last_report = 0.0
+        done = 0
+
+        def fetch(symbol: str) -> pd.DataFrame:
+            return api.bars(symbol, "D", start=start, end=end, naive=True)
+
+        # One pool over the whole universe, so the app always has requests queued at the broker's
+        # pace (it paces them itself); whatever arrives is processed while the rest is fetched.
+        pool = ThreadPoolExecutor(max_workers=LOAD_WORKERS)
+        try:
+            futures = {pool.submit(fetch, s): s for s in symbols}
+            for future in as_completed(futures):
+                symbol = futures[future]
+                done += 1
+                try:
+                    frame = future.result()
+                except client.FATAL:
+                    raise
+                except client.ProTradeError as e:
+                    self.failed[symbol] = str(e)
+                    frame = None
+                if frame is not None and len(frame):
+                    self._series_info[symbol] = (frame.index[0], frame.index[-1], len(frame), float(frame["close"].iloc[-1]))
+                    features = feat.Features(frame, self.benchmark_close)
+                    if on_symbol is None or on_symbol(symbol, features):
+                        data[symbol] = features
+                now = time.monotonic()
+                if now - last_report >= 1.0 or done == total:
+                    last_report = now
+                    line = f"Loading historical data ({done}/{total})"
+                    pace = api._pace(done, total, now - started)
+                    if pace:
+                        line += f" · {pace[0]:.1f}/s, about {api._duration(pace[1])} left"
+                    self.progress(2 + int(70 * done / max(total, 1)), line)
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+        self.timings["load"] = round(time.monotonic() - started, 1)
         if self.failed:
             self.warn("load_failed", f"{len(self.failed)} of {total} symbols couldn't be loaded and are left out.")
-        if not data:
+        if not self._series_info:
             raise StudyDataError("No symbol in the universe had any daily data to study.")
         return data
 
@@ -564,39 +667,48 @@ class ResearchStudy:
         if isinstance(conditions, str):
             conditions = [conditions]
         self._respec("event", conditions=conditions, cooldown_days=cooldown_days, label=label)
-        spec = self.spec
-        conds, cooldown = spec["event"]["conditions"], spec["event"]["cooldown_days"]
-        first_left = conds[0]["left"]
         rows = []
         for n, (symbol, features) in enumerate(data.items()):
-            mask = self._mask(features, conds)
-            edges = (mask & ~mask.shift(1, fill_value=False)).to_numpy(dtype=bool)
-            eligible = self._eligible_positions(features)
-            self._eligible[symbol] = eligible
-            self._event_mask[symbol] = mask.to_numpy(dtype=bool)
-            last = -(10**9)
-            close = features.get("close").to_numpy()
-            value = features.get(first_left).to_numpy()
-            liquidity = features.get(LIQUIDITY_FEATURE).to_numpy()
-            for pos in np.flatnonzero(edges & eligible):
-                if pos - last < cooldown:
-                    continue
-                last = pos
-                rows.append(
-                    {
-                        "symbol": symbol,
-                        "name": self.names.get(symbol),
-                        "event_date": features.index[pos],
-                        "event_value": value[pos],
-                        "price": close[pos],
-                        "market_cap": None,
-                        "avg_traded_value": liquidity[pos],
-                        "pos": int(pos),
-                    }
-                )
-            features.release()
+            rows += self._detect_symbol(symbol, features)
             if n % 50 == 0:
                 self.progress(60 + int(15 * n / max(len(data), 1)), "Detecting events")
+        return self._events_frame(rows)
+
+    def _detect_symbol(self, symbol: str, features: feat.Features) -> list[dict]:
+        """One symbol's events (see :meth:`detect_events`), remembering which of its bars could be
+        control dates. Its computed features are released afterwards."""
+        spec = self.spec
+        conds, cooldown = spec["event"]["conditions"], spec["event"]["cooldown_days"]
+        mask = self._mask(features, conds)
+        edges = (mask & ~mask.shift(1, fill_value=False)).to_numpy(dtype=bool)
+        eligible = self._eligible_positions(features)
+        self._eligible[symbol] = eligible
+        self._event_mask[symbol] = mask.to_numpy(dtype=bool)
+        rows, last = [], -(10**9)
+        close = features.get("close").to_numpy()
+        value = features.get(conds[0]["left"]).to_numpy()
+        liquidity = features.get(LIQUIDITY_FEATURE).to_numpy()
+        for pos in np.flatnonzero(edges & eligible):
+            if pos - last < cooldown:
+                continue
+            last = pos
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "name": self.names.get(symbol),
+                    "event_date": features.index[pos],
+                    "event_value": value[pos],
+                    "price": close[pos],
+                    "market_cap": None,
+                    "avg_traded_value": liquidity[pos],
+                    "pos": int(pos),
+                }
+            )
+        features.release()
+        return rows
+
+    @staticmethod
+    def _events_frame(rows: list[dict]) -> pd.DataFrame:
         events = pd.DataFrame(rows, columns=["symbol", "name", "event_date", "event_value", "price", "market_cap", "avg_traded_value", "pos"])
         return events.sort_values(["event_date", "symbol"], kind="stable").reset_index(drop=True)
 
@@ -710,11 +822,17 @@ class ResearchStudy:
             low = features.get("low").to_numpy()
             for window in spec["forward_windows"]:
                 ret, gain, fall = (np.full(len(pos), np.nan) for _ in range(3))
-                for j, p in enumerate(pos):
-                    if p + window < n and close[p] > 0:
-                        ret[j] = close[p + window] / close[p] - 1
-                        gain[j] = np.nanmax(high[p + 1: p + window + 1]) / close[p] - 1
-                        fall[j] = np.nanmin(low[p + 1: p + window + 1]) / close[p] - 1
+                target = pos + window
+                ok = (target < n) & (close[pos] > 0)
+                if ok.any():
+                    p, t = pos[ok], target[ok]
+                    # The best high and worst low of the `window` bars after each event: a rolling
+                    # window ending at the target bar covers exactly those.
+                    best = pd.Series(high).rolling(window, min_periods=1).max().to_numpy()
+                    worst = pd.Series(low).rolling(window, min_periods=1).min().to_numpy()
+                    ret[ok] = close[t] / close[p] - 1
+                    gain[ok] = best[t] / close[p] - 1
+                    fall[ok] = worst[t] / close[p] - 1
                 put(f"fwd_return_{window}", rows, ret)
                 put(f"fwd_max_gain_{window}", rows, gain)
                 put(f"fwd_max_drawdown_{window}", rows, fall)
@@ -818,8 +936,12 @@ class ResearchStudy:
             self.warn("events_truncated", f"{len(measured)} events were found; the table holds the first {max_events}. Statistics cover all of them.")
 
         loaded = data or {}
-        firsts = [f.index[0] for f in loaded.values() if len(f)]
-        lasts = [f.index[-1] for f in loaded.values() if len(f)]
+        # Every series that was loaded, including those dropped for never passing the filters.
+        series = self._series_info or {
+            s: (f.index[0], f.index[-1], len(f), float(f.bars["close"].iloc[-1])) for s, f in loaded.items() if len(f)
+        }
+        firsts = [info[0] for info in series.values()]
+        lasts = [info[1] for info in series.values()]
         needed_from = pd.Timestamp(fetch_start(spec))
         short = sum(1 for f in firsts if f > needed_from + pd.Timedelta(days=10))
         executed = _dt.datetime.now(_dt.timezone.utc)
@@ -841,16 +963,20 @@ class ResearchStudy:
             "app_version": _app_version(),
             "python_version": platform.python_version(),
             "pandas_version": pd.__version__,
-            "data_source": ", ".join(sorted({s.split(":", 1)[0] for s in loaded})) or None,
+            "data_source": ", ".join(sorted({s.split(":", 1)[0] for s in series})) or None,
             "data_from": _cell(min(firsts)) if firsts else None,
             "data_through": _cell(max(lasts)) if lasts else None,
-            "data_version": _data_version(loaded),
-            "symbols_requested": int(self.requested or len(loaded)),
-            "symbols_loaded": len(loaded),
+            "data_version": _data_version(series),
+            "symbols_requested": int(self.requested or len(series)),
+            "symbols_loaded": len(series),
+            "symbols_kept": len(loaded),
+            "listings_skipped": int(self.skipped_listings),
             "symbols_failed": len(self.failed),
             "symbols_short_history": short,
             "history_bars_needed": history_bars(spec),
             "elapsed_seconds": round(time.monotonic() - self.started, 1),
+            # Seconds per stage, so a slow run says where its time went.
+            "timings": dict(self.timings),
         }
         availability = {
             "ohlc": True,
@@ -909,8 +1035,18 @@ class ResearchStudy:
     def run(self) -> dict:
         """Every step, as the spec describes them. What the app's Run Study does."""
         symbols = self.universe()
-        data = self.load(symbols)
-        events = self.detect_events(data)
+        rows: list[dict] = []
+
+        def detect(symbol: str, features: feat.Features) -> bool:
+            rows.extend(self._detect_symbol(symbol, features))
+            # A symbol with no bar that passes the filters in the period can be neither an event nor
+            # a control date: its bars needn't be kept.
+            return bool(self._eligible[symbol].any())
+
+        data = self.load(symbols, on_symbol=detect)
+        events = self._events_frame(rows)
+        self.timings["load_and_detect"] = self.timings.pop("load")
+        started = time.monotonic()
         if self.spec["outcome"] is not None:
             # The comparison is within the events: those that went on to the outcome against those that didn't.
             events, control = self.split_by_outcome(events, data)
@@ -920,6 +1056,7 @@ class ResearchStudy:
         measured = self.measure(events, data)
         self._measure_band, self._measure_stage = (84, 90), f"Calculating metrics (comparison group, {len(control)} dates)"
         control = self.measure(control, data) if not control.empty else control
+        self.timings["measure"] = round(time.monotonic() - started, 1)
         return self.analyze(measured, control, data)
 
 
@@ -963,17 +1100,15 @@ def _app_version() -> str | None:
         return None
 
 
-def _data_version(data: dict[str, feat.Features]) -> str | None:
+def _data_version(series: dict[str, tuple]) -> str | None:
     """A fingerprint of the bars studied: which series, their span, length and last close. Two runs
     with the same fingerprint studied the same data."""
-    if not data:
+    if not series:
         return None
     digest = hashlib.sha256()
-    for symbol in sorted(data):
-        bars = data[symbol].bars
-        digest.update(
-            f"{symbol}|{bars.index[0]:%Y-%m-%d}|{bars.index[-1]:%Y-%m-%d}|{len(bars)}|{float(bars['close'].iloc[-1]):.6g}\n".encode()
-        )
+    for symbol in sorted(series):
+        first, last, count, close = series[symbol]
+        digest.update(f"{symbol}|{first:%Y-%m-%d}|{last:%Y-%m-%d}|{count}|{close:.6g}\n".encode())
     return digest.hexdigest()[:16]
 
 

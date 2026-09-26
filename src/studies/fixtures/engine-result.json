@@ -11,6 +11,9 @@
    "exchanges": [
     "NSE"
    ],
+   "series": [
+    "EQ"
+   ],
    "watchlist": null,
    "symbols": [],
    "market_cap_min": null,
@@ -81,10 +84,13 @@
   "data_version": "ec22ddd10d539bb1",
   "symbols_requested": 2,
   "symbols_loaded": 2,
+  "symbols_kept": 2,
+  "listings_skipped": 0,
   "symbols_failed": 0,
   "symbols_short_history": 2,
   "history_bars_needed": 509,
-  "elapsed_seconds": 1.0
+  "elapsed_seconds": 1.0,
+  "timings": {}
  },
  "availability": {
   "ohlc": true,

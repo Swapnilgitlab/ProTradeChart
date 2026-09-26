@@ -560,3 +560,28 @@ export const runStudy = (specJson: string, runId: string) => invoke<void>('study
  *  or null when the dialog was cancelled. */
 export const exportStudyFile = (suggestedName: string, kind: StudyExportKind, contents: string) =>
   invoke<string | null>('export_study_file', { suggestedName, kind, contents });
+
+/** The universe a Study would load, to price before it runs (mirrors `EstimateRequest`). */
+export interface StudyEstimateRequest {
+  provider: string;
+  exchanges: string[];
+  series: string[];
+  /** A watchlist's or a list's symbols; the instrument list is read when absent. */
+  symbols: string[] | null;
+  fromMs: number;
+  maxSymbols: number | null;
+}
+
+export interface StudyEstimate {
+  symbols: number;
+  /** Already held back far enough: at most a top-up. */
+  stored: number;
+  /** Broker requests expected, and roughly how long they take at the broker's pace. */
+  requests: number;
+  seconds: number;
+  /** Listings left out as not stocks, or as a company's second listing. */
+  listingsSkipped: number;
+}
+
+/** What a Study's data will cost to load. Reads the database only; asks no broker. */
+export const studyEstimate = (request: StudyEstimateRequest) => invoke<StudyEstimate>('study_estimate', { request });

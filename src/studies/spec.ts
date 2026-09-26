@@ -15,6 +15,11 @@ export const SPEC_VERSION = 1;
 export type UniverseSource = 'instruments' | 'watchlist' | 'symbols';
 export type StudyProvider = 'zerodha' | 'dhan';
 export type Exchange = 'NSE' | 'BSE';
+/** Which listings count as stocks: ordinary shares, the trade-for-trade series (BE/BZ) and the SME
+ *  platforms. Bonds, SGBs, G-secs, T-bills and funds on an exchange's "equity" list never do. The
+ *  engine's `listing_series` applies it. */
+export const SERIES = ['EQ', 'BE', 'SME'] as const;
+export type Series = (typeof SERIES)[number];
 export const OPS = ['>', '>=', '<', '<=', 'crosses_above', 'crosses_below'] as const;
 export type Op = (typeof OPS)[number];
 
@@ -41,6 +46,7 @@ export interface StudySpec {
     source: UniverseSource;
     provider: StudyProvider;
     exchanges: Exchange[];
+    series: Series[];
     watchlist: string | null;
     symbols: string[];
     /** Rupees. No data source supplies market cap, so a Study with this set can't run (see `readiness.ts`). */
@@ -187,6 +193,10 @@ export function normalizeSpec(input: unknown): StudySpec {
   if (!Array.isArray(exchanges) || exchanges.length === 0 || exchanges.some((e) => e !== 'NSE' && e !== 'BSE')) {
     throw new SpecError('universe.exchanges must list one or more of NSE, BSE.');
   }
+  const series = u.series ?? ['EQ'];
+  if (!Array.isArray(series) || series.length === 0 || series.some((x) => !(SERIES as readonly unknown[]).includes(x))) {
+    throw new SpecError('universe.series must list one or more of EQ, BE, SME.');
+  }
   const watchlist = typeof u.watchlist === 'string' && u.watchlist.trim() ? u.watchlist.trim() : null;
   if (source === 'watchlist' && !watchlist) throw new SpecError('universe.watchlist must name a watchlist.');
   const symbols = u.symbols ?? [];
@@ -256,6 +266,7 @@ export function normalizeSpec(input: unknown): StudySpec {
       source,
       provider,
       exchanges: [...new Set(exchanges as Exchange[])],
+      series: SERIES.filter((x) => (series as unknown[]).includes(x)),
       watchlist,
       symbols: [...new Set((symbols as string[]).map((s) => s.trim()))],
       market_cap_min: num(u.market_cap_min, 'universe.market_cap_min', 0),
@@ -326,7 +337,9 @@ export function interpret(spec: StudySpec): Interpretation[] {
   const u = spec.universe;
   const universe =
     u.source === 'instruments'
-      ? [`${u.exchanges.join(' + ')} listed equities (${u.provider === 'zerodha' ? 'Zerodha' : 'Dhan'} instrument list)`]
+      ? [
+          `${u.exchanges.join(' + ')} listed ${u.series.length === 1 ? 'ordinary shares' : `shares (${u.series.join(', ')} series)`} (${u.provider === 'zerodha' ? 'Zerodha' : 'Dhan'} instrument list; bonds, SGBs and funds left out)`,
+        ]
       : u.source === 'watchlist'
         ? [`The watchlist "${u.watchlist}"`]
         : [`${u.symbols.length} chosen symbol${u.symbols.length === 1 ? '' : 's'}`];

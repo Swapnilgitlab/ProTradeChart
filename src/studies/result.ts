@@ -53,8 +53,14 @@ export interface StudyMeta {
   symbols_loaded: number;
   symbols_failed: number;
   symbols_short_history: number;
+  /** Symbols whose bars were kept: the rest never passed the filters in the period. */
+  symbols_kept: number | null;
+  /** Instrument-list rows left out as not stocks, or as a company's second listing. */
+  listings_skipped: number;
   history_bars_needed: number | null;
   elapsed_seconds: number | null;
+  /** Seconds per stage of the run. */
+  timings: Record<string, number>;
 }
 
 export interface StudySummary {
@@ -185,8 +191,16 @@ export function parseStudyResult(data: unknown): StudyResultData | null {
       symbols_loaded: count(meta.symbols_loaded),
       symbols_failed: count(meta.symbols_failed),
       symbols_short_history: count(meta.symbols_short_history),
+      symbols_kept: n(meta.symbols_kept),
+      listings_skipped: count(meta.listings_skipped),
       history_bars_needed: n(meta.history_bars_needed),
       elapsed_seconds: n(meta.elapsed_seconds),
+      timings: Object.fromEntries(
+        Object.entries(isRecord(meta.timings) ? meta.timings : {})
+          .filter((entry): entry is [string, number] => n(entry[1]) !== null)
+          .slice(0, 20)
+          .map(([k, v]) => [k.slice(0, 40), v]),
+      ),
     },
     availability: Object.fromEntries(
       Object.entries(isRecord(data.availability) ? data.availability : {})

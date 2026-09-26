@@ -18,7 +18,7 @@ describe('normalizeSpec', () => {
     expect(spec.event.cooldown_days).toBe(252);
     expect(spec.lookback_windows).toEqual([21, 63, 126, 252]);
     expect(spec.forward_windows).toEqual([63, 126, 252]);
-    expect(spec.universe).toMatchObject({ source: 'instruments', provider: 'zerodha', exchanges: ['NSE'], market_cap_min: null });
+    expect(spec.universe).toMatchObject({ source: 'instruments', provider: 'zerodha', exchanges: ['NSE'], series: ['EQ'], market_cap_min: null });
     expect(spec.control_group).toEqual({ enabled: true, samples_per_event: 2, seed: 42 });
     expect(spec.output.max_events).toBe(5000);
     expect(spec.outcome).toBeNull();
@@ -36,6 +36,8 @@ describe('normalizeSpec', () => {
       [{ metrics: ['nonsense_3'] }, 'metrics'],
       [{ universe: { source: 'watchlist' } }, 'universe.watchlist'],
       [{ universe: { exchanges: ['NYSE'] } }, 'universe.exchanges'],
+      [{ universe: { series: ['GB'] } }, 'universe.series'],
+      [{ universe: { series: [] } }, 'universe.series'],
       [{ metrics: ['rs_126'] }, 'benchmark'],
       [{ lookback_windows: [0] }, 'lookback_windows'],
       [{ outcome: { window: 63 } }, 'outcome.min_return'],
@@ -81,7 +83,7 @@ describe('interpret', () => {
     const text = interpret(spec)
       .map((s) => `${s.heading}: ${s.lines.join('; ')}`)
       .join('\n');
-    expect(text).toContain('NSE + BSE listed equities');
+    expect(text).toContain('NSE + BSE listed ordinary shares');
     expect(text).toContain('Market cap > ₹1,000 Cr');
     expect(text).toContain('12M return crosses above +100%');
     expect(text).toContain('6M before the event');
