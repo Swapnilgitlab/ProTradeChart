@@ -3,7 +3,7 @@ import { Search } from 'lucide-react';
 import { useDismiss } from '../../components/useDismiss';
 import { effectiveDefaultProvider } from '../../data/providerStatus';
 import { searchSymbols, type SearchScope, type SymbolResult } from '../../data/search';
-import { providerLabel, resolveTypedSymbol } from '../../lib/symbols';
+import { displayTicker, providerLabel, resolveTypedSymbol } from '../../lib/symbols';
 import { useProviderState } from '../providers/useProviderState';
 
 export interface PickedSymbol {
@@ -178,7 +178,7 @@ export const SymbolSearchBox = forwardRef<HTMLInputElement, Props>(function Symb
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => pick(r)}
                   >
-                    <span className="ticker">{r.ticker}</span>
+                    <span className="ticker">{displayTicker(r.symbol)}</span>
                     <span className="name">{r.name}</span>
                     {r.tag && <span className="tag">{r.tag}</span>}
                   </button>

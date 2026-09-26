@@ -4,9 +4,11 @@
 pub mod alerts;
 pub mod bars_cache;
 pub mod datasets;
+pub mod instrument_list;
 pub mod layouts;
 pub mod preferences;
 pub mod provider_settings;
+pub mod research_bars;
 pub mod retired;
 pub mod scripts;
 pub mod symbol_names;

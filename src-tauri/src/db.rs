@@ -35,6 +35,8 @@ impl Database {
     fn init(conn: Connection) -> rusqlite::Result<Self> {
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         conn.execute_batch(SCHEMA_SQL)?;
+        // Columns added to a table that may already exist on disk (`CREATE TABLE IF NOT EXISTS` won't add them).
+        crate::store::watchlists::migrate(&conn)?;
         crate::store::bars_cache::prune_intraday(&conn, now_ms())?;
         Ok(Database { conn: Mutex::new(conn) })
     }

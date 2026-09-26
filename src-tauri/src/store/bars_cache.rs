@@ -67,9 +67,13 @@ pub fn get(
     Ok(bars)
 }
 
+/// Drops minute bars older than the retention window. The brokers cache minute bars under the
+/// bare minute count (`5`, `60`) and everything coarser under a word or letter (`D`), so a
+/// digits-only interval is intraday and nothing else is ever pruned.
 pub fn prune_intraday(conn: &Connection, now_ms: i64) -> rusqlite::Result<()> {
     conn.execute(
-        "DELETE FROM bars_cache WHERE interval NOT IN ('1d', '5d', '1wk', '1mo', '3mo') AND ts < ?1",
+        "DELETE FROM bars_cache
+         WHERE interval GLOB '[0-9]*' AND interval NOT GLOB '*[^0-9]*' AND ts < ?1",
         params![now_ms - INTRADAY_RETENTION_MS],
     )?;
     Ok(())
@@ -132,16 +136,51 @@ mod tests {
         assert!(get(&conn, "Y", "1d", None, None, None).unwrap().is_empty());
     }
 
+    /// The brokers cache under the upper-cased interval the chart asked for: `D` for daily
+    /// (and for week and month, which are built from daily) and a minute count for the rest.
+    /// Pruning once compared against Yahoo's lower-case spellings (`1d`), so it deleted every
+    /// broker daily bar older than 45 days on each launch.
     #[test]
-    fn prune_drops_old_intraday_but_keeps_daily_history() {
+    fn prune_drops_old_minute_bars_but_keeps_a_brokers_daily_history() {
         let db = Database::open_in_memory().unwrap();
         let mut conn = db.conn.lock().unwrap();
-        put(&mut conn, "X", "5m", &[bar(1000, 1.0)]).unwrap();
-        put(&mut conn, "X", "1d", &[bar(1000, 1.0)]).unwrap();
+        let old = 1000;
+        for interval in ["1", "5", "15", "60"] {
+            put(&mut conn, "zerodha:NSE:RELIANCE", interval, &[bar(old, 1.0)]).unwrap();
+        }
+        // `D` is what the chart asks for; `DAY` is how Kite spells it, upper-cased.
+        for interval in ["D", "DAY"] {
+            put(&mut conn, "zerodha:NSE:RELIANCE", interval, &[bar(old, 1.0)]).unwrap();
+        }
 
-        prune_intraday(&conn, 1000 + INTRADAY_RETENTION_MS + 1).unwrap();
+        prune_intraday(&conn, old + INTRADAY_RETENTION_MS + 1).unwrap();
 
-        assert!(get(&conn, "X", "5m", None, None, None).unwrap().is_empty());
-        assert_eq!(get(&conn, "X", "1d", None, None, None).unwrap().len(), 1);
+        for interval in ["1", "5", "15", "60"] {
+            let left = get(&conn, "zerodha:NSE:RELIANCE", interval, None, None, None).unwrap();
+            assert!(left.is_empty(), "old {interval}-minute bars should have been pruned");
+        }
+        for interval in ["D", "DAY"] {
+            let left = get(&conn, "zerodha:NSE:RELIANCE", interval, None, None, None).unwrap();
+            assert_eq!(left.len(), 1, "daily bars ({interval}) must survive pruning");
+        }
+    }
+
+    #[test]
+    fn prune_keeps_recent_minute_bars() {
+        let db = Database::open_in_memory().unwrap();
+        let mut conn = db.conn.lock().unwrap();
+        let now = 100 * DAY_MS;
+        put(
+            &mut conn,
+            "dhan:NSE:TCS",
+            "5",
+            &[bar(now - 10 * DAY_MS, 1.0), bar(now - 50 * DAY_MS, 1.0)],
+        )
+        .unwrap();
+
+        prune_intraday(&conn, now).unwrap();
+
+        let left = get(&conn, "dhan:NSE:TCS", "5", None, None, None).unwrap();
+        assert_eq!(left.iter().map(|b| b.time).collect::<Vec<_>>(), [now - 10 * DAY_MS]);
     }
 }

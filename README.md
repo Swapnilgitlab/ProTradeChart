@@ -30,14 +30,20 @@ subscription.
 - **Bring your own data.** Import an OHLCV CSV and chart it offline, at any timeframe coarser than the file's own.
 - **Chart grids.** Any tab can hold from 1 to 16 charts: pick 1×1 up to 4×4 from the layout button in the chart's toolbar,
   and optionally link the charts' symbol, interval, crosshair and style with the sync switches beside it.
-- **Tabs and windows.** Browser-style tabs, each with its own chart grid; open extra windows for a multi-monitor setup.
+- **Tabs and windows.** Browser-style tabs, each with its own chart grid, and each wearing its symbol's live price and the
+  day's change; open extra windows for a multi-monitor setup.
 - **Layouts.** Save your whole session — every tab, its chart grid, and each chart's symbol, indicators, drawings and
   settings — as a named layout, and mark one as the default. Layouts don't include the theme; that stays your own choice.
-- **Watchlists.** Unlimited lists with live prices and day change, sortable, and importable from a TradingView export.
+- **Watchlists.** Unlimited lists with live prices and day change, sortable, and importable from a TradingView export. Group
+  symbols under sections that fold away, mark them with a colour flag, and drag them into any order; right-click a row for
+  its menu. A rail of icons down the right edge switches the side panel between the watchlist and your alerts, and holds the buttons for the Script Editor, the Python tab and the data providers.
 - **Pine Script®-compatible scripts.** Write, save and run your own indicators, and backtest strategies against a chart's
   history, in a built-in Script Editor and Strategy Tester (equity curve, performance summary, list of trades). Runs on
   [PineTS](https://github.com/LuxAlgo/PineTS). Backtests are approximate and can differ from TradingView's. Pine Script is a
   trademark of TradingView, Inc.; ProTradeChart is not affiliated with TradingView.
+- **Python for screening and research.** A Python tab (`Ctrl+Shift+Y`) beside your charts runs your own scripts against your
+  Zerodha or Dhan data: screen a watchlist, backtest with pandas or any library you install, keep the scripts as plain `.py`
+  files. It uses your own Python, and your broker credentials stay in the app. See [Python](#python).
 - **Six themes.** Daylight, Paper, Midnight, Graphite, Ocean and Terminal. The starting theme follows your OS's
   light/dark setting.
 - **Private by design.** No account and no telemetry. Everything (layouts, watchlists, imported data, a small offline
@@ -92,16 +98,17 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib    # backend unit tests
 | To… | Do this |
 | --- | --- |
 | Load a symbol | Type in the search box (`Ctrl+K`) and press Enter. Results come from every data source that is switched on. |
-| Set a price alert | Right-click the chart → **Add alert here…** (it starts at the price under the cursor), or the **Alert** button in the chart toolbar, or `Alt+A`. The bell in the tab bar lists your alerts and shows how many have fired since you last looked. |
+| Set a price alert | Right-click the chart → **Add alert here…** (it starts at the price under the cursor), or the **Alert** button in the chart toolbar, or `Alt+A`. The **Alerts** panel (the bell on the right-hand rail) lists your alerts and shows how many have fired since you last looked. |
 | Open another chart | `Ctrl+T`, or the **+** in the tab bar. Middle-click or `Ctrl+W` closes a tab. |
 | Show several charts at once | The **Layout** button in the chart's toolbar (next to the timeframe and style buttons): choose a grid from 1×1 to 4×4. New charts start on the same symbol; click one to make it the active chart (it gets a white outline), then search or click a watchlist symbol to change just that chart — the tab label follows it. The sync switches in the same dropdown link symbol, interval, crosshair and style. |
-| Write an indicator or backtest a strategy | The **</>** icon in the tab bar, or `Ctrl+E`, opens the Script Editor. Pick an example from **Open**, edit it, then **Add to chart** (`Ctrl+Enter`); **Save** (`Ctrl+S`) keeps it in your script library. A strategy opens the **Strategy Tester**. The pencil on a script's legend row reopens its code. Scripts on a chart are saved with the layout. |
+| Write an indicator or backtest a strategy | The **</>** icon on the right-hand rail, or `Ctrl+E`, opens the Script Editor. Pick an example from **Open**, edit it, then **Add to chart** (`Ctrl+Enter`); **Save** (`Ctrl+S`) keeps it in your script library. A strategy opens the **Strategy Tester**. The pencil on a script's legend row reopens its code. Scripts on a chart are saved with the layout. |
 | Change timeframe / style / indicators | The toolbar at the top of the chart. On the chart itself, press `?` for Vela's own shortcut list. |
 | Save your setup | **Layout** menu → *Save as new layout…*. *Set as default* makes it the starting session (and the template for new tabs). |
-| Track symbols | The watchlist on the right. Click a row to chart it; `↑`/`↓` step through the list. |
+| Track symbols | The watchlist on the right (`Alt+W` shows or hides it). Click a row to chart it; `↑`/`↓` step through the list. Right-click a row to flag it, add an alert, open it in a new tab or add a section above it; drag rows to reorder, or click a section's name to fold it. |
+| Switch the side panel | The icons at the top of the right-hand rail: **Watchlist** and **Alerts**. Press the one that is showing to fold the panel away; the choice is remembered. Below them are the **Script Editor** and **Python** buttons, and the **Data providers** plug sits at the bottom. |
 | Import a watchlist | Watchlist **⋯** menu → *Import from file…* (a TradingView export or a CSV with a `Symbol` column). |
 | Chart your own data | The database icon in the tab bar → *Choose CSV file…* |
-| Choose and configure data sources | The plug icon in the tab bar → *Data providers*. |
+| Choose and configure data sources | The plug icon at the bottom of the right-hand rail → *Data providers*. |
 | Search one source only | The dropdown to the left of the search box (shown when more than one source is on). |
 | Use a second monitor | `Ctrl+Shift+N` opens another window. All windows share the same layouts and watchlists. |
 
@@ -241,6 +248,54 @@ Things worth knowing:
 > that has market data, so treat history and the live feed as new: if a chart's dates look shifted or a live candle
 > misbehaves, please [open an issue](../../issues) with the symbol and timeframe.
 
+## Python
+
+Press `Ctrl+Shift+Y` (or the terminal button on the right-hand rail) to open **Python** as a tab beside your charts: a list of
+scripts, an editor, a console and the results. Scripts read your Zerodha or Dhan data through the `protrade` package, and
+can use anything you install beside it — pandas, numpy, scipy, vectorbt, `backtesting.py`.
+
+```python
+import pandas as pd
+import protrade as pt
+
+panel = pt.bars_many(pt.universe(), "D", limit=250, errors="skip")   # {symbol: DataFrame}
+above = [{"symbol": s, "close": df["close"].iloc[-1]} for s, df in panel.items()
+         if len(df) >= 200 and df["close"].iloc[-1] > df["close"].rolling(200).mean().iloc[-1]]
+pt.show(pd.DataFrame(above), title="Above the 200-day average")
+```
+
+`pt.show` puts a sortable table in the panel's **Results** tab, where clicking a symbol opens its chart and the whole list
+can go to a watchlist. `pt.report(trades=…, equity=…)` shows a backtest — return, drawdown, CAGR, Sharpe, win rate, an
+equity curve against a benchmark, and the trades — and `pt.plot()` shows a matplotlib figure.
+
+The first time, press **Set up Python** in the panel. Four example scripts are there to start from: a greeting, three
+screens (200-day average, RSI, 52-week highs) and a moving-average crossover backtest. Things worth knowing:
+
+- **It uses your own Python.** The app doesn't ship or download one. It looks for Python 3.10 or newer on your machine, and
+  *Set up* makes a private virtual environment in the app's data folder and installs pandas and numpy into it. To use an
+  environment of your own instead (conda, uv), give its interpreter in the panel's settings (the gear).
+- **Your credentials stay in the app.** The app never hands a script a broker key or token. A script asks the app for bars over a
+  local connection (`127.0.0.1`, protected by a one-off token that only scripts the app starts receive); the app fetches, paces
+  and keeps them. Only Zerodha, Dhan and your imported CSV files are available to scripts, and only for reading.
+- **Quick the second time.** The app keeps what it fetched, so the first screen over a few hundred symbols takes minutes at the
+  brokers' rate limits (Kite allows three history requests a second), and later runs fetch only what is new: outside market
+  hours, nothing at all, because a finished day's bar never changes. The settings show how much is kept and can forget it.
+- **Timeframes.** Kite serves 1, 3, 5, 10, 15, 30 and 60 minutes and daily; Dhan 1, 5, 15, 25, 60 and daily. `pt.resample` builds
+  the rest, starting each bucket at the session open like the charts do. Daily bars are on a timezone-aware IST index.
+- **Your scripts are plain files** in the app's data folder (**Open folder** in the panel): edit them anywhere and keep them in
+  git. A script runs only when you press Run, and Stop ends it with everything it started.
+- **Results belong to a run.** What a script shows appears in the Results view and is replaced when you run again. Nothing
+  a script sends is drawn as HTML: tables are text, and a figure must really be a PNG.
+- **The tab keeps working while you look elsewhere.** Switch to a chart and a running script keeps going; come back and its
+  console and results are still there. Closing the tab is always allowed; your last *chart* tab isn't, since the watchlist
+  and alerts need one. Layouts save charts, not the Python tab.
+- **It is not a sandbox.** A script has your own permissions, exactly as if you ran it from a terminal. Run code you trust.
+- **It is for research, not trading.** Nothing here places an order.
+- **Data plans still apply.** Zerodha's historical data needs the paid Kite Connect plan, and Dhan's needs its Data API
+  subscription — the same as for charts. Kite tokens still expire every morning; a script then stops with a clear message.
+
+`python/README.md` lists the functions and the connection details.
+
 ## Price alerts
 
 An alert watches one symbol and fires when its price **crosses** a level — up, down, or either way — once, or every time
@@ -248,7 +303,7 @@ An alert watches one symbol and fires when its price **crosses** a level — up,
 
 - **From a chart:** right-click → **Add alert here…** (or right-click the price axis → **Add alert at this price…**); the
   price under your cursor is filled in. Or use the **Alert** button in the chart toolbar, or press `Alt+A`.
-- **From the bell** in the tab bar, which also lists every alert, lets you pause, edit, re-arm or delete them, and shows a
+- **From the Alerts panel** (the bell on the right-hand rail), which also lists every alert, lets you pause, edit, re-arm or delete them, and shows a
   badge for alerts that fired while you weren't looking.
 
 When one fires you get a system notification (so it reaches you with the app minimised), a toast, and a short chime
@@ -267,7 +322,8 @@ When one fires you get a system notification (so it reaches you with the app min
 src/                     React + TypeScript frontend
   chart/                 The Vela wrapper (a grid of one to sixteen charts per tab)
   data/                  Data providers (crypto, brokers, CSV), symbol search, watchlist quotes
-  features/              Workspace (tabs), layouts, watchlist, search, providers, dataset import, about, Pine dock
+  features/              Workspace (chart and Python tabs), layouts, watchlist, search, providers, import, about, Pine dock
+  features/python/       The Python tab: script list, editor, console, results
   pine/                  Pine Script: engine wiring, layout persistence, backtest report maths (pure, unit-tested)
   lib/                   Pure helpers: timeframes & resampling, CSV and watchlist parsers, IPC wrappers
   theme/                 Theme registry and provider
@@ -277,7 +333,10 @@ src-tauri/               Rust backend
   src/secrets.rs         Credentials: OS keychain, with an explicit fallback
   src/dhan/              Dhan: protocol, instrument list, HTTP client, live feed
   src/commands.rs        Tauri commands exposed to the frontend
+  src/pyapi/             The local data API Python scripts use (read-only, loopback, token-protected)
+  src/python/            Finding Python, running and stopping scripts, the scripts folder
 pine/                    Pine indicators bundled with the app (see pine/README.md)
+python/                  The `protrade` package scripts import, example scripts and their tests (see python/README.md)
 docs/                    Architecture notes and screenshots
 ```
 

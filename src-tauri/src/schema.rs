@@ -37,14 +37,31 @@ CREATE TABLE IF NOT EXISTS watchlists (
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- `position` orders a list's rows, and is shared with `watchlist_sections`: the two tables together
+-- are one sequence, so a section header sits wherever its position falls among the symbols.
+-- `flag` is one of the colour names in `store::watchlists::FLAGS`. Databases made before these two
+-- columns get them from `store::watchlists::migrate`.
 CREATE TABLE IF NOT EXISTS watchlist_items (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   watchlist_id  INTEGER NOT NULL REFERENCES watchlists(id) ON DELETE CASCADE,
   symbol        TEXT NOT NULL,
   name          TEXT,
+  position      INTEGER NOT NULL DEFAULT 0,
+  flag          TEXT,
   UNIQUE (watchlist_id, symbol)
 );
 CREATE INDEX IF NOT EXISTS idx_watchlist_items_list ON watchlist_items(watchlist_id);
+
+-- A heading inside a watchlist ("Indices", "Banks"). It owns the symbols that follow it, up to the next
+-- heading; `collapsed` hides them.
+CREATE TABLE IF NOT EXISTS watchlist_sections (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  watchlist_id  INTEGER NOT NULL REFERENCES watchlists(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  position      INTEGER NOT NULL DEFAULT 0,
+  collapsed     INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_watchlist_sections_list ON watchlist_sections(watchlist_id);
 
 -- Read-through cache of the brokers' bars (keys start `dhan:` / `zerodha:`), used only as an
 -- offline fallback.
@@ -58,6 +75,31 @@ CREATE TABLE IF NOT EXISTS bars_cache (
   close     REAL NOT NULL,
   volume    REAL,
   PRIMARY KEY (symbol, interval, ts)
+) WITHOUT ROWID;
+
+-- Bars kept for the Python research API (`store/research_bars.rs`). Unlike `bars_cache`
+-- this is a store, not a fallback: it is never pruned, and `research_coverage` records
+-- which span of each series is complete (an empty holiday and an unfetched day look
+-- the same in the bars table).
+CREATE TABLE IF NOT EXISTS research_bars (
+  symbol    TEXT NOT NULL,
+  interval  TEXT NOT NULL,
+  ts        INTEGER NOT NULL,
+  open      REAL NOT NULL,
+  high      REAL NOT NULL,
+  low       REAL NOT NULL,
+  close     REAL NOT NULL,
+  volume    REAL,
+  PRIMARY KEY (symbol, interval, ts)
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS research_coverage (
+  symbol     TEXT NOT NULL,
+  interval   TEXT NOT NULL,
+  from_ts    INTEGER NOT NULL,
+  to_ts      INTEGER NOT NULL,
+  synced_at  INTEGER NOT NULL,
+  PRIMARY KEY (symbol, interval)
 ) WITHOUT ROWID;
 
 -- User-imported OHLCV datasets (CSV), chartable as `csv:<TICKER>`.

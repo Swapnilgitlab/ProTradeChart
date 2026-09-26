@@ -30,8 +30,13 @@ const SHORTCUTS: [string, string][] = [
   ['Ctrl + PageUp / PageDown', 'Previous / next tab'],
   ['Ctrl + K', 'Search for a symbol'],
   ['Ctrl + E', 'Show or hide the Script Editor and Strategy Tester'],
+  ['Ctrl + Shift + Y', 'Open the Python tab'],
   ['Ctrl + Shift + N', 'New window'],
+  ['Alt + W', 'Show or hide the watchlist panel'],
+  ['Alt + A', 'New price alert for the chart'],
   ['↑ / ↓ (in the watchlist)', 'Step through symbols'],
+  ['Right-click (in the watchlist)', 'Flag a symbol, add an alert, open it in a new tab, add a section'],
+  ['Drag (in the watchlist)', 'Reorder symbols and sections'],
   ['? (on a chart)', "Vela's own shortcut list"],
 ];
 

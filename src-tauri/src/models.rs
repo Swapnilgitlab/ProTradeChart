@@ -64,6 +64,22 @@ pub struct WatchlistItem {
     /// Fully-qualified chart symbol, e.g. `binance:BTCUSDT` or `dhan:NSE:RELIANCE`.
     pub symbol: String,
     pub name: Option<String>,
+    /// Where the row sits among the list's symbols *and* sections (see `WatchlistSection`).
+    pub position: i64,
+    /// A colour the user marked the symbol with, one of `store::watchlists::FLAGS`.
+    pub flag: Option<String>,
+}
+
+/// A heading in a watchlist. It owns the symbols after it, up to the next heading.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchlistSection {
+    pub id: i64,
+    pub name: String,
+    /// Shares a sequence with the symbols' `position`.
+    pub position: i64,
+    /// Whether the symbols under it are hidden.
+    pub collapsed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -72,10 +88,29 @@ pub struct WatchlistDetail {
     pub id: i64,
     pub name: String,
     pub created_at: String,
+    /// The symbols, in list order.
     pub items: Vec<WatchlistItem>,
+    /// The headings, in list order. Merge with `items` by `position` to get the rows as shown.
+    pub sections: Vec<WatchlistSection>,
     /// Only set on the add-items response: how many of the given symbols were
     /// new (duplicates already on the list are skipped).
     pub added: Option<i64>,
+}
+
+/// Which table a row of a watchlist lives in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RowKind {
+    Item,
+    Section,
+}
+
+/// One row of a watchlist — a symbol or a section heading — named by its table and id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RowRef {
+    pub kind: RowKind,
+    pub id: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

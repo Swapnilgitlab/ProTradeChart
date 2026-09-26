@@ -40,6 +40,24 @@ so search and watchlist quotes use the same instance the charts do.
 | `csv` | `data/providers/csv.ts` + `src-tauri/src/store/datasets.rs` | User-imported files, served from SQLite. |
 | `binance`, `coinbase`, `hyperliquid` | Vela's bundled providers | Fetched directly from the webview; they also stream live. |
 
+### How a symbol is shown
+
+The stored and canonical form of a broker symbol spells its exchange (`zerodha:NSE:HFCL`), so a watchlist row, an alert
+and a chart always agree on one string. What people see is shorter, and there are three forms in `lib/symbols.ts`:
+
+- `normalizeSymbol` — the canonical form. A broker ticker with no exchange means NSE, so `zerodha:HFCL` becomes
+  `zerodha:NSE:HFCL`. Everything that comes *back from Vela* passes through it.
+- `displayTicker` — for the app's own screens (watchlist, tabs, alerts, search, script results): no data source, and no
+  `NSE:`. Other exchanges stay, because `BSE:RELIANCE` is a different instrument from `RELIANCE`.
+- `chartSymbol` — the form a chart is *given*. Vela writes a chart's title, status line and watermark from the ticker part
+  of the symbol it holds, so a chart holding `zerodha:HFCL` shows `HFCL`. The backends read a bare ticker as NSE, so it
+  loads the same instrument. `ChartView` applies it at every point a symbol goes into Vela, and `withChartSymbols`
+  (`features/layouts`) does the same for the charts inside a layout as it opens.
+
+Vela also prints the data source in the status line (`· ZERODHA · 1D`), from its provider registry rather than from the
+symbol. `chart/statuslineMeta.ts` removes the source and keeps the timeframe, and puts the full symbol in the hover text.
+It watches Vela's `.vela-sl-meta` element, so a Vela upgrade that renames that class only brings the source name back.
+
 ### Yahoo Finance was removed
 
 Yahoo Finance used to be a data source, through its unofficial public endpoints. It was removed entirely — provider,
@@ -107,7 +125,8 @@ Alerts are a small feature with a clean split:
 - **On the chart** (`chart/alertActions.ts`): Vela's `registerWidgetAction` puts *Add alert here…* in the chart's context
   menu, *Add alert at this price…* in the price axis menu, and an *Alert* button in the toolbar. Vela's context object
   doesn't carry the clicked price, so the chart's crosshair is tracked (`renderer.onCrosshairMove`) and the last price
-  under the cursor is used. The actions only ask the app to open the dialog (`alerts/ui.ts`); the dialog is React.
+  under the cursor is used. The actions only ask the app to open the new-alert form (`alerts/ui.ts`); the form is React (`AlertFormDialog`), and the list
+  of alerts is the rail's Alerts panel (`AlertsPanel`).
 
 Not done yet: drawing alert levels on the chart. Vela's drawings (`chart.drawings.add('hline', …)`) could carry them, but
 they would share the undo history, be saved into layouts (they'd need stripping, like `withoutTheme`), and be draggable, all
@@ -156,7 +175,12 @@ a new provider appears there with no UI work.
 - **Secrets never touch SQLite.** Non-secret settings (the `enabled` flag, a client ID) live in `provider_settings`.
   Secret fields go to the OS credential store through `secrets.rs`. If that store is unavailable the value falls back to the
   `provider_secrets_fallback` table and `Storage::Database` is reported, which the UI shows as an explicit "unencrypted"
-  warning. Secrets are write-only over IPC: `list_providers` says *whether* one is set, never what it is.
+  warning. Secrets are write-only over IPC: `list_providers` says *whether* one is set, never what it is. `Secrets` remembers
+  what the OS store said for a minute, because every broker request reads its credentials and each read is an OS call made
+  while holding the database lock; every write goes through `Secrets::set` / `delete`, which update the memory at once, so a
+  token saved after the daily login applies to the next request. That changes how long a credential stays in the process (up to a
+  minute, where each request already held it briefly), not which ones; it never reaches disk, the web view or the log. `has`
+  answers "is it set?" without copying a value out.
 - **The default provider** (what a bare typed ticker means) is a UI preference; the search box also lets you scope a search
   to one source.
 
@@ -219,18 +243,66 @@ Vela speaks canonical timeframes — minutes as bare digits (`"5"`, `"60"`), and
 **Daily-and-up bars are stamped at local midnight of the exchange's calendar date; intraday bars keep their real
 instant.** Each new chart is set to the machine's timezone (`ChartView.tsx`) so both read correctly on the axis.
 
+## Side panels, watchlists and tab prices
+
+### The right rail
+
+A strip of icons down the window's right edge (`features/rail/RightRail.tsx`) shows one panel at a time beside the chart:
+the watchlist or the price alerts. Pressing the icon of the panel that is showing folds it away. `Workspace` holds the choice
+(`railPanel`) and remembers it in the `right_panel` preference (`features/rail/railPanel.ts`, pure and tested: what a saved
+value means, and the fallback to the old `watchlist_collapsed` setting for a first launch after the rail arrived).
+
+The watchlist panel stays **mounted** while another panel shows (it is `display: none`, and stops fetching prices), so its
+list, sort and scroll position are still there when it comes back; the alerts panel mounts when shown. To add a panel: add its
+id to `RAIL_PANELS`, a button to `railPanels` in `Workspace.tsx`, and render it in `app-body`.
+
+Below the panel buttons the rail also holds **actions** (`RailAction`): the Script Editor and Python buttons (`railTools`) and, pinned
+to the bottom, the Data providers plug (`railFooter`). They open something elsewhere — the Pine dock, the Python tab, a dialog —
+rather than a side panel. An action that is either showing or not is lit while it shows (`pressed`): the Python button when the
+Python tab is the active one, and the Script Editor button while the dock is open, which `PineDock` reports through
+`onOpenChange` since it owns that state (and isn't mounted, so isn't showing, while the Python tab is).
+
+### Watchlists
+
+- **Storage.** `watchlist_items` and `watchlist_sections` share one sequence: both have a `position`, numbered from 1
+  (`store/watchlists.rs`), so a section heading sits wherever its position falls among the symbols, and a section owns the
+  symbols after it up to the next heading. `set_order` takes the whole order of rows (`RowRef { kind, id }`) and renumbers; rows
+  it leaves out follow in their current order and unknown ones are skipped, so an order that went stale (a Python script added a
+  symbol meanwhile) can neither fail nor scramble the list. `migrate` adds the `position` and `flag` columns to a database made
+  before them, once. `WatchlistDetail` keeps `items` and `sections` apart, so the Python API and everything else that reads a
+  list still sees symbols only, in list order.
+- **Rows.** `lib/watchlistRows.ts` (pure, tested) merges the two into one list, hides what a collapsed section holds, works out
+  where a dragged row may land (a symbol never inside a collapsed section; a section only between blocks, and it takes its
+  symbols with it) and renumbers after a move.
+- **One row height.** The list is windowed and finds a row by dividing by a single measured height, so section headings are
+  exactly one row tall too. Sorting by a column shows a flat list without headings and switches dragging off.
+- **Dragging uses pointer events** (`useRowDrag.ts`), not HTML5 drag and drop: the window's file-drop handler swallows in-page
+  drags on Windows. Changes (order, flag, a section's name or folding) show at once and are then saved; if the backend refuses
+  one, the list is read again (`saveOrReload`).
+
+### Tab prices
+
+Each chart tab shows its symbol's price and the day's change. `useTabQuotes` polls `fetchQuotes` for just the tabs' symbols (the
+same call the watchlist and alerts use, every 20 s at most, not while the window is hidden). That gives the change from the
+previous close and covers a tab whose chart isn't streaming. On top of it, every streaming provider publishes each bar it
+delivers to `data/livePrices.ts` (`withLivePriceTap` in `data/providers/index.ts`), so the tabs of streaming charts tick with
+the market at no extra cost; `lib/tabQuote.ts` (pure, tested) re-measures the change from the polled quote's previous close,
+prefers whichever of the two is newer, and drops a streamed price that has gone stale. **A new streaming provider has to be
+wrapped by the tap**, or its tabs fall back to the poll.
+
 ## Persistence
 
 One SQLite file (`charting.db`, in the OS's per-user app data folder), opened by `src-tauri/src/db.rs`.
 
 | Table | Holds |
 | --- | --- |
-| `ui_preferences` | Key/value settings (theme, watchlist panel state) |
+| `ui_preferences` | Key/value settings (theme, which side panel the rail shows) |
 | `chart_layouts` | Named sessions. `state_json` is **opaque to Rust** — the frontend owns its shape (`LayoutDocument`, versioned) |
 | `pine_scripts` | The user's Pine Script library: name, kind (`indicator` / `strategy`) and source |
-| `watchlists`, `watchlist_items` | Lists and their symbols |
+| `watchlists`, `watchlist_items`, `watchlist_sections` | Lists, their symbols (with a colour flag) and their section headings; see "Watchlists" |
 | `datasets`, `dataset_bars` | Imported CSV data |
 | `bars_cache` | Offline fallback for the brokers' bars (keys start `dhan:` / `zerodha:`) |
+| `research_bars`, `research_coverage` | The Python API's store of the brokers' bars, and which span of each series is complete (see "Python") |
 | `provider_settings` | Per-provider `enabled` flag and non-secret configuration |
 | `provider_secrets_fallback` | Credentials, **only** when no OS keychain exists (unencrypted; the UI says so) |
 | `dhan_instruments` | Dhan's instrument list, for symbol search and `SecurityId` lookup |
@@ -242,7 +314,21 @@ Schema changes: `CREATE TABLE IF NOT EXISTS` won't alter an existing table, so a
 
 ## Layouts and tabs
 
-Each tab is its own `VelaWorkspace`, which is a grid of one to sixteen charts ("cells"). It starts as a single chart
+A tab is a chart or the Python workspace (`features/workspace/tabs.ts`, pure and tested; at most one
+Python tab, opened by the toolbar button or `Ctrl+Shift+Y`). The Python tab has no symbol and no chart, so:
+
+- the chrome that needs a chart — the watchlist's highlight, the Pine dock, a new alert's symbol, and where
+  a picked symbol loads — follows `activeChartTab`, which is the active tab when that is a chart and otherwise
+  the chart last looked at, so opening Python doesn't move the watchlist off the symbol you were on;
+- picking a symbol anywhere (the search box, the watchlist, a script's results) loads it into that chart **and
+  shows it**, which is how a screen's clickable symbols work;
+- **a layout holds charts only.** `captureLayoutDocument` saves the chart tabs and an `activeTabIndex` among
+  them; loading one replaces the charts and leaves the Python tab open, with its scripts and any running script
+  untouched. So a saved session never carries a Python tab, by design;
+- **the last chart tab can't be closed** (`canCloseTab`), because the chrome above needs one; the Python tab
+  always can.
+
+Each chart tab is its own `VelaWorkspace`, which is a grid of one to sixteen charts ("cells"). It starts as a single chart
 (`layout: '1'`); Vela's toolbar offers 1×1 to 4×4 and the sync switches, so the app has no grid UI of its own. A
 background tab is `display: none`, so it has no size and Vela can't be built into it; `ChartView` therefore builds the
 grid on the **first non-zero size** and forwards later resizes. Saving a layout reads every live tab's state
@@ -291,7 +377,7 @@ script.
 | Ids | `pine/ids.ts` | An indicator this app adds is `<libraryScriptId>~<suffix>`, so a legend row leads back to its library script, and one Vela added itself (a bundled script) can be told apart |
 | Bundled scripts | `pine/indicators/**/*.pine`, `pine/bundled.ts` | Scripts that ship with the app. Vite inlines them (`import.meta.glob(…, '?raw')`), and they are handed to Vela as its indicator **manifest** with `enabled: false`, so they appear in the chart's Indicators dialog (grouped by folder) without being added to every chart. Vela saves a manifest indicator in layouts **by name**, so a script's declared title is its identity; `persistence.ts` skips them so they aren't restored twice. `bundled.engine.test.ts` compiles and runs every one on the real engine. Editing a `.pine` file reloads the dev app (`reloadOnPineChange` in `vite.config.ts`: a hot-swapped module would leave the live chart on the old script). See `pine/README.md` |
 | Backtest report | `pine/tester.ts` | Pure. The engine reports fills and account state, not P&L, commission or an equity history, so trades, net P&L, run-up, drawdown, the equity curve and the summary are derived from fills + bars + the strategy's commission setting. Tests hold the numbers to PineTS's own ledger (`tester.engine.test.ts`) |
-| UI | `features/pine/` | A bottom dock (`PineDock`) with the Script Editor (CodeMirror 6, `pineLanguage.ts`) and the Strategy Tester. Opened from the tab bar, `Ctrl+E`, or the "Edit script" button registered on every script's legend row (`pine/hostActions.ts`) |
+| UI | `features/pine/` | A bottom dock (`PineDock`) with the Script Editor (CodeMirror 6, `pineLanguage.ts`) and the Strategy Tester. Opened from the right rail, `Ctrl+E`, or the "Edit script" button registered on every script's legend row (`pine/hostActions.ts`) |
 
 - **The backtest covers the bars the chart has loaded**, so a longer test means scrolling the chart back (see "History on
   demand"). `script:run` events drive the tester; strategies removed from the chart are pruned.
@@ -303,6 +389,78 @@ script.
   `ready` event fires only once.
 - `handle.title` is a placeholder until a script runs; the title it declares comes from `script:run` or
   `declaredTitle(source)`.
+
+## Python
+
+The user's own scripts run as **child processes** of the app and reach market data through a small **local API**, so a
+broker's credentials never leave Rust: a script asks for bars, and Rust fetches (through the same paced clients the charts
+use), keeps them, and answers. It is for research — screening, backtesting, analysis. Nothing here places an order.
+
+```
+ Python tab ─── invoke ──▶ python_commands.rs ── spawn ──▶ <venv>/python script.py   (import protrade as pt)
+      ▲                        │  stdout/stderr                       │
+      └────── events ◀─────────┘                                      │ HTTP, Authorization: Bearer <token>
+                                pyapi/ (127.0.0.1) ◀──────────────────┘
+                                   │  research store  ── Zerodha / Dhan clients (paced) ──▶ brokers
+```
+
+| Piece | Where | Notes |
+| --- | --- | --- |
+| Interpreter | `python/env.rs` | The app never bundles or downloads Python. It finds one by *running* `py -3` / `python` / `python3` and reading `sys.version_info` (so the Microsoft Store's stub, which is on `PATH` where no Python is installed, isn't taken for one), makes a venv in `<app data>/python/venv` and installs pandas and numpy. The user may name their own interpreter instead (preference `python_interpreter`), and then nothing is installed unless they ask. |
+| Runner | `python/runner.rs` | Starts `python -u script.py` with no stdin (so `input()` fails instead of waiting), streams each line as a `python-output` event, and on Stop ends the whole process tree (`taskkill /T`, or a process group), because a script may use `multiprocessing`. A lone `\r` marks a progress-bar line the console overwrites. Output past 4 MB is dropped with a notice. It knows nothing of Tauri (output goes to a callback), so it is tested against a real Python. |
+| Scripts | `python/scripts.rs` | Plain `.py` files in `<app data>/python/scripts`, so any editor and `git` work on them. The frontend names a script and never sends a path; `validate_name` refuses anything that could leave the folder, a Windows device name, and a name that would shadow a library (`pandas.py` beside a script replaces pandas for it). Examples (`python/examples/`) are copied in and kept current: the app records a hash of what it wrote (`.examples-seeded`), refreshes an example nobody has touched when a newer one ships, and leaves alone one the user edited or deleted. They must work with no setup (a test runs them for a user with no watchlists). |
+| Client | `python/protrade/` | Standard library plus pandas. It is embedded in the app (`python/client_files.rs`), written to `<app data>/python/lib` at each run and put on the child's `PYTHONPATH`, so it is never `pip install`ed and always matches the running app. A test fails if a module is added to the folder without being listed in `FILES`. |
+| Local API | `pyapi/` | `data.rs` (bars: store reads plus broker fetches), `routes.rs` (auth and routing, against a `Backend` trait), `server.rs` (hyper), `backend.rs` (the real `Backend`, plus the error mapping), `wire.rs` (JSON). Read-only `GET`s: `/v1/bars`, `/v1/instruments`, `/v1/watchlists`, `/v1/watchlist`, `/v1/providers`, `/v1/ping`; plus `POST /v1/results`. |
+| Results | `pyapi` `POST /v1/results` → `python-result` → `python/results.ts` → `features/python/Results*.tsx` | What a script shows: `pt.show` (a table), `pt.report` (a backtest) and `pt.plot` (a matplotlib PNG). Rust checks only what makes forwarding safe — the run id, the kind, a title's length, and that a figure's bytes really start like a PNG — and the webview validates the shape before drawing. The report reuses the Strategy Tester's `EquityChart`. |
+| Research store | `store/research_bars.rs` | Bars kept for the API, with a *coverage* per series. See below. |
+| UI | `features/python/`, `python/` (TS) | **A tab of its own**, beside the charts (`features/workspace/tabs.ts`), holding the script list, the editor, the console and the results. `python/console.ts`, `format.ts` and `results.ts` are pure and tested. It loads nothing until the tab is first shown: no Python is probed and no example is written for someone who never opens it. |
+
+- **A script's output is data, never markup.** A script is code the user wrote, so `python/results.ts` refuses anything it
+  doesn't recognise rather than drawing it: a table's rows are squared off to its columns and unusable cells become blanks,
+  a curve keeps only points where both the time and the value are numbers, and a figure must be base64 that begins with
+  PNG's own bytes (an SVG would carry script). Nothing is ever put into the DOM as HTML. Keep it that way.
+- **The API is loopback-only and every request must prove itself** (`pyapi/routes.rs`). Binding to `127.0.0.1` alone doesn't make
+  it private: any local program can connect, and so can a web page in the user's browser, directly or through a DNS name pointed
+  at 127.0.0.1. So the `Host` header must name this listener's own address and port (defeats DNS rebinding), a request with an
+  `Origin` header is a browser's and is refused, and the `Authorization: Bearer` token must match. The token is 256 random bits made
+  when the API starts, given only to scripts the app runs (`PROTRADE_API`, `PROTRADE_TOKEN`), and compared in constant time. Don't
+  loosen any of it, add a route that returns a credential or touches an order, or add CORS headers. Each connection has a header
+  timeout and there is a cap on connections, so a stalled or runaway client can't hold it up. **Who is asking is settled before any
+  body is read** (`server.rs` calls `authorize` first), so an unauthorised caller can't make the app buffer megabytes; a body is
+  capped at 16 MB, by its declared length and again as it arrives.
+- **The store is not `bars_cache`.** `bars_cache` is the charts' offline fallback and its pruning is tuned for them. The research store
+  is never pruned, and records per `(symbol, interval)` the span whose bars are complete, because "no bars" (a holiday, a stock not
+  yet listed) and "not fetched yet" look alike in the bars table. `research_bars::plan` is the whole sync policy and is pure: given
+  the coverage, the request and the time it says which ranges to fetch. Ranges always touch the existing coverage, so it stays one
+  span, and a series whose last sync reached the present is served as it stands rather than refetched because "now" moved. An
+  intraday tail is refetched from a few bars back (to replace the forming bar) once it is older than its ttl. A **daily** series
+  follows the exchange's calendar instead (`market.rs`, pure like the planner): a settled session's bar never changes, so the age of
+  a sync is no reason to look again. Only a session that settled after the coverage's end (15:30 IST plus half an hour) triggers a
+  refresh, from that last day, or during market hours a forming bar older than five minutes. So a second screen the same evening,
+  or over a weekend, costs no broker requests. Holidays are deliberately not modelled (a list in a binary rots): one is a single
+  empty check, after which coverage reaches past it. MCX trades to 23:30, so its daily bar is taken as final early until the next
+  refresh corrects it.
+- **The first run is bound by the broker, and a script can't change that.** Kite allows three history requests a second and has no
+  batch endpoint, and every caller (charts, backfill, scripts) shares one client whose `Throttle` releases a request every 350 ms
+  however many are waiting, so `bars_many`'s workers only overlap the waiting: 984 symbols is about six minutes, once. A daily
+  request's span is rounded up to 90-day blocks (`lookback_ms`) so two screens asking for 250 and 257 bars start on the same date;
+  otherwise each symbol needs a second request for the few days between them, which doubled the run. *Not built:* Kite's
+  `/quote/ohlc` returns today's bar for 200+ symbols a call, the only way past the first run of each trading day, but its
+  `ohlc.close` is the previous close (today's is `last_price`) and volume needs the fuller `/quote`.
+- **Record what was fetched, not what was asked.** The brokers' clients answer a range longer than one call may span with only its
+  newest part (`MAX_CHUNKS`), and Dhan's intraday history stops at five years. `Fetcher::fetch` returns where the fetch *really began*,
+  the store records that, and `limitedFrom` tells the script the data starts later than it asked (a `DataLimitWarning` in Python).
+- **Daily bars belong to an IST calendar date.** They are put on midnight IST whichever instant the broker stamped them with, a
+  daily range selects whole dates (an `end` date includes that day), and the client returns them on a timezone-aware IST index.
+  Intraday bars keep their real instant. Only the brokers' native intervals are served (Kite 1, 3, 5, 10, 15, 30, 60 minutes and
+  daily; Dhan 1, 5, 15, 25, 60 and daily); `pt.resample` builds the rest, restarting each bucket at the session open like the charts.
+- **Sources.** Zerodha, Dhan and imported CSV datasets. The crypto sources are fetched by the webview, not Rust, and are not offered.
+  Errors carry a stable `code` (`auth`, `not_configured`, `no_access`, `rate_limited`, `not_found`, `bad_request`, `upstream`) that the
+  client turns into an exception class; `auth` and its kin are *fatal* to a batch, since every later symbol would fail the same way.
+- **Python is not a sandbox.** A script has the user's own privileges, as from a terminal, so it could read `charting.db` or the
+  OS keychain like any local program. What this design guarantees is narrower: the app never *hands* a script a credential, no route
+  returns one, and a script runs only when the user presses Run — never on opening a layout, importing a file or starting the app.
+  The environment a script inherits has `TAURI_*` (the updater's signing key, during development) removed.
 
 ## Themes
 
@@ -325,3 +483,10 @@ properties on `<html>` and persists the choice. To add a theme, append one entry
   browser's file picker.
 - Broker credentials live in the OS keychain and are read only by the Rust backend; the web view never receives an access
   token, and the settings screen can't read one back.
+- The Python data API (see "Python") listens on the loopback interface only, refuses any request without the per-launch token, a
+  matching `Host`, and no `Origin`, and serves read-only market data. The webview never talks to it (Rust does), so the CSP is
+  unchanged. Python itself is *not* sandboxed: a script runs with the user's own privileges and only when they press Run.
+- **The webview can now run code.** The Python commands let the webview save a script and run it, so an injection into the webview
+  would mean code execution on the machine, where before it could only change what a chart shows. Keep the CSP strict, render
+  nothing from a broker, a file or a script's output as HTML (the console draws text), and treat any new way for outside content to
+  reach the DOM as a security matter.

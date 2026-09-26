@@ -1,0 +1,478 @@
+/* The Python tab: scripts, an editor, a console and results, filling a tab beside the charts. It reuses
+   the Script Editor's dock, toolbar and console (pine.css); every colour is a theme token, so
+   all themes work without additions. */
+
+/* The Python workspace fills its tab, the way a chart fills its own. */
+.python-panel {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  background: var(--surface-1);
+}
+
+/* Its tab wears a terminal mark, so it is told apart from the symbols at a glance. */
+.tab-chip.python {
+  gap: 6px;
+}
+.tab-chip.python svg {
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+/* ---- Script list ------------------------------------------------------------ */
+
+.python-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border-soft);
+}
+
+.python-side-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 40px;
+  padding: 0 6px 0 12px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.python-side-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 4px;
+}
+
+.python-side-empty {
+  padding: 8px;
+}
+
+.python-script {
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-md);
+}
+.python-script:hover {
+  background: var(--surface-hover);
+}
+.python-script.active {
+  background: var(--accent-soft);
+}
+.python-script .icon-button {
+  width: 22px;
+  height: 22px;
+  opacity: 0;
+}
+.python-script:hover .icon-button,
+.python-script.active .icon-button,
+.python-script .icon-button:focus-visible {
+  opacity: 1;
+}
+
+.python-script-name {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.python-side-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: none;
+  border-top: 1px solid var(--border-soft);
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+}
+.python-side-footer:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.python-input {
+  height: 28px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font: inherit;
+}
+.python-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.python-new-name {
+  margin: 0 8px 6px;
+}
+
+/* ---- Editor column ---------------------------------------------------------------- */
+
+.python-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.python-current {
+  max-width: 34vw;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.python-stop {
+  color: var(--loss);
+}
+
+/* Python isn't ready: say why and offer the fix, above the editor. */
+.python-banner {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--accent-soft);
+}
+.python-banner-text {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.python-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 16px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+.python-empty p {
+  max-width: 46ch;
+  margin: 0;
+}
+
+/* ---- Console and results ---------------------------------------------------------- */
+
+/* The bottom of the panel: the console and what a script showed, one at a time. */
+.python-output {
+  display: flex;
+  flex-direction: column;
+  height: 42%;
+  min-height: 140px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-soft);
+}
+.python-output-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 28px;
+  flex-shrink: 0;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.python-output-tabs .pine-tab {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.python-running {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.python-output-body {
+  flex: 1;
+  min-height: 0;
+}
+.python-output-pane {
+  height: 100%;
+  min-height: 0;
+}
+.python-output-pane[hidden] {
+  display: none;
+}
+
+.pine-console.python-console {
+  height: 100%;
+  border-top: none;
+}
+.python-console .pine-console-header {
+  padding-left: 12px;
+}
+
+/* A script's output keeps its columns: a pandas table wraps into nonsense, so scroll instead. */
+.python-console-lines {
+  overflow-x: auto;
+}
+.python-line {
+  white-space: pre;
+  word-break: normal;
+}
+.python-line.stderr {
+  color: color-mix(in srgb, var(--loss) 45%, var(--text-primary));
+}
+.python-line.error {
+  color: var(--loss);
+}
+.python-line.info {
+  color: var(--text-muted);
+}
+
+/* ---- Results ----------------------------------------------------------------------- */
+
+.python-results {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.python-results-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 2px 4px 2px 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.python-result-tabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 4px;
+  overflow-x: auto;
+}
+.python-result-tab {
+  max-width: 220px;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.python-result-tab:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+.python-result-tab.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.python-result-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.python-result-table {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.python-result-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 5px 10px;
+}
+.python-table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.python-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.python-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+.python-table th button {
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-weight: 600;
+  text-align: inherit;
+}
+.python-table th button:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+.python-table td {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
+.python-table td.numeric {
+  text-align: right;
+}
+.python-table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+.python-symbol {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+}
+.python-symbol:hover {
+  text-decoration: underline;
+}
+
+/* ---- A backtest report ------------------------------------------------------------- */
+
+.python-report {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+}
+
+.python-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.python-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+}
+.python-kpi-label {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.python-kpi-value {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.python-kpi-value.profit {
+  color: var(--profit);
+}
+.python-kpi-value.loss {
+  color: var(--loss);
+}
+
+.python-report .python-result-table {
+  height: auto;
+  max-height: 320px;
+}
+
+.python-figure {
+  display: flex;
+  justify-content: center;
+  padding: 10px;
+}
+.python-figure img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--r-md);
+  /* A dark theme behind a matplotlib figure with a transparent background is unreadable. */
+  background: #fff;
+}
+
+.python-watchlist-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ---- Settings popover ------------------------------------------------------------- */
+
+.python-settings {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 340px;
+  max-width: 80vw;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 4px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-pop);
+}
+.python-settings-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.python-settings-section .menu-heading {
+  padding-left: 0;
+}
+.python-field {
+  margin-top: 4px;
+}
+.python-field-row {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+.python-field-row .python-input {
+  flex: 1;
+}
+.python-path {
+  font-family: "Cascadia Mono", "JetBrains Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  word-break: break-all;
+}

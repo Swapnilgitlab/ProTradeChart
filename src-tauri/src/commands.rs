@@ -133,6 +133,77 @@ pub fn remove_watchlist_items(watchlist_id: i64, symbols: Vec<String>, db: State
     sql(watchlists::remove_items(&mut *lock(&db)?, watchlist_id, &symbols))
 }
 
+/// Marks a symbol with a colour (`red`, `orange`, `yellow`, `green`, `blue`, `purple`), or clears it with `None`.
+#[tauri::command]
+pub fn set_watchlist_item_flag(
+    watchlist_id: i64,
+    symbol: String,
+    flag: Option<String>,
+    db: State<Database>,
+) -> Result<(), String> {
+    if let Some(flag) = &flag {
+        if !watchlists::is_flag(flag) {
+            return Err(format!("'{flag}' is not a flag colour"));
+        }
+    }
+    sql(watchlists::set_flag(
+        &*lock(&db)?,
+        watchlist_id,
+        &symbol,
+        flag.as_deref(),
+    ))
+}
+
+/// Puts a list's rows (symbols and section headings) in the given order; see `watchlists::write_order`
+/// for what a partial or stale order does. Returns the list as it now stands.
+#[tauri::command]
+pub fn set_watchlist_order(
+    watchlist_id: i64,
+    order: Vec<RowRef>,
+    db: State<Database>,
+) -> Result<WatchlistDetail, String> {
+    let mut conn = lock(&db)?;
+    sql(watchlists::set_order(&mut conn, watchlist_id, &order))?;
+    watchlist_detail(&conn, watchlist_id)
+}
+
+/// Adds a section heading before `before`, or at the end of the list when that is `None`.
+#[tauri::command]
+pub fn add_watchlist_section(
+    watchlist_id: i64,
+    name: String,
+    before: Option<RowRef>,
+    db: State<Database>,
+) -> Result<WatchlistDetail, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("a section needs a name".to_string());
+    }
+    let mut conn = lock(&db)?;
+    sql(watchlists::add_section(&mut conn, watchlist_id, name, before))?;
+    watchlist_detail(&conn, watchlist_id)
+}
+
+#[tauri::command]
+pub fn rename_watchlist_section(id: i64, name: String, db: State<Database>) -> Result<(), String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("a section needs a name".to_string());
+    }
+    sql(watchlists::rename_section(&*lock(&db)?, id, name))
+}
+
+/// Removes a section heading; its symbols stay on the list.
+#[tauri::command]
+pub fn delete_watchlist_section(id: i64, db: State<Database>) -> Result<(), String> {
+    sql(watchlists::delete_section(&*lock(&db)?, id))
+}
+
+#[tauri::command]
+pub fn set_watchlist_section_collapsed(id: i64, collapsed: bool, db: State<Database>) -> Result<(), String> {
+    sql(watchlists::set_section_collapsed(&*lock(&db)?, id, collapsed))
+}
+
 // ---- Imported datasets -----------------------------------------------------
 
 #[tauri::command]

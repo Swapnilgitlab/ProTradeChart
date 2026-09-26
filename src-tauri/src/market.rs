@@ -1,0 +1,136 @@
+//! The Indian exchanges' trading calendar, as pure functions of an instant: no clock and
+//! no I/O, so whatever depends on it is tested by handing it the time.
+//!
+//! It knows weekdays and the equity session (09:15–15:30 IST) and nothing else. Holidays
+//! are deliberately not listed, because a list in a binary goes stale: treating a holiday
+//! as a session costs one check that returns no bars, after which coverage reaches past
+//! it. MCX trades until 23:30, so a commodity's daily bar read between 15:30 and 23:30 is
+//! taken as final until the next refresh re-reads that day and corrects it.
+
+const MINUTE_MS: i64 = 60_000;
+const HOUR_MS: i64 = 60 * MINUTE_MS;
+const DAY_MS: i64 = 24 * HOUR_MS;
+
+/// Every broker here serves Indian exchanges; daily bars belong to an IST calendar date.
+pub const IST_OFFSET_MS: i64 = 19_800_000;
+/// An NSE session is 09:15–15:30.
+pub const SESSION_MINUTES: i64 = 375;
+
+const OPEN_MS: i64 = 9 * HOUR_MS + 15 * MINUTE_MS;
+const CLOSE_MS: i64 = OPEN_MS + SESSION_MINUTES * MINUTE_MS;
+/// The exchange settles its closing prices a little after the bell, so a daily bar read in
+/// the first minutes after 15:30 may still move. Half an hour is comfortably past that.
+const SETTLED_MS: i64 = CLOSE_MS + 30 * MINUTE_MS;
+
+/// Midnight IST of the calendar date `ms` falls on.
+pub fn ist_day_start(ms: i64) -> i64 {
+    (ms + IST_OFFSET_MS).div_euclid(DAY_MS) * DAY_MS - IST_OFFSET_MS
+}
+
+fn is_weekday(ms: i64) -> bool {
+    // 1970-01-01 was a Thursday; counting from Sunday = 0, that is 4.
+    matches!(((ms + IST_OFFSET_MS).div_euclid(DAY_MS) + 4).rem_euclid(7), 1..=5)
+}
+
+/// Whether the equity session is running: a weekday, 09:15 up to 15:30 IST.
+pub fn is_open(now_ms: i64) -> bool {
+    is_weekday(now_ms) && (OPEN_MS..CLOSE_MS).contains(&(now_ms - ist_day_start(now_ms)))
+}
+
+/// When the most recent session that is certainly over became final: its close plus the
+/// time the exchange takes to settle. A daily bar read from that moment on never changes.
+pub fn last_settled_ms(now_ms: i64) -> i64 {
+    let today = ist_day_start(now_ms);
+    (0..7)
+        .map(|back| today - back * DAY_MS)
+        .filter(|day| is_weekday(*day))
+        .map(|day| day + SETTLED_MS)
+        .find(|settled| *settled <= now_ms)
+        // A week always holds a settled weekday; this only keeps the function total.
+        .unwrap_or(i64::MIN)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Monday 5 January 2026, 00:00 IST.
+    const MON: i64 = 1_767_551_400_000;
+
+    /// `day` days after that Monday (negative for before it), at `hour:minute` IST.
+    fn at(day: i64, hour: i64, minute: i64) -> i64 {
+        MON + day * DAY_MS + hour * HOUR_MS + minute * MINUTE_MS
+    }
+
+    #[test]
+    fn a_day_starts_at_midnight_ist() {
+        assert_eq!(ist_day_start(at(0, 0, 0)), at(0, 0, 0));
+        assert_eq!(ist_day_start(at(0, 12, 34)), at(0, 0, 0));
+        assert_eq!(ist_day_start(at(0, 23, 59) + 59_999), at(0, 0, 0));
+        assert_eq!(ist_day_start(at(1, 0, 0)), at(1, 0, 0));
+        // UTC's midnight is 05:30 into the IST day.
+        assert_eq!(ist_day_start(0), -IST_OFFSET_MS);
+    }
+
+    #[test]
+    fn a_day_starts_at_midnight_ist_before_1970_too() {
+        assert_eq!(ist_day_start(-1), -IST_OFFSET_MS);
+        assert_eq!(ist_day_start(-IST_OFFSET_MS - 1), -IST_OFFSET_MS - DAY_MS);
+    }
+
+    #[test]
+    fn the_market_is_open_only_between_the_bells_on_a_weekday() {
+        assert!(!is_open(at(0, 9, 14) + 59_999));
+        assert!(is_open(at(0, 9, 15)));
+        assert!(is_open(at(0, 12, 0)));
+        assert!(is_open(at(0, 15, 29) + 59_999));
+        assert!(!is_open(at(0, 15, 30)));
+        assert!(!is_open(at(0, 20, 0)));
+        assert!(is_open(at(4, 12, 0)), "Friday");
+        assert!(!is_open(at(5, 12, 0)), "Saturday");
+        assert!(!is_open(at(6, 12, 0)), "Sunday");
+        assert!(is_open(at(7, 12, 0)), "the next Monday");
+    }
+
+    #[test]
+    fn a_session_is_settled_half_an_hour_after_the_close() {
+        assert_eq!(
+            last_settled_ms(at(0, 15, 59)),
+            at(-3, 16, 0),
+            "Friday's, until Monday's settles"
+        );
+        assert_eq!(last_settled_ms(at(0, 16, 0)), at(0, 16, 0));
+        assert_eq!(last_settled_ms(at(0, 23, 0)), at(0, 16, 0));
+    }
+
+    #[test]
+    fn friday_is_the_last_settled_session_all_weekend_and_until_monday_settles() {
+        let friday = at(-3, 16, 0);
+        for now in [
+            at(-3, 16, 0),
+            at(-3, 23, 59),
+            at(-2, 12, 0),
+            at(-1, 12, 0),
+            at(0, 0, 0),
+            at(0, 9, 0),
+        ] {
+            assert_eq!(last_settled_ms(now), friday, "{now}");
+        }
+        // The morning after a weekday is that weekday's.
+        assert_eq!(last_settled_ms(at(2, 8, 0)), at(1, 16, 0));
+    }
+
+    #[test]
+    fn the_last_settled_time_never_runs_backwards_or_ahead_of_now() {
+        let mut previous = i64::MIN;
+        // Hourly across a fortnight, a few minutes past each hour.
+        for step in 0..(14 * 24) {
+            let now = at(-7, 0, 5) + step * HOUR_MS;
+            let settled = last_settled_ms(now);
+            assert!(settled <= now, "{now}");
+            assert!(settled >= previous, "{now}");
+            assert!(now - settled < 4 * DAY_MS, "always within a long weekend of now: {now}");
+            previous = settled;
+        }
+    }
+}

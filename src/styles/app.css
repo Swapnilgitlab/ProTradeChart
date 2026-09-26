@@ -209,7 +209,7 @@ a {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-  max-width: 180px;
+  max-width: 300px;
   height: 32px;
   padding: 0 8px 0 12px;
   border-radius: var(--r-md) var(--r-md) 0 0;
@@ -238,6 +238,27 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The price and the day's change beside a tab's name. The label gives way first: these stay whole. */
+.tab-chip-quote {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.tab-chip.active .tab-chip-quote {
+  color: var(--text-secondary);
+}
+.tab-chip-change.up {
+  color: var(--profit);
+}
+.tab-chip-change.down {
+  color: var(--loss);
 }
 
 .tab-chip-close {
@@ -491,7 +512,19 @@ a {
 
 /* ---- Watchlist panel ---------------------------------------------------- */
 
-.watchlist-panel {
+/* The colours a symbol can be flagged with: the same in every theme, like the names they carry. */
+:root {
+  --flag-red: #ef4444;
+  --flag-orange: #f97316;
+  --flag-yellow: #eab308;
+  --flag-green: #22c55e;
+  --flag-blue: #3b82f6;
+  --flag-purple: #a855f7;
+}
+
+/* A panel docked beside the chart: the right rail shows one at a time. */
+.watchlist-panel,
+.alerts-panel {
   display: flex;
   flex-direction: column;
   width: 300px;
@@ -500,10 +533,76 @@ a {
   border-left: 1px solid var(--border);
   background: var(--surface-1);
 }
-.watchlist-panel.collapsed {
-  width: 40px;
+/* Not showing, but still mounted: its list, sort and scroll position wait for it to come back. */
+.watchlist-panel.is-hidden {
+  display: none;
+}
+
+.panel-title {
+  display: inline-flex;
   align-items: center;
-  padding-top: 8px;
+  gap: 8px;
+  padding: 0 4px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.panel-count {
+  padding: 1px 7px;
+  border-radius: 9999px;
+  background: var(--border-soft);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ---- Right rail ---------------------------------------------------------- */
+
+.right-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 44px;
+  flex-shrink: 0;
+  padding: 8px 0;
+  border-left: 1px solid var(--border);
+  background: var(--surface-1);
+}
+.rail-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-secondary);
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.rail-button:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.rail-button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.rail-button .icon-badge {
+  top: 1px;
+  right: 1px;
+}
+.rail-divider {
+  width: 22px;
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+/* Pushes what follows to the bottom of the rail. */
+.rail-spacer {
+  flex: 1;
 }
 
 .watchlist-header {
@@ -571,6 +670,7 @@ a {
 .watchlist-row {
   min-height: 34px;
   cursor: pointer;
+  user-select: none;
 }
 /* The company name beneath Vela's symbol watermark (chart/watermarkName.ts). It
    sits inside the mark, so it shares its colour, faintness and fitted size. */
@@ -602,10 +702,19 @@ a {
   padding: 3px 0;
 }
 .watchlist-symbol .ticker {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
   font-weight: 700;
+}
+.watchlist-symbol .ticker-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.watchlist-flag {
+  flex-shrink: 0;
 }
 .watchlist-symbol .sub {
   font-size: 11px;
@@ -626,6 +735,127 @@ a {
 }
 .watchlist-row:hover .watchlist-remove {
   visibility: visible;
+}
+
+/* A price that just moved is tinted for a moment: green up, red down. */
+.watchlist-num.flash-up {
+  animation: watchlist-flash-up 0.9s ease-out;
+}
+.watchlist-num.flash-down {
+  animation: watchlist-flash-down 0.9s ease-out;
+}
+@keyframes watchlist-flash-up {
+  from {
+    background: color-mix(in srgb, var(--profit) 30%, transparent);
+  }
+}
+@keyframes watchlist-flash-down {
+  from {
+    background: color-mix(in srgb, var(--loss) 30%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .watchlist-num.flash-up,
+  .watchlist-num.flash-down {
+    animation: none;
+  }
+}
+
+/* A section heading: one row tall like the rest (the list's windowing counts on it). */
+.watchlist-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: var(--border-soft);
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.watchlist-section:hover {
+  color: var(--text-primary);
+}
+.watchlist-section > svg {
+  flex-shrink: 0;
+}
+.watchlist-section-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.watchlist-section-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.watchlist-section-input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+/* Dragging a row: it fades where it was, and a line shows where it will land. */
+.watchlist-row.dragging,
+.watchlist-section.dragging {
+  opacity: 0.45;
+}
+.watchlist-row.drop-before,
+.watchlist-section.drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+.watchlist-row.drop-after,
+.watchlist-section.drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.watchlist-row.selected.drop-before {
+  box-shadow: inset 2px 0 0 var(--accent), inset 0 2px 0 var(--accent);
+}
+.watchlist-row.selected.drop-after {
+  box-shadow: inset 2px 0 0 var(--accent), inset 0 -2px 0 var(--accent);
+}
+body.watchlist-dragging,
+body.watchlist-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+/* The menu that opens on a right-click, at the pointer. */
+.context-menu {
+  position: fixed;
+  right: auto;
+  z-index: 60;
+}
+.menu-flags {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 8px;
+}
+.menu-flags-label {
+  flex: 1;
+}
+.flag-swatch {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+.flag-swatch:hover {
+  transform: scale(1.15);
+}
+.flag-swatch.on {
+  border-color: var(--surface-1);
+  box-shadow: 0 0 0 2px var(--text-primary);
 }
 
 .panel-empty {
@@ -1188,6 +1418,38 @@ code {
 }
 .alert-current strong {
   color: var(--text-primary);
+}
+
+/* The alerts panel beside the chart: the same rows as the list once had, narrower. */
+.alerts-panel-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 8px;
+  overflow-y: auto;
+  align-content: start;
+}
+.alerts-panel .alert-row {
+  gap: 6px;
+  padding: 8px 6px 8px 10px;
+  cursor: pointer;
+}
+.alerts-panel .alert-row:hover {
+  background: var(--surface-hover);
+}
+.alerts-panel .alert-actions .icon-button {
+  width: 24px;
+  height: 24px;
+}
+.alerts-panel-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+.alerts-panel-footer .grow {
+  flex: 1;
 }
 
 /* ---- Updates ---------------------------------------------------------------- */

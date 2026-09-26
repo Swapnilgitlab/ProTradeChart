@@ -25,6 +25,10 @@ Thumbs.db
 *.suo
 *.sw?
 
+# Python (the protrade client's tests, and anything run in the repo)
+__pycache__/
+*.pyc
+
 # Tauri / Rust (see also src-tauri/.gitignore)
 src-tauri/target
 

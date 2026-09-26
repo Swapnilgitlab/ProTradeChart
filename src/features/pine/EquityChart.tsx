@@ -12,12 +12,14 @@ interface Props {
   buyHold: readonly CurvePoint[];
   initialCapital: number;
   currency?: string;
+  /** What the second curve is called. A Python report may compare against anything. */
+  benchmarkLabel?: string;
 }
 
 /** The strategy's equity over time, against buy & hold, drawn as plain SVG so it takes the
  *  theme's colours and needs no charting dependency. The strokes don't scale with the
  *  box, so the lines stay crisp at any panel width. */
-export function EquityChart({ equity, buyHold, initialCapital, currency }: Props) {
+export function EquityChart({ equity, buyHold, initialCapital, currency, benchmarkLabel = 'Buy & hold' }: Props) {
   const [showEquity, setShowEquity] = useState(true);
   const [showBuyHold, setShowBuyHold] = useState(true);
   const [hover, setHover] = useState<number | null>(null);
@@ -46,11 +48,13 @@ export function EquityChart({ equity, buyHold, initialCapital, currency }: Props
           <span className="swatch" aria-hidden="true" />
           Equity
         </label>
-        <label className="pine-chart-toggle buyhold">
-          <input type="checkbox" checked={showBuyHold} onChange={(e) => setShowBuyHold(e.currentTarget.checked)} />
-          <span className="swatch" aria-hidden="true" />
-          Buy &amp; hold
-        </label>
+        {bh.length > 0 && (
+          <label className="pine-chart-toggle buyhold">
+            <input type="checkbox" checked={showBuyHold} onChange={(e) => setShowBuyHold(e.currentTarget.checked)} />
+            <span className="swatch" aria-hidden="true" />
+            {benchmarkLabel}
+          </label>
+        )}
       </div>
 
       <div
@@ -74,7 +78,7 @@ export function EquityChart({ equity, buyHold, initialCapital, currency }: Props
             <div className={`tip${hoverX > 60 ? ' flip' : ''}`} style={{ left: `${hoverX}%` }}>
               <div className="muted small">{formatWhen(hoverPoint.time)}</div>
               {showEquity && <div>Equity {formatMoney(hoverPoint.value, currency)}</div>}
-              {showBuyHold && hoverBuyHold && <div className="muted">Buy &amp; hold {formatMoney(hoverBuyHold.value, currency)}</div>}
+              {showBuyHold && hoverBuyHold && <div className="muted">{benchmarkLabel} {formatMoney(hoverBuyHold.value, currency)}</div>}
             </div>
           </>
         )}

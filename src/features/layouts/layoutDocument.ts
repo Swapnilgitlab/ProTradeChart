@@ -1,5 +1,5 @@
 import type { WorkspaceState } from '@luxalgo/vela/workspace';
-import { isSupportedSymbol, normalizeSymbol } from '../../lib/symbols';
+import { chartSymbol, isSupportedSymbol, normalizeSymbol } from '../../lib/symbols';
 
 /** What one saved layout's `stateJson` deserializes to: the WHOLE session —
  *  every tab's symbol plus its full Vela state — not a single chart's settings.
@@ -60,6 +60,23 @@ export function withoutTheme(state: WorkspaceState): WorkspaceState {
         : chart,
     ),
   };
+}
+
+/** `state` with every chart's symbol in the form a chart is given (see `chartSymbol`), so a
+ *  layout saved before that form existed shows `HFCL`, not `NSE:HFCL`, in the chart's title
+ *  and status line. It loads the same instrument; nothing stored is rewritten. Returns the
+ *  input itself when nothing needed changing. */
+export function withChartSymbols(state: WorkspaceState): WorkspaceState {
+  if (!Array.isArray(state.charts)) return state;
+  let changed = false;
+  const charts = state.charts.map((chart) => {
+    if (typeof chart.symbol !== 'string') return chart;
+    const symbol = chartSymbol(chart.symbol);
+    if (symbol === chart.symbol) return chart;
+    changed = true;
+    return { ...chart, symbol };
+  });
+  return changed ? { ...state, charts } : state;
 }
 
 export function serializeLayout(doc: LayoutDocument): string {

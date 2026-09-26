@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkspaceState } from '@luxalgo/vela/workspace';
-import { parseLayout, serializeLayout, withoutTheme, withoutUnsupportedSymbols, type LayoutDocument } from './layoutDocument';
+import {
+  parseLayout,
+  serializeLayout,
+  withChartSymbols,
+  withoutTheme,
+  withoutUnsupportedSymbols,
+  type LayoutDocument,
+} from './layoutDocument';
 
 const doc: LayoutDocument = {
   version: 1,
@@ -176,5 +183,34 @@ describe('withoutUnsupportedSymbols', () => {
     const before = JSON.stringify(original);
     withoutUnsupportedSymbols(original, FALLBACK);
     expect(JSON.stringify(original)).toBe(before);
+  });
+});
+
+describe('withChartSymbols', () => {
+  const state = (...symbols: string[]) =>
+    ({ version: 1, charts: symbols.map((symbol, i) => ({ id: String(i), symbol, provider: symbol.split(':')[0] })) }) as unknown as WorkspaceState;
+  const symbolsOf = (s: WorkspaceState) => s.charts.map((c) => c.symbol);
+
+  it('gives each chart of a layout saved before the short form its short symbol', () => {
+    const out = withChartSymbols(state('zerodha:NSE:HFCL', 'zerodha:BSE:RELIANCE', 'binance:BTCUSDT'));
+    expect(symbolsOf(out)).toEqual(['zerodha:HFCL', 'zerodha:BSE:RELIANCE', 'binance:BTCUSDT']);
+  });
+
+  it('keeps everything else about a chart', () => {
+    const out = withChartSymbols(state('dhan:NSE:INFY'));
+    expect(out.charts[0]).toMatchObject({ id: '0', provider: 'dhan', symbol: 'dhan:INFY' });
+  });
+
+  it('returns the state itself when nothing needs changing, and never edits its input', () => {
+    const already = state('zerodha:HFCL', 'binance:BTCUSDT');
+    expect(withChartSymbols(already)).toBe(already);
+    const old = state('zerodha:NSE:HFCL');
+    withChartSymbols(old);
+    expect(symbolsOf(old)).toEqual(['zerodha:NSE:HFCL']);
+  });
+
+  it('copes with a state that has no charts', () => {
+    const empty = { version: 1 } as unknown as WorkspaceState;
+    expect(withChartSymbols(empty)).toBe(empty);
   });
 });

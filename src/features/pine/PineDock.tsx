@@ -28,12 +28,14 @@ type EditRequest = Extract<DockRequest, { type: 'edit-indicator' }>;
 interface Props {
   /** The active tab's workspace; null until its chart has been built. */
   workspace: VelaWorkspace | null;
+  /** Told whenever the dock opens or closes, so the rail's Script Editor button can show whether it is open. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 /** TradingView's bottom panel: the Script Editor and the Strategy Tester, sharing one
  *  resizable dock under the charts. Both stay mounted while the dock is hidden, so an
  *  editor buffer and the latest backtest survive closing and reopening it. */
-export function PineDock({ workspace }: Props) {
+export function PineDock({ workspace, onOpenChange }: Props) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('editor');
   const [height, setHeight] = useState(defaultHeight);
@@ -58,6 +60,10 @@ export function PineDock({ workspace }: Props) {
       });
   }, []);
 
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
+  useEffect(() => onOpenChangeRef.current?.(open), [open]);
+
   useEffect(() => {
     if (!restored.current) return;
     setPreference(PREF_DOCK, JSON.stringify({ open, tab, height } satisfies DockPrefs)).catch(() => {});
@@ -71,7 +77,7 @@ export function PineDock({ workspace }: Props) {
         } else if (request.type === 'open-tester') {
           setTab('tester');
           setOpen(true);
-        } else {
+        } else if (request.type === 'edit-indicator') {
           setTab('editor');
           setOpen(true);
           setEditRequest(request);

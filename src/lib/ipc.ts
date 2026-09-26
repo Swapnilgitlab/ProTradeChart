@@ -42,11 +42,27 @@ export interface WatchlistSummary {
   itemCount: number;
 }
 
+/** The colours a symbol can be flagged with; the backend refuses any other. */
+export const WATCHLIST_FLAGS = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'] as const;
+export type WatchlistFlag = (typeof WATCHLIST_FLAGS)[number];
+
 export interface WatchlistItem {
   id: number;
   /** Fully-qualified chart symbol, e.g. `binance:BTCUSDT`. */
   symbol: string;
   name: string | null;
+  /** Where the row sits among the list's symbols and sections: they share one sequence. */
+  position: number;
+  flag: WatchlistFlag | null;
+}
+
+/** A heading in a watchlist. It owns the symbols after it, up to the next heading. */
+export interface WatchlistSection {
+  id: number;
+  name: string;
+  position: number;
+  /** The symbols under it are hidden. */
+  collapsed: boolean;
 }
 
 export interface WatchlistDetail {
@@ -54,8 +70,15 @@ export interface WatchlistDetail {
   name: string;
   createdAt: string;
   items: WatchlistItem[];
+  sections: WatchlistSection[];
   /** Only present on the add-items response. */
   added?: number | null;
+}
+
+/** One row of a watchlist — a symbol or a section heading — named by its kind and id. */
+export interface RowRef {
+  kind: 'item' | 'section';
+  id: number;
 }
 
 export interface NewWatchlistItem {
@@ -158,6 +181,26 @@ export const addWatchlistItems = (watchlistId: number, items: NewWatchlistItem[]
 
 export const removeWatchlistItems = (watchlistId: number, symbols: string[]) =>
   invoke<void>('remove_watchlist_items', { watchlistId, symbols });
+
+export const setWatchlistItemFlag = (watchlistId: number, symbol: string, flag: WatchlistFlag | null) =>
+  invoke<void>('set_watchlist_item_flag', { watchlistId, symbol, flag });
+
+/** Puts the rows in this order and returns the list as it now stands. Rows left out keep their order after the
+ *  ones named, so a list that changed under the caller isn't scrambled. */
+export const setWatchlistOrder = (watchlistId: number, order: RowRef[]) =>
+  invoke<WatchlistDetail>('set_watchlist_order', { watchlistId, order });
+
+/** Adds a section heading before `before`, or at the end of the list. Returns the list as it now stands. */
+export const addWatchlistSection = (watchlistId: number, name: string, before: RowRef | null) =>
+  invoke<WatchlistDetail>('add_watchlist_section', { watchlistId, name, before });
+
+export const renameWatchlistSection = (id: number, name: string) => invoke<void>('rename_watchlist_section', { id, name });
+
+/** Removes the heading; the symbols under it stay on the list. */
+export const deleteWatchlistSection = (id: number) => invoke<void>('delete_watchlist_section', { id });
+
+export const setWatchlistSectionCollapsed = (id: number, collapsed: boolean) =>
+  invoke<void>('set_watchlist_section_collapsed', { id, collapsed });
 
 // ---- Imported datasets -----------------------------------------------------
 
@@ -359,3 +402,108 @@ export const deletePriceAlert = (id: string) => invoke<void>('delete_price_alert
 
 /** Removes the alerts that have already fired; resolves with how many went. */
 export const clearTriggeredPriceAlerts = () => invoke<number>('clear_triggered_price_alerts');
+
+// ---- Python -------------------------------------------------------------------
+
+export type PythonEnvState = 'noPython' | 'needsVenv' | 'needsPackages' | 'ready';
+
+export interface PythonEnvStatus {
+  state: PythonEnvState;
+  /** The interpreter scripts run with (or would be made from), when there is one. */
+  python: string | null;
+  version: string | null;
+  /** Where the app's own environment lives, or will. */
+  venv: string;
+  /** The user chose the interpreter instead of the app's environment. */
+  custom: boolean;
+  /** One sentence for the person: what is true, and what to do about it. */
+  message: string;
+}
+
+export interface PythonScript {
+  name: string;
+  modifiedMs: number;
+  size: number;
+}
+
+export type PythonStream = 'stdout' | 'stderr';
+
+/** `python-output`: one line a running script printed. */
+export interface PythonOutputEvent {
+  runId: string;
+  stream: PythonStream;
+  text: string;
+  /** A progress bar redrawing itself: the next line from the same stream replaces it. */
+  overwrite: boolean;
+}
+
+/** `python-exit`: a run has ended. */
+export interface PythonExitEvent {
+  runId: string;
+  /** Null when it was stopped, or a signal ended it. */
+  code: number | null;
+  stopped: boolean;
+  /** Set when the script could not be started at all. */
+  error: string | null;
+}
+
+/** `python-result`: something a script asked the app to show. `data` is whatever the script
+ *  sent, checked by the backend only as far as forwarding it safely; `python/results.ts`
+ *  validates its shape before anything is drawn. */
+export interface PythonResultEvent {
+  runId: string;
+  /** `table`, `report` or `figure`. */
+  kind: string;
+  title: string | null;
+  data: unknown;
+}
+
+/** `python-setup-output`: a line the environment setup printed. */
+export interface PythonSetupOutputEvent {
+  stream: PythonStream;
+  text: string;
+  overwrite: boolean;
+}
+
+/** `python-setup-done`. */
+export interface PythonSetupDoneEvent {
+  ok: boolean;
+  message: string;
+}
+
+export interface ResearchStats {
+  series: number;
+  bars: number;
+}
+
+export const pythonEnvStatus = () => invoke<PythonEnvStatus>('python_env_status');
+
+/** Use this interpreter instead of the app's own environment; null goes back to the app's. */
+export const pythonSetInterpreter = (path: string | null) => invoke<PythonEnvStatus>('python_set_interpreter', { path });
+
+/** Makes the environment and installs pandas and numpy. Returns at once; progress arrives
+ *  as `python-setup-output` events and the end as `python-setup-done`. */
+export const pythonSetupEnv = () => invoke<void>('python_setup_env');
+
+export const listPythonScripts = () => invoke<PythonScript[]>('python_list_scripts');
+
+export const readPythonScript = (name: string) => invoke<string>('python_read_script', { name });
+
+export const savePythonScript = (name: string, source: string) => invoke<void>('python_save_script', { name, source });
+
+export const deletePythonScript = (name: string) => invoke<void>('python_delete_script', { name });
+
+/** Opens the scripts folder in the system's file manager. */
+export const revealPythonFolder = () => invoke<void>('python_reveal_folder');
+
+/** Starts a script. `runId` is made up by the caller and names the run in every event, so
+ *  output can be recognised before this resolves. */
+export const runPythonScript = (name: string, runId: string) => invoke<void>('python_run', { name, runId });
+
+export const stopPythonRun = (runId: string) => invoke<void>('python_stop', { runId });
+
+/** How much market data scripts have caused the app to keep. */
+export const pythonResearchStats = () => invoke<ResearchStats>('python_research_stats');
+
+/** Forgets it all; resolves with how many bars went. */
+export const clearPythonResearchData = () => invoke<number>('python_clear_research_data');

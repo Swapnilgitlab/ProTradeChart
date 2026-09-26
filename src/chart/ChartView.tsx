@@ -1,12 +1,14 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { VelaWorkspace, type WorkspaceState } from '@luxalgo/vela/workspace';
 import { providerFactories } from '../data/providers';
-import { normalizeSymbol } from '../lib/symbols';
+import { withChartSymbols } from '../features/layouts/layoutDocument';
+import { chartSymbol, normalizeSymbol } from '../lib/symbols';
 import { BUNDLED_MANIFEST } from '../pine/bundled';
 import { useTheme } from '../theme/ThemeProvider';
 import { trackCursorPrice } from './alertActions';
 import { watchHistory } from './historyBackfill';
 import { installThinMovingAverages } from './thinMovingAverages';
+import { tidyStatusline } from './statuslineMeta';
 import { showCompanyName } from './watermarkName';
 
 // Vela's own default grid hues, at 20% opacity — the same neutral gray it
@@ -49,7 +51,7 @@ function watchAllCells(ws: VelaWorkspace, watched: Map<object, () => void>) {
   for (const cell of cells) {
     const chart = cell.chart;
     if (!watched.has(chart)) {
-      const stops = [watchHistory(chart), trackCursorPrice(chart), showCompanyName(cell)];
+      const stops = [watchHistory(chart), trackCursorPrice(chart), showCompanyName(cell), tidyStatusline(cell)];
       watched.set(chart, () => stops.forEach((stop) => stop()));
     }
   }
@@ -119,7 +121,7 @@ export const ChartView = forwardRef<ChartViewHandle, Props>(function ChartView(
     ref,
     () => ({
       setSymbol: (symbol) => {
-        if (wsRef.current) wsRef.current.chart.setMarket({ symbol });
+        if (wsRef.current) wsRef.current.chart.setMarket({ symbol: chartSymbol(symbol) });
         else pendingSymbolRef.current = symbol;
       },
       getState: () => wsRef.current?.getState() ?? null,
@@ -140,7 +142,7 @@ export const ChartView = forwardRef<ChartViewHandle, Props>(function ChartView(
       if (!wsRef.current) {
         const ws = new VelaWorkspace(container, {
           layout: '1', // starts as one chart; the toolbar's layout button offers grids up to 4×4
-          symbol: pendingSymbolRef.current ?? initialSymbol,
+          symbol: chartSymbol(pendingSymbolRef.current ?? initialSymbol),
           timeframe: 'D',
           theme: theme.baseMode,
           live: true,
@@ -168,10 +170,10 @@ export const ChartView = forwardRef<ChartViewHandle, Props>(function ChartView(
           }
         }
         if (initialState) {
-          ws.applyState(initialState);
+          ws.applyState(withChartSymbols(initialState));
           // The restored state carries its own market; a symbol picked in the
           // meantime is the more recent intent.
-          if (pendingSymbolRef.current) ws.chart.setMarket({ symbol: pendingSymbolRef.current });
+          if (pendingSymbolRef.current) ws.chart.setMarket({ symbol: chartSymbol(pendingSymbolRef.current) });
         }
         applyGridOpacity(ws, theme.baseMode);
         wsRef.current = ws;

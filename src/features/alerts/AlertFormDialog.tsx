@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Bell, Pause, Pencil, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { Dialog } from '../../components/Dialog';
 import { useToast } from '../../components/Toasts';
 import {
@@ -13,31 +12,14 @@ import {
   type AlertCondition,
   type AlertMode,
 } from '../../alerts/logic';
-import { soundEnabled, SOUND_PREFERENCE } from '../../alerts/notifier';
-import type { AlertDraft } from '../../alerts/ui';
 import { effectiveDefaultProvider, ensureProvidersLoaded } from '../../data/providerStatus';
 import { fetchQuotes } from '../../data/quotes';
 import { formatPrice } from '../../lib/format';
-import {
-  clearTriggeredPriceAlerts,
-  deletePriceAlert,
-  errorMessage,
-  savePriceAlert,
-  setPreference,
-  type PriceAlert,
-} from '../../lib/ipc';
+import { errorMessage, savePriceAlert, type PriceAlert } from '../../lib/ipc';
 import { displayTicker, providerLabel, resolveTypedSymbol, splitSymbol } from '../../lib/symbols';
-import { useAlerts } from './useAlerts';
 
-interface Props {
-  /** Open straight onto a new-alert form for this symbol (and price), or on the list. */
-  draft: AlertDraft | null;
-  /** The symbol a new alert starts with when the dialog was opened on the list: the active chart's. */
-  defaultSymbol: string;
-  onClose: () => void;
-}
-
-interface FormSeed {
+/** What the form starts from: a new alert for a symbol (and perhaps a price), or an existing alert to edit. */
+export interface AlertFormSeed {
   /** Set when editing an existing alert. */
   alert?: PriceAlert;
   symbol: string;
@@ -49,168 +31,17 @@ function priceText(value: number): string {
   return String(Number(value.toPrecision(10)));
 }
 
-const when = (ms: number) => new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-
-/** Statuses in the order people want to see them: what is watching first, what has fired last. */
-const STATUS_ORDER = { active: 0, paused: 1, triggered: 2 } as const;
-
-/** Price alerts: the list of what is being watched, and the form to add or edit one. */
-export function AlertsDialog({ draft, defaultSymbol, onClose }: Props) {
-  const [form, setForm] = useState<FormSeed | null>(draft ? { symbol: draft.symbol, price: draft.price ?? null } : null);
+/** The form for one price alert — new or being edited — in a dialog. The list of alerts lives in the side
+ *  panel (`AlertsPanel`); this is what opens from it, from a chart's right-click menu, or from `Alt+A`. */
+export function AlertFormDialog({ seed, onClose }: { seed: AlertFormSeed; onClose: () => void }) {
   return (
-    <Dialog
-      title={form ? (form.alert ? 'Edit alert' : 'New alert') : 'Price alerts'}
-      onClose={onClose}
-      wide={!form}
-    >
-      {form ? (
-        <AlertForm
-          key={form.alert?.id ?? 'new'}
-          seed={form}
-          onCancel={() => setForm(null)}
-          onSaved={() => setForm(null)}
-        />
-      ) : (
-        <AlertList onNew={() => setForm({ symbol: draft?.symbol ?? defaultSymbol, price: null })} onEdit={(alert) => setForm({ alert, symbol: alert.symbol, price: alert.price })} onClose={onClose} />
-      )}
+    <Dialog title={seed.alert ? 'Edit alert' : 'New alert'} onClose={onClose}>
+      <AlertForm seed={seed} onCancel={onClose} onSaved={onClose} />
     </Dialog>
   );
 }
 
-function AlertList({ onNew, onEdit, onClose }: { onNew: () => void; onEdit: (alert: PriceAlert) => void; onClose: () => void }) {
-  const toast = useToast();
-  const { alerts } = useAlerts();
-  const [sound, setSound] = useState(true);
-
-  useEffect(() => {
-    void soundEnabled().then(setSound);
-  }, []);
-
-  const sorted = useMemo(
-    () =>
-      [...alerts].sort(
-        (a, b) =>
-          STATUS_ORDER[a.status as keyof typeof STATUS_ORDER] - STATUS_ORDER[b.status as keyof typeof STATUS_ORDER] ||
-          (b.triggeredAt ?? b.createdAt) - (a.triggeredAt ?? a.createdAt),
-      ),
-    [alerts],
-  );
-  const firedCount = alerts.filter((a) => a.status === 'triggered').length;
-
-  const run = async (action: () => Promise<unknown>) => {
-    try {
-      await action();
-    } catch (err) {
-      toast(errorMessage(err), 'error');
-    }
-  };
-
-  /** Pausing keeps the alert; resuming or re-arming one starts measuring from the
-   *  price at that moment (`basePrice: null` makes the engine take a fresh sample),
-   *  so it doesn't fire at once over a move that happened while it was off. */
-  const setStatus = (alert: PriceAlert, status: PriceAlert['status']) =>
-    run(() => savePriceAlert({ ...alert, status, basePrice: status === 'active' ? null : alert.basePrice }));
-
-  const toggleSound = (on: boolean) => {
-    setSound(on);
-    void setPreference(SOUND_PREFERENCE, on ? '1' : '0').catch(() => {});
-  };
-
-  return (
-    <>
-      <p className="secondary" style={{ marginTop: 0 }}>
-        Get told when a price crosses a level. You can also right-click a chart and choose <strong>Add alert</strong>, or
-        press <kbd>Alt</kbd>+<kbd>A</kbd>. Alerts are checked about every 20 seconds while the app is open.
-      </p>
-
-      {sorted.length === 0 ? (
-        <div className="alert-empty">
-          <Bell size={22} aria-hidden />
-          <p>No alerts yet.</p>
-        </div>
-      ) : (
-        <ul className="alert-list">
-          {sorted.map((alert) => (
-            <li key={alert.id} className={`alert-row ${alert.status}`}>
-              <div className="alert-main">
-                <div className="alert-title">
-                  <strong>{displayTicker(alert.symbol)}</strong>
-                  <span className="muted small">{providerLabel(splitSymbol(alert.symbol).provider)}</span>
-                  <span>{describeCondition(alert.condition as AlertCondition, formatPrice(alert.price))}</span>
-                </div>
-                <div className="alert-sub small muted">{describeStatus(alert)}</div>
-              </div>
-              <div className="alert-actions">
-                {alert.status === 'active' && (
-                  <button type="button" className="icon-button" aria-label="Pause alert" title="Pause" onClick={() => void setStatus(alert, 'paused')}>
-                    <Pause size={14} />
-                  </button>
-                )}
-                {alert.status === 'paused' && (
-                  <button type="button" className="icon-button" aria-label="Resume alert" title="Resume" onClick={() => void setStatus(alert, 'active')}>
-                    <Play size={14} />
-                  </button>
-                )}
-                {alert.status === 'triggered' && (
-                  <button type="button" className="icon-button" aria-label="Re-arm alert" title="Watch for it again" onClick={() => void setStatus(alert, 'active')}>
-                    <RotateCcw size={14} />
-                  </button>
-                )}
-                <button type="button" className="icon-button" aria-label="Edit alert" title="Edit" onClick={() => onEdit(alert)}>
-                  <Pencil size={14} />
-                </button>
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label="Delete alert"
-                  title="Delete"
-                  onClick={() => void run(() => deletePriceAlert(alert.id))}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="alert-footer">
-        <label className="alert-sound">
-          <input type="checkbox" checked={sound} onChange={(e) => toggleSound(e.currentTarget.checked)} /> Play a sound
-        </label>
-        <span className="grow" />
-        {firedCount > 0 && (
-          <button type="button" className="btn" onClick={() => void run(clearTriggeredPriceAlerts)}>
-            Clear fired ({firedCount})
-          </button>
-        )}
-        <button type="button" className="btn" onClick={onClose}>
-          Close
-        </button>
-        <button type="button" className="btn btn-primary" onClick={onNew}>
-          <Plus size={13} /> New alert
-        </button>
-      </div>
-    </>
-  );
-}
-
-function describeStatus(alert: PriceAlert): string {
-  const parts: string[] = [];
-  if (alert.status === 'active') parts.push('Watching');
-  else if (alert.status === 'paused') parts.push('Paused');
-  else parts.push(`Fired ${alert.triggeredAt ? when(alert.triggeredAt) : ''} at ${alert.triggerPrice === null ? '—' : formatPrice(alert.triggerPrice)}`.replace('  ', ' '));
-  if (alert.mode === 'every') {
-    parts.push('every time it crosses');
-    if (alert.status !== 'triggered' && alert.triggerCount > 0 && alert.triggeredAt) {
-      parts.push(`fired ${alert.triggerCount}× (last ${when(alert.triggeredAt)})`);
-    }
-  }
-  if (alert.message) parts.push(alert.message);
-  return parts.join(' · ');
-}
-
-function AlertForm({ seed, onCancel, onSaved }: { seed: FormSeed; onCancel: () => void; onSaved: () => void }) {
+function AlertForm({ seed, onCancel, onSaved }: { seed: AlertFormSeed; onCancel: () => void; onSaved: () => void }) {
   const toast = useToast();
   const editing = seed.alert;
   const [symbolText, setSymbolText] = useState(seed.symbol);
@@ -383,7 +214,7 @@ function AlertForm({ seed, onCancel, onSaved }: { seed: FormSeed; onCancel: () =
       <div className="alert-footer">
         <span className="grow" />
         <button type="button" className="btn" onClick={onCancel} disabled={busy}>
-          Back
+          Cancel
         </button>
         <button type="submit" className="btn btn-primary" disabled={busy}>
           {busy ? 'Saving…' : editing ? 'Save' : 'Create alert'}

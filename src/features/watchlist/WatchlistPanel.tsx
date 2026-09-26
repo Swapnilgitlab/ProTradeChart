@@ -1,16 +1,33 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import {
+  ArrowUpToLine,
+  Bell,
   ChevronDown,
-  ChevronsLeft,
-  ChevronsRight,
+  ChevronRight,
+  ExternalLink,
   FileUp,
+  Flag,
   ListPlus,
   MoreHorizontal,
   Pencil,
   Plus,
+  SeparatorHorizontal,
   Trash2,
   X,
 } from 'lucide-react';
+import { openAlerts } from '../../alerts/ui';
+import { ContextMenu } from '../../components/ContextMenu';
 import { useDismiss } from '../../components/useDismiss';
 import { useToast } from '../../components/Toasts';
 import { effectiveDefaultProvider, isProviderUsable } from '../../data/providerStatus';
@@ -19,8 +36,10 @@ import { confirmDelete } from '../../lib/dialogs';
 import { formatPercent, formatPrice } from '../../lib/format';
 import {
   addWatchlistItems,
+  addWatchlistSection,
   createWatchlist,
   deleteWatchlist,
+  deleteWatchlistSection,
   errorMessage,
   getPreference,
   getSymbolNames,
@@ -28,21 +47,48 @@ import {
   listWatchlists,
   removeWatchlistItems,
   renameWatchlist,
+  renameWatchlistSection,
   setPreference,
+  setWatchlistItemFlag,
+  setWatchlistOrder,
+  setWatchlistSectionCollapsed,
+  WATCHLIST_FLAGS,
+  type RowRef,
   type WatchlistDetail,
-  type WatchlistItem,
+  type WatchlistFlag,
   type WatchlistSummary,
 } from '../../lib/ipc';
 import { mergeQuotes, quoteTargets, rowWindow, SMALL_LIST } from '../../lib/listWindow';
 import { displayTicker } from '../../lib/symbols';
 import { parseWatchlistFile } from '../../lib/watchlistImport';
+import {
+  buildRows,
+  fullIndex,
+  isItem,
+  moveRows,
+  refOf,
+  rowKey,
+  sectionSize,
+  visibleRows,
+  withPositions,
+  type ItemRow,
+  type Row,
+  type SectionRow,
+} from '../../lib/watchlistRows';
 import { useProviderState } from '../providers/useProviderState';
 import { SymbolSearchBox, type PickedSymbol } from '../search/SymbolSearchBox';
+import { useRowDrag } from './useRowDrag';
+import { subscribeWatchlistsChanged } from './watchlistBus';
 
 interface Props {
+  /** Whether the panel is showing. It stays mounted while another panel (or none) is: the list, its sort and
+   *  its scroll position are kept, and it simply stops fetching prices. */
+  visible: boolean;
   /** The active chart's symbol, highlighted in the list when present. */
   activeSymbol: string;
   onSelectSymbol: (symbol: string) => void;
+  /** "Open in new tab" from a row's menu. */
+  onOpenInNewTab: (symbol: string) => void;
 }
 
 type SortKey = 'symbol' | 'last' | 'chg';
@@ -52,7 +98,6 @@ type FormMode = 'create' | 'rename' | null;
 /** Regaining window focus refreshes prices, but not if they were fetched this recently. */
 const FOCUS_REFRESH_MIN_GAP_MS = 10_000;
 const PREF_ACTIVE = 'watchlist_active';
-const PREF_COLLAPSED = 'watchlist_collapsed';
 /** Rows rendered beyond the visible ones, so a short scroll never shows a gap. */
 const OVERSCAN_ROWS = 8;
 /** A row's height until the first one is measured. */
@@ -62,12 +107,14 @@ const FULL_LIST_CHUNK = 60;
 /** How long the list must sit still after a scroll before its new rows are fetched. */
 const SCROLL_SETTLE_MS = 250;
 /** Keeps a row with no name yet as tall as the others, which the windowing relies on. */
-const NO_NAME = '\u00a0';
+const NO_NAME = ' ';
+/** How long a price that just moved stays tinted. */
+const FLASH_MS = 900;
+const NEW_SECTION_NAME = 'New section';
 
-function sortItems(items: WatchlistItem[], quotes: Map<string, QuoteView>, key: SortKey | null, dir: SortDir): WatchlistItem[] {
-  if (!key) return items; // insertion order — the order the user built the list in
+function sortItems<T extends { symbol: string }>(items: T[], quotes: Map<string, QuoteView>, key: SortKey, dir: SortDir): T[] {
   const sign = dir === 'asc' ? 1 : -1;
-  const value = (i: WatchlistItem) => (key === 'last' ? quotes.get(i.symbol)?.price : quotes.get(i.symbol)?.changePercent);
+  const value = (i: T) => (key === 'last' ? quotes.get(i.symbol)?.price : quotes.get(i.symbol)?.changePercent);
   return [...items].sort((a, b) => {
     if (key === 'symbol') return sign * displayTicker(a.symbol).localeCompare(displayTicker(b.symbol));
     // Symbols with no quote always sink to the bottom, whichever way it's sorted.
@@ -81,8 +128,10 @@ function sortItems(items: WatchlistItem[], quotes: Map<string, QuoteView>, key: 
 
 /** Watchlists, stored locally, with live-ish prices. Docks on the right of the
  *  chart: a switcher between lists, sortable columns, a search box to add
- *  symbols, and import from a TradingView-style export. */
-export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
+ *  symbols, and import from a TradingView-style export. Rows can be flagged with
+ *  a colour, grouped under section headings and dragged into any order; a
+ *  right-click opens a menu of what can be done with one. */
+export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenInNewTab }: Props) {
   const toast = useToast();
   const [watchlists, setWatchlists] = useState<WatchlistSummary[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -90,13 +139,15 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
   const [quotes, setQuotes] = useState<Map<string, QuoteView>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [formMode, setFormMode] = useState<FormMode>(null);
   const [formName, setFormName] = useState('');
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null);
+  /** The section whose name is being typed in place. */
+  const [editingSection, setEditingSection] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const switcherRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
@@ -124,6 +175,7 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
       setActiveId(id);
       setSwitcherOpen(false);
       setError(null);
+      setEditingSection(null);
       if (listRef.current) listRef.current.scrollTop = 0;
       setPreference(PREF_ACTIVE, String(id)).catch(() => {});
       try {
@@ -135,17 +187,12 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
     [fail],
   );
 
-  // Initial load: restore the last-used list and collapsed state.
+  // Initial load: restore the last-used list.
   useEffect(() => {
     (async () => {
       try {
-        const [lists, savedActive, savedCollapsed] = await Promise.all([
-          listWatchlists(),
-          getPreference(PREF_ACTIVE),
-          getPreference(PREF_COLLAPSED),
-        ]);
+        const [lists, savedActive] = await Promise.all([listWatchlists(), getPreference(PREF_ACTIVE)]);
         setWatchlists(lists);
-        setCollapsed(savedCollapsed === '1');
         const preferred = lists.find((l) => String(l.id) === savedActive) ?? lists[0];
         if (preferred) await selectWatchlist(preferred.id);
       } catch (err) {
@@ -156,20 +203,49 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
     })();
   }, [selectWatchlist, fail]);
 
+  // Something else changed the lists (a Python script adding its results to one).
+  useEffect(
+    () =>
+      subscribeWatchlistsChanged(() => {
+        listWatchlists()
+          .then(async (lists) => {
+            setWatchlists(lists);
+            const current = activeId ?? lists[0]?.id;
+            if (current !== undefined) setDetail(await getWatchlist(current));
+          })
+          .catch(fail);
+      }),
+    [activeId, fail],
+  );
+
+  // The list as rows: symbols and section headings in one sequence, and — for what is on screen — with
+  // the symbols under a collapsed heading left out, or, while sorted by a column, just the symbols.
+  const rows = useMemo(() => (detail ? buildRows(detail.items, detail.sections) : []), [detail]);
+  const rowByKey = useMemo(() => new Map(rows.map((r) => [rowKey(r), r])), [rows]);
+  const sectionCounts = useMemo(() => {
+    const counts = new Map<number, number>();
+    rows.forEach((row, i) => {
+      if (row.kind === 'section') counts.set(row.id, sectionSize(rows, i));
+    });
+    return counts;
+  }, [rows]);
+  const sortedRows = useMemo(
+    () => (sortKey ? sortItems(rows.filter(isItem), quotes, sortKey, sortDir) : null),
+    [rows, quotes, sortKey, sortDir],
+  );
+  const shown: Row[] = useMemo(() => sortedRows ?? visibleRows(rows), [sortedRows, rows]);
+  const shownItems = useMemo(() => shown.filter(isItem), [shown]);
   const symbolsKey = detail?.items.map((i) => i.symbol).join('|') ?? '';
-  const sortedItems = useMemo(() => sortItems(detail?.items ?? [], quotes, sortKey, sortDir), [detail, quotes, sortKey, sortDir]);
 
   // Only the rows on screen are rendered: a 1,000-row list costs what a screenful does.
-  const win = rowWindow(viewport.top, viewport.height || 600, rowHeight, sortedItems.length, OVERSCAN_ROWS);
-  const windowSymbols = useMemo(
-    () => sortedItems.slice(win.start, win.end).map((i) => i.symbol),
-    [sortedItems, win.start, win.end],
-  );
+  const win = rowWindow(viewport.top, viewport.height || 600, rowHeight, shown.length, OVERSCAN_ROWS);
+  const windowRows = useMemo(() => shown.slice(win.start, win.end), [shown, win.start, win.end]);
+  const windowSymbols = useMemo(() => windowRows.filter(isItem).map((r) => r.symbol), [windowRows]);
   const visibleKey = windowSymbols.join('|');
   const priceSort = sortKey === 'last' || sortKey === 'chg';
-  const needsAll = priceSort && sortedItems.length > SMALL_LIST;
+  const needsAll = priceSort && shownItems.length > SMALL_LIST;
   useEffect(() => {
-    quoteView.current = { all: sortedItems.map((i) => i.symbol), visible: windowSymbols, needsAll, known: quotes };
+    quoteView.current = { all: shownItems.map((i) => i.symbol), visible: windowSymbols, needsAll, known: quotes };
   });
 
   // Follow the list's scroll position and size.
@@ -193,7 +269,7 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
       resize.disconnect();
       cancelAnimationFrame(frame);
     };
-  }, [collapsed, hasDetail]);
+  }, [visible, hasDetail]);
 
   // Rows are one fixed height (both text lines are single-line), measured once
   // rendered so the spacers above and below the visible rows are exact.
@@ -205,10 +281,11 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
 
   // Prices, for the rows on screen: on load, every 20s, when the window regains
   // focus after a short while, and for rows scrolled into view. Skipped while the
-  // window is hidden. A long list isn't quoted whole — that would spend a data source's
-  // request limits and starve the charts — except while sorted by price.
+  // window is hidden or the panel isn't showing. A long list isn't quoted whole — that
+  // would spend a data source's request limits and starve the charts — except while
+  // sorted by price.
   useEffect(() => {
-    if (collapsed || !symbolsKey) return;
+    if (!visible || !symbolsKey) return;
     let cancelled = false;
     let inFlight = false;
     let queued: 'tick' | 'scroll' | null = null;
@@ -220,17 +297,17 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
         if (queued !== 'tick') queued = reason;
         return;
       }
-      const { all, visible, needsAll: walkAll, known } = quoteView.current;
+      const { all, visible: onScreen, needsAll: walkAll, known } = quoteView.current;
       let target: string[];
       if (reason === 'tick') {
-        const planned = quoteTargets(all, visible, walkAll, cursor, FULL_LIST_CHUNK);
+        const planned = quoteTargets(all, onScreen, walkAll, cursor, FULL_LIST_CHUNK);
         cursor = planned.next;
         target = planned.symbols;
         lastRefresh = Date.now();
       } else {
         // Only rows that have never been priced: a price sort reshuffles the rows
         // on every refresh, and re-quoting whatever lands on screen would never stop.
-        target = visible.filter((s) => !known.has(s));
+        target = onScreen.filter((s) => !known.has(s));
       }
       if (target.length === 0) return;
       inFlight = true;
@@ -259,7 +336,7 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
       window.clearInterval(timer);
       window.removeEventListener('focus', refreshOnFocus);
     };
-  }, [symbolsKey, collapsed, usableProviders]);
+  }, [symbolsKey, visible, usableProviders]);
 
   useEffect(() => {
     if (!visibleKey) return;
@@ -284,7 +361,7 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
   // Keep the chosen row in view when it changes from the keyboard or a chart.
   useEffect(() => {
     const el = listRef.current;
-    const index = sortedItems.findIndex((i) => i.symbol === activeSymbol);
+    const index = shown.findIndex((r) => r.kind === 'item' && r.symbol === activeSymbol);
     if (!el || index < 0) return;
     const top = index * rowHeight;
     if (top < el.scrollTop) el.scrollTop = top;
@@ -293,34 +370,28 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
   }, [activeSymbol]);
 
   const pricedCount = useMemo(
-    () => (needsAll ? sortedItems.filter((i) => quotes.get(i.symbol)?.price != null).length : 0),
-    [needsAll, sortedItems, quotes],
+    () => (needsAll ? shownItems.filter((i) => quotes.get(i.symbol)?.price != null).length : 0),
+    [needsAll, shownItems, quotes],
   );
-
 
   // Arrow keys scrub through the list and load each symbol as you go. Ignored
   // while typing in a field so it never fights the search box or a name input.
   useEffect(() => {
-    if (collapsed) return;
+    if (!visible) return;
     const onKey = (e: KeyboardEvent) => {
-      if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || sortedItems.length === 0) return;
+      if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || shownItems.length === 0) return;
       const el = document.activeElement;
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return;
       // Vela's own keyboard handling owns arrows while a chart has focus.
       if (el?.closest('.single-chart-canvas')) return;
       e.preventDefault();
-      const idx = sortedItems.findIndex((i) => i.symbol === activeSymbol);
-      const next = e.key === 'ArrowUp' ? sortedItems[Math.max(0, idx - 1)] : sortedItems[Math.min(sortedItems.length - 1, idx + 1)];
+      const idx = shownItems.findIndex((i) => i.symbol === activeSymbol);
+      const next = e.key === 'ArrowUp' ? shownItems[Math.max(0, idx - 1)] : shownItems[Math.min(shownItems.length - 1, idx + 1)];
       if (next && next.symbol !== activeSymbol) onSelectSymbol(next.symbol);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [collapsed, sortedItems, activeSymbol, onSelectSymbol]);
-
-  function setCollapsedPersisted(value: boolean) {
-    setCollapsed(value);
-    setPreference(PREF_COLLAPSED, value ? '1' : '0').catch(() => {});
-  }
+  }, [visible, shownItems, activeSymbol, onSelectSymbol]);
 
   function cycleSort(key: SortKey) {
     if (sortKey !== key) {
@@ -406,12 +477,126 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
     }
   }
 
+  /** Runs a change the screen already shows: if the backend refuses it, the list is read again so the screen
+   *  says what is really stored. */
+  async function saveOrReload(save: () => Promise<unknown>) {
+    if (!detail) return;
+    try {
+      await save();
+    } catch (err) {
+      fail(err);
+      getWatchlist(detail.id).then(setDetail).catch(() => {});
+    }
+  }
+
+  function setFlag(symbol: string, flag: WatchlistFlag | null) {
+    if (!detail) return;
+    setDetail({ ...detail, items: detail.items.map((i) => (i.symbol === symbol ? { ...i, flag } : i)) });
+    void saveOrReload(() => setWatchlistItemFlag(detail.id, symbol, flag));
+  }
+
+  /** Puts the rows in a new order — on screen at once, then in the database. */
+  function applyOrder(next: readonly Row[]) {
+    if (!detail) return;
+    const { items, sections } = withPositions(next);
+    setDetail({ ...detail, items, sections });
+    void saveOrReload(() => setWatchlistOrder(detail.id, next.map(refOf)));
+  }
+
+  function moveToTop(row: Row) {
+    const from = rows.indexOf(row);
+    if (from > 0) applyOrder(moveRows(rows, from, 0));
+  }
+
+  /** A row was let go over the shown row `insertion` (an index into `shown`). */
+  function dropRow(row: Row, insertion: number) {
+    const from = rows.findIndex((r) => rowKey(r) === rowKey(row));
+    const next = moveRows(rows, from, fullIndex(rows, shown, insertion));
+    if (next !== rows) applyOrder(next);
+  }
+
+  async function addSection(before: RowRef | null) {
+    if (!detail) return;
+    setSortKey(null); // headings aren't shown in a sorted list
+    try {
+      const known = new Set(detail.sections.map((s) => s.id));
+      const updated = await addWatchlistSection(detail.id, NEW_SECTION_NAME, before);
+      setDetail(updated);
+      // Its name is asked for in place, where it now sits.
+      setEditingSection(updated.sections.find((s) => !known.has(s.id))?.id ?? null);
+    } catch (err) {
+      fail(err);
+    }
+  }
+
+  function toggleSection(id: number) {
+    if (!detail) return;
+    const collapsed = !detail.sections.find((s) => s.id === id)?.collapsed;
+    setDetail({ ...detail, sections: detail.sections.map((s) => (s.id === id ? { ...s, collapsed } : s)) });
+    void saveOrReload(() => setWatchlistSectionCollapsed(id, collapsed));
+  }
+
+  /** The name typed for a section, or `null` when it was abandoned. */
+  function finishRename(id: number, name: string | null) {
+    setEditingSection(null);
+    const clean = name?.trim();
+    const current = detail?.sections.find((s) => s.id === id)?.name;
+    if (!detail || !clean || clean === current) return;
+    setDetail({ ...detail, sections: detail.sections.map((s) => (s.id === id ? { ...s, name: clean } : s)) });
+    void saveOrReload(() => renameWatchlistSection(id, clean));
+  }
+
+  function removeSection(id: number) {
+    if (!detail) return;
+    setDetail({ ...detail, sections: detail.sections.filter((s) => s.id !== id) });
+    void saveOrReload(() => deleteWatchlistSection(id));
+  }
+
+  const canReorder = detail != null && sortKey === null;
+  const { drag, onRowPointerDown, consumeClick } = useRowDrag({
+    listRef,
+    rowHeight,
+    shown,
+    enabled: canReorder && editingSection === null,
+    onDrop: dropRow,
+  });
+
+  // Where the dragged row would land, unless that is where it already is.
+  const dropAt = useMemo(() => {
+    if (!drag || drag.insertion === null) return null;
+    const from = rows.findIndex((r) => rowKey(r) === rowKey(drag.row));
+    return moveRows(rows, from, fullIndex(rows, shown, drag.insertion)) === rows ? null : drag.insertion;
+  }, [drag, rows, shown]);
+  const draggedKey = drag ? rowKey(drag.row) : null;
 
   // Rows are memoised, so they get callbacks that never change identity.
-  const latest = useRef({ onSelectSymbol, handleRemove });
-  latest.current = { onSelectSymbol, handleRemove };
-  const selectRow = useCallback((symbol: string) => latest.current.onSelectSymbol(symbol), []);
+  const latest = useRef({ onSelectSymbol, handleRemove, rowByKey, toggleSection, finishRename });
+  latest.current = { onSelectSymbol, handleRemove, rowByKey, toggleSection, finishRename };
+  const selectRow = useCallback(
+    (symbol: string) => {
+      if (!consumeClick()) latest.current.onSelectSymbol(symbol);
+    },
+    [consumeClick],
+  );
   const removeRow = useCallback((symbol: string) => void latest.current.handleRemove(symbol), []);
+  const toggleRow = useCallback(
+    (id: number) => {
+      if (!consumeClick()) latest.current.toggleSection(id);
+    },
+    [consumeClick],
+  );
+  const renameRow = useCallback((id: number, name: string | null) => latest.current.finishRename(id, name), []);
+  const pressRow = useCallback(
+    (e: ReactPointerEvent, key: string) => {
+      const row = latest.current.rowByKey.get(key);
+      if (row) onRowPointerDown(e, row);
+    },
+    [onRowPointerDown],
+  );
+  const openMenu = useCallback((e: ReactMouseEvent, key: string) => {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY, key });
+  }, []);
 
   async function handleFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.currentTarget.files?.[0];
@@ -446,20 +631,21 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
     }
   }
 
-  if (collapsed) {
-    return (
-      <div className="watchlist-panel collapsed">
-        <button type="button" className="icon-button" aria-label="Expand watchlist" title="Show watchlist" onClick={() => setCollapsedPersisted(false)}>
-          <ChevronsLeft size={16} />
-        </button>
-      </div>
-    );
-  }
-
   const sortMark = (key: SortKey) => (sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
+  const menuRow = menu ? rowByKey.get(menu.key) : undefined;
+  const closeMenu = () => setMenu(null);
+  // The row a menu was opened on is gone (removed from elsewhere, another list opened): so is the menu.
+  useEffect(() => {
+    if (menu && !menuRow) setMenu(null);
+  }, [menu, menuRow]);
+  /** Closes the menu, then does what its item said. */
+  const choose = (action: () => void) => () => {
+    setMenu(null);
+    action();
+  };
 
   return (
-    <aside className="watchlist-panel" aria-label="Watchlist">
+    <aside className={`watchlist-panel${visible ? '' : ' is-hidden'}`} aria-label="Watchlist" aria-hidden={!visible}>
       <div className="watchlist-header">
         <div className="menu-anchor" ref={switcherRef}>
           <button type="button" className="menu-trigger" onClick={() => setSwitcherOpen((v) => !v)} aria-haspopup="menu" aria-expanded={switcherOpen}>
@@ -518,6 +704,18 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
                       className="menu-item"
                       onClick={() => {
                         setMoreOpen(false);
+                        void addSection(null);
+                      }}
+                    >
+                      <SeparatorHorizontal size={14} />
+                      <span className="grow">Add section</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="menu-item"
+                      onClick={() => {
+                        setMoreOpen(false);
                         setFormMode('rename');
                         setFormName(detail.name);
                       }}
@@ -535,9 +733,6 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
               </div>
             )}
           </div>
-          <button type="button" className="icon-button" aria-label="Collapse watchlist" title="Hide watchlist" onClick={() => setCollapsedPersisted(true)}>
-            <ChevronsRight size={16} />
-          </button>
           <input ref={fileInputRef} type="file" accept=".csv,.txt" style={{ display: 'none' }} onChange={handleFilePicked} />
         </div>
       </div>
@@ -587,34 +782,93 @@ export function WatchlistPanel({ activeSymbol, onSelectSymbol }: Props) {
             </button>
             <span />
           </div>
-          {needsAll && pricedCount < sortedItems.length && (
+          {needsAll && pricedCount < shownItems.length && (
             <p className="watchlist-note muted small">
-              Sorting by the prices loaded so far: {pricedCount} of {sortedItems.length}.
+              Sorting by the prices loaded so far: {pricedCount} of {shownItems.length}.
             </p>
+          )}
+          {sortKey && detail.sections.length > 0 && (
+            <p className="watchlist-note muted small">Sections are hidden, and rows can't be dragged, while the list is sorted.</p>
           )}
 
           <div className="watchlist-items" ref={listRef}>
-            {sortedItems.length === 0 ? (
+            {detail.items.length === 0 && shown.length === 0 ? (
               <p className="muted small" style={{ padding: 12 }}>No symbols yet — search above to add one.</p>
             ) : (
               <>
                 <div style={{ height: win.start * rowHeight }} aria-hidden="true" />
-                {sortedItems.slice(win.start, win.end).map((item) => (
-                  <WatchlistRow
-                    key={item.symbol}
-                    symbol={item.symbol}
-                    name={item.name ?? names.get(item.symbol) ?? null}
-                    quote={quotes.get(item.symbol)}
-                    selected={item.symbol === activeSymbol}
-                    onSelect={selectRow}
-                    onRemove={removeRow}
-                  />
-                ))}
-                <div style={{ height: (sortedItems.length - win.end) * rowHeight }} aria-hidden="true" />
+                {windowRows.map((row, k) => {
+                  const index = win.start + k;
+                  const dropEdge =
+                    dropAt === null ? null : dropAt === index ? 'before' : dropAt === shown.length && index === shown.length - 1 ? 'after' : null;
+                  const key = rowKey(row);
+                  return row.kind === 'section' ? (
+                    <SectionHeading
+                      key={key}
+                      rowKey={key}
+                      id={row.id}
+                      name={row.name}
+                      collapsed={row.collapsed}
+                      count={sectionCounts.get(row.id) ?? 0}
+                      editing={editingSection === row.id}
+                      height={rowHeight}
+                      dragging={draggedKey === key}
+                      dropEdge={dropEdge}
+                      onToggle={toggleRow}
+                      onRename={renameRow}
+                      onMenu={openMenu}
+                      onPress={pressRow}
+                    />
+                  ) : (
+                    <WatchlistRow
+                      key={key}
+                      rowKey={key}
+                      symbol={row.symbol}
+                      name={row.name ?? names.get(row.symbol) ?? null}
+                      flag={row.flag}
+                      quote={quotes.get(row.symbol)}
+                      selected={row.symbol === activeSymbol}
+                      dragging={draggedKey === key}
+                      dropEdge={dropEdge}
+                      onSelect={selectRow}
+                      onRemove={removeRow}
+                      onMenu={openMenu}
+                      onPress={pressRow}
+                    />
+                  );
+                })}
+                <div style={{ height: (shown.length - win.end) * rowHeight }} aria-hidden="true" />
               </>
             )}
           </div>
         </>
+      )}
+
+      {menu && menuRow && (
+        <ContextMenu x={menu.x} y={menu.y} label={menuRow.kind === 'item' ? displayTicker(menuRow.symbol) : menuRow.name} onClose={closeMenu}>
+          {menuRow.kind === 'item' ? (
+            <ItemMenu
+              row={menuRow}
+              canReorder={canReorder}
+              isFirst={rows[0] === menuRow}
+              onOpenInNewTab={choose(() => onOpenInNewTab(menuRow.symbol))}
+              onAddAlert={choose(() => openAlerts({ symbol: menuRow.symbol }))}
+              onFlag={(flag) => choose(() => setFlag(menuRow.symbol, flag))()}
+              onMoveToTop={choose(() => moveToTop(menuRow))}
+              onAddSection={choose(() => void addSection(refOf(menuRow)))}
+              onRemove={choose(() => void handleRemove(menuRow.symbol))}
+            />
+          ) : (
+            <SectionMenu
+              row={menuRow}
+              canReorder={canReorder}
+              onRename={choose(() => setEditingSection(menuRow.id))}
+              onToggle={choose(() => toggleSection(menuRow.id))}
+              onAddSection={choose(() => void addSection(refOf(menuRow)))}
+              onDelete={choose(() => removeSection(menuRow.id))}
+            />
+          )}
+        </ContextMenu>
       )}
     </aside>
   );
@@ -625,34 +879,65 @@ function withNames(prev: Map<string, string>, found: Record<string, string>): Ma
   return fresh.length ? new Map([...prev, ...fresh]) : prev;
 }
 
-interface RowProps {
-  symbol: string;
-  name: string | null;
-  quote: QuoteView | undefined;
-  selected: boolean;
-  onSelect: (symbol: string) => void;
-  onRemove: (symbol: string) => void;
+type DropEdge = 'before' | 'after' | null;
+
+const dropClass = (edge: DropEdge) => (edge ? ` drop-${edge}` : '');
+
+/** A price that just moved, and which way: for a moment it is tinted green (up) or red (down). */
+function useTickFlash(price: number | null | undefined): 'up' | 'down' | null {
+  const previous = useRef(price);
+  const [flash, setFlash] = useState<'up' | 'down' | null>(null);
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = price;
+    if (before == null || price == null || before === price) return;
+    setFlash(price > before ? 'up' : 'down');
+    const timer = window.setTimeout(() => setFlash(null), FLASH_MS);
+    return () => window.clearTimeout(timer);
+  }, [price]);
+  return flash;
 }
 
-/** One watchlist row: the ticker, the company name beneath it, price and change.
+interface RowProps {
+  rowKey: string;
+  symbol: string;
+  name: string | null;
+  flag: WatchlistFlag | null;
+  quote: QuoteView | undefined;
+  selected: boolean;
+  dragging: boolean;
+  dropEdge: DropEdge;
+  onSelect: (symbol: string) => void;
+  onRemove: (symbol: string) => void;
+  onMenu: (e: ReactMouseEvent, key: string) => void;
+  onPress: (e: ReactPointerEvent, key: string) => void;
+}
+
+/** One watchlist row: the ticker (with its colour flag), the company name beneath it, price and change.
  *  Memoised, so a refresh re-renders only the rows whose price moved. */
-const WatchlistRow = memo(function WatchlistRow({ symbol, name, quote, selected, onSelect, onRemove }: RowProps) {
+const WatchlistRow = memo(function WatchlistRow({ rowKey: key, symbol, name, flag, quote, selected, dragging, dropEdge, onSelect, onRemove, onMenu, onPress }: RowProps) {
   const change = quote?.changePercent ?? null;
   const ticker = displayTicker(symbol);
+  const flash = useTickFlash(quote?.price);
   return (
     <div
-      className={`watchlist-row${selected ? ' selected' : ''}`}
+      className={`watchlist-row${selected ? ' selected' : ''}${dragging ? ' dragging' : ''}${dropClass(dropEdge)}`}
       role="button"
       tabIndex={0}
       title={name ? `${ticker} — ${name}` : ticker}
       onClick={() => onSelect(symbol)}
-      onKeyDown={(e) => e.key === 'Enter' && onSelect(symbol)}
+      onKeyDown={(e: ReactKeyboardEvent) => e.key === 'Enter' && onSelect(symbol)}
+      onContextMenu={(e) => onMenu(e, key)}
+      onPointerDown={(e) => onPress(e, key)}
     >
       <div className="watchlist-symbol">
-        <span className="ticker">{ticker}</span>
+        <span className="ticker">
+          {flag && <Flag size={11} fill="currentColor" className="watchlist-flag" style={{ color: `var(--flag-${flag})` }} aria-label={`${flag} flag`} />}
+          <span className="ticker-text">{ticker}</span>
+        </span>
         <span className="sub">{name ?? NO_NAME}</span>
       </div>
-      <span className="watchlist-num">{formatPrice(quote?.price)}</span>
+      <span className={`watchlist-num${flash ? ` flash-${flash}` : ''}`}>{formatPrice(quote?.price)}</span>
       <span className={`watchlist-num ${change == null ? 'muted' : change < 0 ? 'neg' : 'pos'}`}>{formatPercent(change)}</span>
       <button
         type="button"
@@ -668,3 +953,175 @@ const WatchlistRow = memo(function WatchlistRow({ symbol, name, quote, selected,
     </div>
   );
 });
+
+interface SectionProps {
+  rowKey: string;
+  id: number;
+  name: string;
+  collapsed: boolean;
+  /** How many symbols it holds. */
+  count: number;
+  editing: boolean;
+  height: number;
+  dragging: boolean;
+  dropEdge: DropEdge;
+  onToggle: (id: number) => void;
+  /** The name typed, or `null` when the edit was abandoned. */
+  onRename: (id: number, name: string | null) => void;
+  onMenu: (e: ReactMouseEvent, key: string) => void;
+  onPress: (e: ReactPointerEvent, key: string) => void;
+}
+
+/** A section heading: click to fold the symbols under it away, right-click for the rest, drag to move it
+ *  (with its symbols). It is exactly one row tall, which the windowing relies on. */
+const SectionHeading = memo(function SectionHeading({ rowKey: key, id, name, collapsed, count, editing, height, dragging, dropEdge, onToggle, onRename, onMenu, onPress }: SectionProps) {
+  return (
+    <div
+      className={`watchlist-section${dragging ? ' dragging' : ''}${dropClass(dropEdge)}`}
+      style={{ height }}
+      role="button"
+      tabIndex={0}
+      aria-expanded={!collapsed}
+      onClick={() => !editing && onToggle(id)}
+      onKeyDown={(e: ReactKeyboardEvent) => {
+        if (editing || (e.key !== 'Enter' && e.key !== ' ')) return;
+        e.preventDefault();
+        onToggle(id);
+      }}
+      onContextMenu={(e) => onMenu(e, key)}
+      onPointerDown={(e) => onPress(e, key)}
+    >
+      {collapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+      {editing ? <SectionNameInput initial={name} onDone={(typed) => onRename(id, typed)} /> : <span className="watchlist-section-name">{name}</span>}
+      <span className="watchlist-section-count">{count}</span>
+    </div>
+  );
+});
+
+/** The name of a section being typed in place: Enter or leaving the field keeps it, Escape drops it. It reports
+ *  once — removing the field can itself blur it, and that must not undo an Escape. */
+function SectionNameInput({ initial, onDone }: { initial: string; onDone: (typed: string | null) => void }) {
+  const settled = useRef(false);
+  const settle = (typed: string | null) => {
+    if (settled.current) return;
+    settled.current = true;
+    onDone(typed);
+  };
+  return (
+    <input
+      autoFocus
+      type="text"
+      className="watchlist-section-input"
+      defaultValue={initial}
+      maxLength={60}
+      aria-label="Section name"
+      onFocus={(e) => e.currentTarget.select()}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') settle(e.currentTarget.value);
+        else if (e.key === 'Escape') settle(null);
+      }}
+      onBlur={(e) => settle(e.currentTarget.value)}
+    />
+  );
+}
+
+interface ItemMenuProps {
+  row: ItemRow;
+  canReorder: boolean;
+  isFirst: boolean;
+  onOpenInNewTab: () => void;
+  onAddAlert: () => void;
+  onFlag: (flag: WatchlistFlag | null) => void;
+  onMoveToTop: () => void;
+  onAddSection: () => void;
+  onRemove: () => void;
+}
+
+/** What can be done with one symbol of the list. */
+function ItemMenu({ row, canReorder, isFirst, onOpenInNewTab, onAddAlert, onFlag, onMoveToTop, onAddSection, onRemove }: ItemMenuProps) {
+  return (
+    <>
+      <button type="button" role="menuitem" className="menu-item" onClick={onOpenInNewTab}>
+        <ExternalLink size={14} />
+        <span className="grow">Open in new tab</span>
+      </button>
+      <button type="button" role="menuitem" className="menu-item" onClick={onAddAlert}>
+        <Bell size={14} />
+        <span className="grow">Add alert…</span>
+      </button>
+      <div className="menu-flags" role="group" aria-label="Flag">
+        <span className="menu-flags-label">Flag</span>
+        {WATCHLIST_FLAGS.map((flag) => (
+          <button
+            key={flag}
+            type="button"
+            role="menuitemradio"
+            aria-checked={row.flag === flag}
+            aria-label={flag}
+            title={row.flag === flag ? `Remove the ${flag} flag` : `Flag ${flag}`}
+            className={`flag-swatch${row.flag === flag ? ' on' : ''}`}
+            style={{ background: `var(--flag-${flag})` }}
+            onClick={() => onFlag(row.flag === flag ? null : flag)}
+          />
+        ))}
+      </div>
+      {canReorder && (
+        <>
+          {!isFirst && (
+            <button type="button" role="menuitem" className="menu-item" onClick={onMoveToTop}>
+              <ArrowUpToLine size={14} />
+              <span className="grow">Move to top</span>
+            </button>
+          )}
+          <button type="button" role="menuitem" className="menu-item" onClick={onAddSection}>
+            <SeparatorHorizontal size={14} />
+            <span className="grow">Add section above</span>
+          </button>
+        </>
+      )}
+      <div className="menu-divider" />
+      <button type="button" role="menuitem" className="menu-item danger" onClick={onRemove}>
+        <Trash2 size={14} />
+        <span className="grow">Remove</span>
+      </button>
+    </>
+  );
+}
+
+interface SectionMenuProps {
+  row: SectionRow;
+  canReorder: boolean;
+  onRename: () => void;
+  onToggle: () => void;
+  onAddSection: () => void;
+  onDelete: () => void;
+}
+
+/** What can be done with a section heading. */
+function SectionMenu({ row, canReorder, onRename, onToggle, onAddSection, onDelete }: SectionMenuProps) {
+  return (
+    <>
+      <button type="button" role="menuitem" className="menu-item" onClick={onRename}>
+        <Pencil size={14} />
+        <span className="grow">Rename</span>
+      </button>
+      <button type="button" role="menuitem" className="menu-item" onClick={onToggle}>
+        {row.collapsed ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <span className="grow">{row.collapsed ? 'Expand' : 'Collapse'}</span>
+      </button>
+      {canReorder && (
+        <button type="button" role="menuitem" className="menu-item" onClick={onAddSection}>
+          <SeparatorHorizontal size={14} />
+          <span className="grow">Add section above</span>
+        </button>
+      )}
+      <div className="menu-divider" />
+      <button type="button" role="menuitem" className="menu-item danger" onClick={onDelete}>
+        <Trash2 size={14} />
+        <span className="grow">Delete section (keep its symbols)</span>
+      </button>
+    </>
+  );
+}

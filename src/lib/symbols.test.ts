@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  chartSymbol,
   DEFAULT_PROVIDER,
   displayTicker,
   isSupportedProvider,
@@ -42,6 +43,62 @@ describe('symbol helpers', () => {
 
   it('the default provider needs no account, so a bare ticker always has somewhere to go', () => {
     expect(DEFAULT_PROVIDER).toBe('binance');
+  });
+});
+
+describe('broker symbols on screen', () => {
+  it('hide the data source and the usual exchange', () => {
+    expect(displayTicker('zerodha:NSE:HFCL')).toBe('HFCL');
+    expect(displayTicker('dhan:NSE:RELIANCE')).toBe('RELIANCE');
+    expect(displayTicker('zerodha:NSE:NIFTY_50')).toBe('NIFTY_50');
+    expect(displayTicker('zerodha:nse:hfcl')).toBe('hfcl');
+  });
+
+  it('keep any other exchange, because BSE:RELIANCE is not NSE:RELIANCE', () => {
+    expect(displayTicker('zerodha:BSE:RELIANCE')).toBe('BSE:RELIANCE');
+    expect(displayTicker('zerodha:NFO:RELIANCE26OCTFUT')).toBe('NFO:RELIANCE26OCTFUT');
+    expect(displayTicker('dhan:IDX:NIFTY_BANK')).toBe('IDX:NIFTY_BANK');
+    expect(displayTicker('zerodha:MCX:CRUDEOIL26OCTFUT')).toBe('MCX:CRUDEOIL26OCTFUT');
+  });
+
+  it('never strip a ticker down to nothing, or touch a symbol with no exchange to hide', () => {
+    expect(displayTicker('zerodha:NSE:')).toBe('NSE:');
+    expect(displayTicker('zerodha:HFCL')).toBe('HFCL');
+    expect(displayTicker('binance:BTCUSDT')).toBe('BTCUSDT');
+    expect(displayTicker('coinbase:BTC-USD')).toBe('BTC-USD');
+    expect(displayTicker('csv:NSE:MY_DATA')).toBe('NSE:MY_DATA');
+  });
+});
+
+describe('the symbol a chart is given', () => {
+  it('drops the usual exchange, so the chart’s own title and status line are short', () => {
+    expect(chartSymbol('zerodha:NSE:HFCL')).toBe('zerodha:HFCL');
+    expect(chartSymbol('dhan:NSE:RELIANCE')).toBe('dhan:RELIANCE');
+  });
+
+  it('keeps everything a bare ticker could not stand for', () => {
+    expect(chartSymbol('zerodha:BSE:RELIANCE')).toBe('zerodha:BSE:RELIANCE');
+    expect(chartSymbol('dhan:IDX:NIFTY')).toBe('dhan:IDX:NIFTY');
+    expect(chartSymbol('binance:BTCUSDT')).toBe('binance:BTCUSDT');
+  });
+
+  it('is undone by normalizeSymbol, so the app has one spelling of each instrument', () => {
+    for (const symbol of ['zerodha:NSE:HFCL', 'zerodha:NSE:NIFTY_50', 'zerodha:BSE:RELIANCE', 'zerodha:NFO:X26OCTFUT', 'dhan:IDX:NIFTY', 'binance:BTCUSDT']) {
+      expect(normalizeSymbol(chartSymbol(symbol))).toBe(symbol);
+    }
+  });
+
+  it('is stable: giving a chart what it already has changes nothing', () => {
+    expect(chartSymbol(chartSymbol('zerodha:NSE:HFCL'))).toBe('zerodha:HFCL');
+  });
+
+  it('is read back as NSE by normalizeSymbol, for brokers only', () => {
+    expect(normalizeSymbol('zerodha:HFCL')).toBe('zerodha:NSE:HFCL');
+    expect(normalizeSymbol('DHAN:RELIANCE')).toBe('dhan:NSE:RELIANCE');
+    expect(normalizeSymbol('zerodha:BSE:RELIANCE')).toBe('zerodha:BSE:RELIANCE');
+    expect(normalizeSymbol('binance:BTCUSDT')).toBe('binance:BTCUSDT');
+    expect(normalizeSymbol('csv:MYDATA')).toBe('csv:MYDATA');
+    expect(normalizeSymbol('zerodha:')).toBe('zerodha:');
   });
 });
 
@@ -96,7 +153,7 @@ describe('resolveTypedSymbol with a default provider', () => {
   it('knows Dhan as a provider', () => {
     expect(providerLabel('dhan')).toBe('Dhan');
     expect(splitSymbol('dhan:NSE:RELIANCE')).toEqual({ provider: 'dhan', ticker: 'NSE:RELIANCE' });
-    expect(displayTicker('dhan:NSE:RELIANCE')).toBe('NSE:RELIANCE');
+    expect(displayTicker('dhan:NSE:RELIANCE')).toBe('RELIANCE');
   });
 });
 
@@ -120,7 +177,7 @@ describe('Zerodha symbols', () => {
   it('splits and labels like any other provider', () => {
     expect(providerLabel('zerodha')).toBe('Zerodha');
     expect(splitSymbol('zerodha:NSE:NIFTY_50')).toEqual({ provider: 'zerodha', ticker: 'NSE:NIFTY_50' });
-    expect(displayTicker('zerodha:NSE:RELIANCE')).toBe('NSE:RELIANCE');
+    expect(displayTicker('zerodha:NSE:RELIANCE')).toBe('RELIANCE');
     expect(normalizeSymbol('ZERODHA:NSE:RELIANCE')).toBe('zerodha:NSE:RELIANCE');
   });
 });

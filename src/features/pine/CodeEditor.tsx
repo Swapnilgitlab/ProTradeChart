@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { EditorState } from '@codemirror/state';
+import { EditorState, type Extension } from '@codemirror/state';
 import {
   EditorView,
   drawSelection,
@@ -53,11 +53,17 @@ interface Props {
   onSave: () => void;
   /** Ctrl/Cmd+Enter. */
   onRun: () => void;
+  /** Syntax colouring and completion. Pine's, unless another language is given. */
+  language?: Extension;
+  placeholderText?: string;
 }
 
-/** A Pine source editor. Uncontrolled after mount: the parent remounts it (via `key`) to
- *  load a different script, which also gives that script a fresh undo history. */
-export function CodeEditor({ value, onChange, onSave, onRun }: Props) {
+const PINE_PLACEHOLDER = 'Write a Pine Script indicator() or strategy() here…';
+
+/** A source editor, for Pine Script unless given another language. Uncontrolled after
+ *  mount: the parent remounts it (via `key`) to load a different script, which also gives
+ *  that script a fresh undo history. */
+export function CodeEditor({ value, onChange, onSave, onRun, language = pineExtensions, placeholderText = PINE_PLACEHOLDER }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   // The editor is built once, so the callbacks it holds are read through a ref.
   const callbacks = useRef({ onChange, onSave, onRun });
@@ -79,8 +85,8 @@ export function CodeEditor({ value, onChange, onSave, onRun }: Props) {
           bracketMatching(),
           closeBrackets(),
           highlightSelectionMatches(),
-          placeholder('Write a Pine Script indicator() or strategy() here…'),
-          pineExtensions,
+          placeholder(placeholderText),
+          language,
           keymap.of([
             {
               key: 'Mod-s',

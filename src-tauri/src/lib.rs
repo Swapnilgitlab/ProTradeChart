@@ -2,9 +2,13 @@ mod alert_commands;
 mod commands;
 mod db;
 mod dhan;
+mod market;
 mod models;
 mod provider_commands;
 mod providers;
+mod pyapi;
+mod python;
+mod python_commands;
 mod schema;
 mod secrets;
 mod store;
@@ -43,6 +47,9 @@ pub fn run() {
                 } else {
                     log::LevelFilter::Info
                 })
+                // Debug builds would otherwise log every credential lookup: thousands of
+                // lines in one screen of the watchlist, burying the entries that matter.
+                .level_for("keyring", log::LevelFilter::Info)
                 .max_file_size(5_000_000)
                 .build(),
         )
@@ -66,6 +73,8 @@ pub fn run() {
 
             app.manage(db);
             app.manage(Secrets::os());
+            // The Python runs and the local data API they use, which starts with the first script.
+            app.manage(python::PythonState::default());
 
             let broker_http = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
@@ -141,6 +150,12 @@ pub fn run() {
             commands::delete_watchlist,
             commands::add_watchlist_items,
             commands::remove_watchlist_items,
+            commands::set_watchlist_item_flag,
+            commands::set_watchlist_order,
+            commands::add_watchlist_section,
+            commands::rename_watchlist_section,
+            commands::delete_watchlist_section,
+            commands::set_watchlist_section_collapsed,
             commands::list_datasets,
             commands::save_dataset,
             commands::delete_dataset,
@@ -174,6 +189,18 @@ pub fn run() {
             alert_commands::save_price_alert,
             alert_commands::delete_price_alert,
             alert_commands::clear_triggered_price_alerts,
+            python_commands::python_env_status,
+            python_commands::python_set_interpreter,
+            python_commands::python_setup_env,
+            python_commands::python_list_scripts,
+            python_commands::python_read_script,
+            python_commands::python_save_script,
+            python_commands::python_delete_script,
+            python_commands::python_reveal_folder,
+            python_commands::python_run,
+            python_commands::python_stop,
+            python_commands::python_research_stats,
+            python_commands::python_clear_research_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the application");

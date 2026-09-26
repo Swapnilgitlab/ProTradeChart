@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AppWindow, Bell, Code, Database, Info, Plug, Plus, X } from 'lucide-react';
+import { AppWindow, Bell, Code, Database, Info, List, Plug, Plus, SquareTerminal, X } from 'lucide-react';
 import type { VelaWorkspace, WorkspaceState } from '@luxalgo/vela/workspace';
 import { startAlertEngine } from '../../alerts/engine';
-import { onOpenAlerts, openAlerts, type AlertDraft } from '../../alerts/ui';
+import { onOpenAlerts, openAlerts } from '../../alerts/ui';
 import { ChartView, type ChartViewHandle } from '../../chart/ChartView';
 import { ThemeSelect } from '../../components/ThemeSelect';
 import { useToast } from '../../components/Toasts';
@@ -21,26 +21,42 @@ import { displayTicker, isSupportedSymbol } from '../../lib/symbols';
 import { openNewWindow } from '../../lib/windows';
 import { publishDockRequest } from '../../pine/dockBus';
 import { AboutDialog } from '../about/AboutDialog';
-import { AlertsDialog } from '../alerts/AlertsDialog';
+import { AlertFormDialog, type AlertFormSeed } from '../alerts/AlertFormDialog';
+import { AlertsPanel } from '../alerts/AlertsPanel';
 import { useAlerts } from '../alerts/useAlerts';
 import { startBackgroundUpdates } from '../../updates/service';
 import { useUpdateState } from '../../updates/useUpdateState';
 import { ImportDataDialog } from '../datasets/ImportDataDialog';
 import { PineDock } from '../pine/PineDock';
+import { PythonPanel } from '../python/PythonPanel';
 import { LayoutMenu, type LayoutSummary } from '../layouts/LayoutMenu';
+import { RightRail, type RailAction, type RailPanelButton } from '../rail/RightRail';
+import {
+  PREF_LEGACY_WATCHLIST_COLLAPSED,
+  PREF_RAIL_PANEL,
+  panelAfterToggle,
+  railPreferenceValue,
+  restoreRailPanel,
+  type RailPanelId,
+} from '../rail/railPanel';
 import { DataProvidersDialog } from '../providers/DataProvidersDialog';
 import { parseLayout, serializeLayout, withoutUnsupportedSymbols, type LayoutDocument } from '../layouts/layoutDocument';
 import { SymbolSearchBox } from '../search/SymbolSearchBox';
 import { WatchlistPanel } from '../watchlist/WatchlistPanel';
-
-interface ChartTab {
-  id: string;
-  /** Fully-qualified `provider:TICKER`. Tracks the chart's own symbol. */
-  symbol: string;
-  /** Only set when this tab was just restored from a saved layout — consumed
-   *  once by ChartView at construction. */
-  initialState?: WorkspaceState;
-}
+import { TabQuote } from './TabQuote';
+import { useTabQuotes } from './useTabQuotes';
+import {
+  activeChartIndex,
+  activeChartTab,
+  canCloseTab,
+  chartTabs,
+  isChartTab,
+  pythonTab,
+  tabAfterClosing,
+  tabAfterStep,
+  type ChartTab,
+  type Tab,
+} from './tabs';
 
 /** When the alerts list was last looked at: alerts fired since then wear a badge. */
 const PREF_ALERTS_SEEN = 'alerts_seen_at';
@@ -48,7 +64,7 @@ const PREF_ALERTS_SEEN = 'alerts_seen_at';
 const PREF_GRID_HINT = 'grid_hint_seen';
 
 function createTab(symbol: string = starterSymbol(), initialState?: WorkspaceState): ChartTab {
-  return { id: crypto.randomUUID(), symbol, initialState };
+  return { kind: 'chart', id: crypto.randomUUID(), symbol, initialState };
 }
 
 function toSummary(row: ChartLayoutRow): LayoutSummary {
@@ -62,8 +78,11 @@ function toSummary(row: ChartLayoutRow): LayoutSummary {
  *  whole tab set as one named session. The theme is not part of a layout. */
 export function Workspace() {
   const toast = useToast();
-  const [tabs, setTabs] = useState<ChartTab[]>(() => [createTab()]);
+  const [tabs, setTabs] = useState<Tab[]>(() => [createTab()]);
   const [activeTabId, setActiveTabId] = useState<string>(() => tabs[0].id);
+  /** The chart tab last looked at, so the watchlist, alerts and the Pine dock keep talking about
+   *  it while the Python tab is showing. */
+  const [lastChartId, setLastChartId] = useState<string | null>(() => tabs[0].id);
   /** Charts are built once the data providers are known. */
   const [startup, setStartup] = useState<'loading' | 'ready'>('loading');
   const [layouts, setLayouts] = useState<ChartLayoutRow[]>([]);
@@ -71,7 +90,12 @@ export function Workspace() {
   const [importOpen, setImportOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [providersOpen, setProvidersOpen] = useState(false);
-  const [alertsOpen, setAlertsOpen] = useState<{ draft: AlertDraft | null } | null>(null);
+  /** The new-alert / edit-alert form, when it is open. The list of alerts is the rail's Alerts panel. */
+  const [alertForm, setAlertForm] = useState<AlertFormSeed | null>(null);
+  /** Whether the Script Editor dock is open, for the rail's button. (The dock owns this; it only says so.) */
+  const [dockOpen, setDockOpen] = useState(false);
+  /** The panel the right rail is showing beside the chart, if any. The watchlist until saved settings say otherwise. */
+  const [railPanel, setRailPanel] = useState<RailPanelId | null>('watchlist');
   const { alerts } = useAlerts();
   const [alertsSeenAt, setAlertsSeenAt] = useState<number | null>(null);
   const chartRefs = useRef<Map<string, ChartViewHandle>>(new Map());
@@ -84,6 +108,20 @@ export function Workspace() {
   const bootedDefaultLayout = useRef(false);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
+  /** What the chrome outside the tab talks about: see `activeChartTab`. */
+  const chartTab = activeChartTab(tabs, activeTabId, lastChartId);
+  const chartSymbol = chartTab?.symbol ?? starterSymbol();
+  /** The price and day's change each chart tab wears beside its name. */
+  const tabQuotes = useTabQuotes(chartTabs(tabs).map((t) => t.symbol));
+
+  /** Shows a tab, and remembers it when it is a chart. */
+  const showTab = useCallback(
+    (id: string) => {
+      setActiveTabId(id);
+      if (tabs.some((t) => t.id === id && isChartTab(t))) setLastChartId(id);
+    },
+    [tabs],
+  );
 
   // New charts of a grid start on the tab's symbol; how to give one its own is
   // not obvious, so say so — once, ever.
@@ -114,10 +152,17 @@ export function Workspace() {
           'info',
         );
       }
+      // A layout holds charts; the Python tab is a workspace, not part of a saved session, so it
+      // stays open across a load with its scripts and its run untouched.
       const next = usable.tabs.map((t) => createTab(t.symbol, t.state));
       chartRefs.current.clear();
-      setTabs(next);
-      setActiveTabId(next[usable.activeTabIndex].id);
+      const active = next[usable.activeTabIndex] ?? next[0];
+      setTabs((prev) => {
+        const python = pythonTab(prev);
+        return python ? [...next, python] : next;
+      });
+      setActiveTabId(active.id);
+      setLastChartId(active.id);
       setCurrentLayoutId(row.id);
     },
     [toast],
@@ -166,31 +211,47 @@ export function Workspace() {
         if (template) tab = createTab(template.symbol, template.state);
       }
       const created = tab ?? createTab(symbol);
-      setTabs((prev) => [...prev, created]);
+      // A new chart goes after the last one, so the Python tab stays on the right.
+      setTabs((prev) => {
+        const at = prev.findIndex((t) => !isChartTab(t));
+        return at === -1 ? [...prev, created] : [...prev.slice(0, at), created, ...prev.slice(at)];
+      });
       setActiveTabId(created.id);
+      setLastChartId(created.id);
     },
     [layouts],
   );
 
+  /** Opens the Python workspace, or shows it when it is already open. */
+  const openPython = useCallback(() => {
+    const existing = pythonTab(tabs);
+    if (existing) {
+      setActiveTabId(existing.id);
+      return;
+    }
+    const created: Tab = { kind: 'python', id: crypto.randomUUID() };
+    setTabs((prev) => [...prev, created]);
+    setActiveTabId(created.id);
+  }, [tabs]);
+
   const closeTab = useCallback(
     (id: string) => {
-      if (tabs.length <= 1) return; // always keep at least one tab open
-      const idx = tabs.findIndex((t) => t.id === id);
-      if (idx === -1) return;
-      const next = tabs.filter((t) => t.id !== id);
-      if (id === activeTabId) setActiveTabId((next[idx - 1] ?? next[idx] ?? next[0]).id);
+      if (!canCloseTab(tabs, id)) return;
+      const nextActive = tabAfterClosing(tabs, id);
+      if (id === activeTabId && nextActive) showTab(nextActive);
+      if (id === lastChartId) setLastChartId(null);
       chartRefs.current.delete(id);
-      setTabs(next);
+      setTabs((prev) => prev.filter((t) => t.id !== id));
     },
-    [tabs, activeTabId],
+    [tabs, activeTabId, lastChartId, showTab],
   );
 
   const setTabSymbol = useCallback((id: string, symbol: string) => {
-    setTabs((prev) => prev.map((t) => (t.id === id && t.symbol !== symbol ? { ...t, symbol } : t)));
+    setTabs((prev) => prev.map((t) => (t.id === id && isChartTab(t) && t.symbol !== symbol ? { ...t, symbol } : t)));
   }, []);
 
-  /** Routes a symbol pick — from the search box, the watchlist or the data
-   *  dialog — to whichever tab is active. */
+  /** Routes a symbol pick — from the search box, the watchlist, the data dialog or a Python
+   *  script's results — to the chart the chrome is following, and shows it. */
   const goToSymbol = useCallback(
     (symbol: string) => {
       if (!isSupportedSymbol(symbol)) {
@@ -198,24 +259,43 @@ export function Workspace() {
         toast(`${displayTicker(symbol)} came from a data source that is no longer available.`, 'info');
         return;
       }
-      chartRefs.current.get(activeTab.id)?.setSymbol(symbol);
-      setTabSymbol(activeTab.id, symbol);
+      if (!chartTab) return;
+      chartRefs.current.get(chartTab.id)?.setSymbol(symbol);
+      setTabSymbol(chartTab.id, symbol);
+      // Picked from the Python tab: show the chart it was asked for.
+      if (chartTab.id !== activeTabId) showTab(chartTab.id);
     },
-    [activeTab.id, setTabSymbol, toast],
+    [chartTab, activeTabId, showTab, setTabSymbol, toast],
   );
 
-  const stepTab = useCallback(
-    (delta: number) => {
-      const idx = tabs.findIndex((t) => t.id === activeTabId);
-      setActiveTabId(tabs[(idx + delta + tabs.length) % tabs.length].id);
-    },
-    [tabs, activeTabId],
+  const stepTab = useCallback((delta: number) => showTab(tabAfterStep(tabs, activeTabId, delta)), [tabs, activeTabId, showTab]);
+
+  // The right rail: remembered between launches, and shared by every window.
+  useEffect(() => {
+    Promise.all([getPreference(PREF_RAIL_PANEL), getPreference(PREF_LEGACY_WATCHLIST_COLLAPSED)])
+      .then(([saved, legacyCollapsed]) => setRailPanel(restoreRailPanel(saved, legacyCollapsed)))
+      .catch(() => {});
+  }, []);
+  const showRailPanel = useCallback((panel: RailPanelId | null) => {
+    setRailPanel(panel);
+    setPreference(PREF_RAIL_PANEL, railPreferenceValue(panel)).catch(() => {});
+  }, []);
+  const toggleRailPanel = useCallback(
+    (pressed: RailPanelId) => showRailPanel(panelAfterToggle(railPanel, pressed)),
+    [railPanel, showRailPanel],
   );
 
-  // Alerts: the chart's own menus and buttons ask the app to open the dialog,
-  // and the workspace that is the app's main window is the one that watches prices
-  // (every window shares the alerts, and two watchers would each fire them).
-  useEffect(() => onOpenAlerts((draft) => setAlertsOpen({ draft })), []);
+  // Alerts: the chart's own menus and buttons ask the app to open them — a draft opens the new-alert form,
+  // none opens the alerts panel — and the workspace that is the app's main window is the one that watches
+  // prices (every window shares the alerts, and two watchers would each fire them).
+  useEffect(
+    () =>
+      onOpenAlerts((draft) => {
+        if (draft) setAlertForm({ symbol: draft.symbol, price: draft.price ?? null });
+        else showRailPanel('alerts');
+      }),
+    [showRailPanel],
+  );
   useEffect(() => {
     if (getCurrentWindow().label !== 'main') return;
     return startAlertEngine();
@@ -238,13 +318,22 @@ export function Workspace() {
   }, []);
   const unseenAlerts =
     alertsSeenAt === null ? 0 : alerts.filter((a) => a.triggeredAt !== null && a.triggeredAt > alertsSeenAt).length;
+  // An alert that fires while its panel is open is being looked at.
+  useEffect(() => {
+    if (railPanel === 'alerts' && unseenAlerts > 0) markAlertsSeen();
+  }, [railPanel, unseenAlerts, markAlertsSeen]);
 
   // App-wide shortcuts. Modifier combos only, so they never collide with
   // Vela's own type-a-letter shortcuts on the chart.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'a') {
-        openAlerts({ symbol: activeTab.symbol });
+        openAlerts({ symbol: chartSymbol });
+        e.preventDefault();
+        return;
+      }
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'w') {
+        toggleRailPanel('watchlist');
         e.preventDefault();
         return;
       }
@@ -254,6 +343,7 @@ export function Workspace() {
       else if (key === 'w' && !e.shiftKey) closeTab(activeTabId);
       else if (key === 'k' && !e.shiftKey) searchRef.current?.focus();
       else if (key === 'n' && e.shiftKey) openNewWindow();
+      else if (key === 'y' && e.shiftKey) openPython();
       else if (e.key === 'PageDown') stepTab(1);
       else if (e.key === 'PageUp') stepTab(-1);
       else return;
@@ -261,19 +351,19 @@ export function Workspace() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [openTab, closeTab, stepTab, activeTabId, activeTab.symbol]);
+  }, [openTab, closeTab, stepTab, openPython, toggleRailPanel, activeTabId, chartSymbol]);
 
   /** Never silently drops the save. A tab that was never shown has no live
    *  chart (see ChartView), so it falls back to its own last-known state —
    *  untouched, since nothing could have changed it without a live chart —
    *  and to symbol-only if it never had one. */
   function captureLayoutDocument(): LayoutDocument {
-    const tabDocs = tabs.map((t) => {
+    // Charts only: the Python tab holds scripts and a console, which aren't part of a chart session.
+    const tabDocs = chartTabs(tabs).map((t) => {
       const state = chartRefs.current.get(t.id)?.getState() ?? t.initialState;
       return state ? { symbol: t.symbol, state } : { symbol: t.symbol };
     });
-    const activeIdx = tabs.findIndex((t) => t.id === activeTabId);
-    return { version: 1, tabs: tabDocs, activeTabIndex: Math.max(0, activeIdx) };
+    return { version: 1, tabs: tabDocs, activeTabIndex: activeChartIndex(tabs, activeTabId, lastChartId) };
   }
 
   async function persistLayout(id: string, name: string, isDefault: boolean) {
@@ -298,6 +388,34 @@ export function Workspace() {
 
   const currentLayout = layouts.find((l) => l.id === currentLayoutId);
 
+  const railPanels: RailPanelButton[] = [
+    { id: 'watchlist', label: 'Watchlist', shortcut: 'Alt+W', icon: List },
+    { id: 'alerts', label: unseenAlerts > 0 ? `Price alerts — ${unseenAlerts} fired` : 'Price alerts', icon: Bell, badge: unseenAlerts },
+  ];
+  // The dock and the Python tab each belong to the tab showing: the dock is a chart's, so it isn't showing
+  // while the Python tab is.
+  const railTools: RailAction[] = [
+    {
+      id: 'script-editor',
+      label: 'Script Editor',
+      title: 'Script Editor and Strategy Tester (Ctrl+E)',
+      icon: Code,
+      pressed: dockOpen && !!activeTab && isChartTab(activeTab),
+      onClick: () => publishDockRequest({ type: 'toggle' }),
+    },
+    {
+      id: 'python',
+      label: 'Python',
+      title: "Python: screen and backtest with your broker's data (Ctrl+Shift+Y)",
+      icon: SquareTerminal,
+      pressed: !!activeTab && !isChartTab(activeTab),
+      onClick: openPython,
+    },
+  ];
+  const railFooter: RailAction[] = [
+    { id: 'data-providers', label: 'Data providers', title: 'Data providers: where prices come from', icon: Plug, onClick: () => setProvidersOpen(true) },
+  ];
+
   async function handleDeleteLayout(id: string) {
     try {
       await deleteChartLayout(id);
@@ -312,31 +430,36 @@ export function Workspace() {
     <div className="app">
       <div className="tab-bar">
         <div className="tab-bar-scroll" role="tablist">
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              role="tab"
-              aria-selected={tab.id === activeTabId}
-              className={`tab-chip${tab.id === activeTabId ? ' active' : ''}`}
-              onClick={() => setActiveTabId(tab.id)}
-              onAuxClick={(e) => e.button === 1 && closeTab(tab.id)}
-            >
-              <span className="tab-chip-label">{displayTicker(tab.symbol)}</span>
-              {tabs.length > 1 && (
-                <button
-                  type="button"
-                  className="tab-chip-close"
-                  aria-label={`Close ${displayTicker(tab.symbol)}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    closeTab(tab.id);
-                  }}
-                >
-                  <X size={12} />
-                </button>
-              )}
-            </div>
-          ))}
+          {tabs.map((tab) => {
+            const label = isChartTab(tab) ? displayTicker(tab.symbol) : 'Python';
+            return (
+              <div
+                key={tab.id}
+                role="tab"
+                aria-selected={tab.id === activeTabId}
+                className={`tab-chip${tab.id === activeTabId ? ' active' : ''}${isChartTab(tab) ? '' : ' python'}`}
+                onClick={() => showTab(tab.id)}
+                onAuxClick={(e) => e.button === 1 && closeTab(tab.id)}
+              >
+                {!isChartTab(tab) && <SquareTerminal size={13} aria-hidden="true" />}
+                <span className="tab-chip-label">{label}</span>
+                {isChartTab(tab) && <TabQuote symbol={tab.symbol} quote={tabQuotes.get(tab.symbol)} />}
+                {canCloseTab(tabs, tab.id) && (
+                  <button
+                    type="button"
+                    className="tab-chip-close"
+                    aria-label={`Close ${label}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      closeTab(tab.id);
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
           <button type="button" className="icon-button" style={{ margin: '0 4px 4px', flexShrink: 0 }} aria-label="New chart tab" title="New tab (Ctrl+T)" onClick={() => openTab()}>
             <Plus size={15} />
           </button>
@@ -357,25 +480,6 @@ export function Workspace() {
           />
           <SymbolSearchBox ref={searchRef} onSelect={(picked) => goToSymbol(picked.symbol)} />
           <span className="tab-bar-divider" />
-          <button
-            type="button"
-            className="icon-button bell-button"
-            aria-label="Price alerts"
-            title={unseenAlerts > 0 ? `Price alerts (${unseenAlerts} fired) — Alt+A` : 'Price alerts (Alt+A)'}
-            onClick={() => {
-              markAlertsSeen();
-              setAlertsOpen({ draft: null });
-            }}
-          >
-            <Bell size={15} />
-            {unseenAlerts > 0 && <span className="icon-badge">{unseenAlerts > 9 ? '9+' : unseenAlerts}</span>}
-          </button>
-          <button type="button" className="icon-button" aria-label="Script Editor" title="Script Editor and Strategy Tester (Ctrl+E)" onClick={() => publishDockRequest({ type: 'toggle' })}>
-            <Code size={15} />
-          </button>
-          <button type="button" className="icon-button" aria-label="Data providers" title="Data providers: where prices come from" onClick={() => setProvidersOpen(true)}>
-            <Plug size={15} />
-          </button>
           <button type="button" className="icon-button" aria-label="Import data" title="Import your own data (CSV)" onClick={() => setImportOpen(true)}>
             <Database size={15} />
           </button>
@@ -401,38 +505,51 @@ export function Workspace() {
           <div className="app-canvases">
             {startup === 'ready' && tabs.map((tab) => (
               <div key={tab.id} className={tab.id === activeTabId ? 'tab-panel' : undefined} style={tab.id === activeTabId ? undefined : { display: 'none' }}>
-                <ChartView
-                  ref={(handle) => {
-                    if (handle) chartRefs.current.set(tab.id, handle);
-                    else chartRefs.current.delete(tab.id);
-                  }}
-                  initialSymbol={tab.symbol}
-                  initialState={tab.initialState}
-                  onSymbolChange={(symbol) => setTabSymbol(tab.id, symbol)}
-                  onGridGrow={showGridHint}
-                  onWorkspace={(ws) => setTabWorkspace(tab.id, ws)}
-                />
+                {isChartTab(tab) ? (
+                  <ChartView
+                    ref={(handle) => {
+                      if (handle) chartRefs.current.set(tab.id, handle);
+                      else chartRefs.current.delete(tab.id);
+                    }}
+                    initialSymbol={tab.symbol}
+                    initialState={tab.initialState}
+                    onSymbolChange={(symbol) => setTabSymbol(tab.id, symbol)}
+                    onGridGrow={showGridHint}
+                    onWorkspace={(ws) => setTabWorkspace(tab.id, ws)}
+                  />
+                ) : (
+                  // Stays mounted while another tab shows, so a run keeps going and its console
+                  // and results are still there when you come back.
+                  <PythonPanel visible={tab.id === activeTabId} onOpenSymbol={goToSymbol} />
+                )}
               </div>
             ))}
           </div>
-          <PineDock workspace={workspaces[activeTab.id] ?? null} />
+          {/* The Pine dock belongs to a chart, so it is hidden while the Python tab is showing. */}
+          {activeTab && isChartTab(activeTab) && <PineDock workspace={workspaces[activeTab.id] ?? null} onOpenChange={setDockOpen} />}
         </div>
-        <WatchlistPanel activeSymbol={activeTab.symbol} onSelectSymbol={goToSymbol} />
+        {/* The watchlist stays mounted while another panel shows, so its list, sort and scroll are still there. */}
+        <WatchlistPanel
+          visible={railPanel === 'watchlist'}
+          activeSymbol={chartSymbol}
+          onSelectSymbol={goToSymbol}
+          onOpenInNewTab={openTab}
+        />
+        {railPanel === 'alerts' && (
+          <AlertsPanel
+            alerts={alerts}
+            onSelectSymbol={goToSymbol}
+            onNew={() => setAlertForm({ symbol: chartSymbol, price: null })}
+            onEdit={(alert) => setAlertForm({ alert, symbol: alert.symbol, price: alert.price })}
+          />
+        )}
+        <RightRail panels={railPanels} activePanel={railPanel} onTogglePanel={toggleRailPanel} tools={railTools} footer={railFooter} />
       </div>
 
       {importOpen && <ImportDataDialog onClose={() => setImportOpen(false)} onOpenSymbol={goToSymbol} />}
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
       {providersOpen && <DataProvidersDialog onClose={() => setProvidersOpen(false)} />}
-      {alertsOpen && (
-        <AlertsDialog
-          draft={alertsOpen.draft}
-          defaultSymbol={activeTab.symbol}
-          onClose={() => {
-            setAlertsOpen(null);
-            markAlertsSeen();
-          }}
-        />
-      )}
+      {alertForm && <AlertFormDialog seed={alertForm} onClose={() => setAlertForm(null)} />}
     </div>
   );
 }

@@ -192,14 +192,26 @@ fn clean(value: &str) -> String {
     v.strip_prefix("Bearer ").unwrap_or(v).trim().to_string()
 }
 
+/// Whether a credential field is a secret; `None` for a field the provider doesn't have.
+fn is_secret(provider: &str, key: &str) -> Option<bool> {
+    spec(provider)
+        .and_then(|s| s.fields.iter().find(|f| f.key == key))
+        .map(|f| f.secret)
+}
+
 /// The current value of a credential field, secret or not.
 pub fn credential(conn: &Connection, secrets: &Secrets, provider: &str, key: &str) -> rusqlite::Result<Option<String>> {
-    let is_secret = spec(provider)
-        .and_then(|s| s.fields.iter().find(|f| f.key == key))
-        .map(|f| f.secret);
-    match is_secret {
+    match is_secret(provider, key) {
         Some(true) => secrets.get(conn, provider, key),
         _ => settings::get(conn, Table::Settings, provider, key),
+    }
+}
+
+/// Whether a credential field has a value. Unlike [`credential`] it never copies a secret out.
+fn has_credential(conn: &Connection, secrets: &Secrets, provider: &str, key: &str) -> rusqlite::Result<bool> {
+    match is_secret(provider, key) {
+        Some(true) => secrets.has(conn, provider, key),
+        _ => Ok(settings::get(conn, Table::Settings, provider, key)?.is_some_and(|v| !v.is_empty())),
     }
 }
 
@@ -257,8 +269,7 @@ pub fn is_usable(conn: &Connection, secrets: &Secrets, provider: &str) -> Result
     let spec = require_spec(provider)?;
     let enabled = is_enabled(conn, spec).map_err(|e| e.to_string())?;
     for f in spec.fields {
-        let present = credential(conn, secrets, provider, f.key).map_err(|e| e.to_string())?;
-        if present.as_deref().is_none_or(str::is_empty) {
+        if !has_credential(conn, secrets, provider, f.key).map_err(|e| e.to_string())? {
             return Ok(false);
         }
     }
@@ -334,6 +345,7 @@ mod tests {
     use super::*;
     use crate::db::Database;
     use crate::secrets::testing::MemoryKeychain;
+    use std::sync::Arc;
 
     fn setup() -> (Database, Secrets) {
         (
@@ -525,5 +537,70 @@ mod tests {
         let (db, _) = setup();
         let conn = db.conn.lock().unwrap();
         assert!(set_enabled(&conn, "csv", false).is_err());
+    }
+
+    /// A zerodha setup saved through one `Secrets`, then opened through a second one that
+    /// remembers nothing, as after a launch. Returns the store so a test can count its reads.
+    fn a_configured_zerodha() -> (Database, Arc<MemoryKeychain>, Secrets) {
+        let db = Database::open_in_memory().unwrap();
+        let store = Arc::new(MemoryKeychain::default());
+        {
+            let conn = db.conn.lock().unwrap();
+            let saving = Secrets::new(Box::new(store.clone()));
+            let all = values(&[("apiKey", "key"), ("apiSecret", "secret"), ("accessToken", "token")]);
+            save_config(&conn, &saving, "zerodha", &all).unwrap();
+            set_enabled(&conn, "zerodha", true).unwrap();
+        }
+        let secrets = Secrets::new(Box::new(store.clone()));
+        (db, store, secrets)
+    }
+
+    #[test]
+    fn a_hundred_requests_cost_two_keychain_reads_not_three_hundred() {
+        // Every broker request checks the provider is usable and then reads its credentials;
+        // that was three trips to the OS a request, 6,048 over one screen of the watchlist.
+        let (db, store, secrets) = a_configured_zerodha();
+        let conn = db.conn.lock().unwrap();
+        for _ in 0..100 {
+            assert!(is_usable(&conn, &secrets, "zerodha").unwrap());
+            for key in ["apiKey", "apiSecret", "accessToken"] {
+                assert!(credential(&conn, &secrets, "zerodha", key).unwrap().is_some());
+            }
+        }
+        assert_eq!(store.reads(), 2, "one for each secret, ever after from memory");
+    }
+
+    #[test]
+    fn turning_a_provider_off_takes_effect_at_once_even_with_credentials_remembered() {
+        let (db, _store, secrets) = a_configured_zerodha();
+        let conn = db.conn.lock().unwrap();
+        assert!(is_usable(&conn, &secrets, "zerodha").unwrap());
+
+        set_enabled(&conn, "zerodha", false).unwrap();
+        assert!(!is_usable(&conn, &secrets, "zerodha").unwrap());
+        set_enabled(&conn, "zerodha", true).unwrap();
+        assert!(is_usable(&conn, &secrets, "zerodha").unwrap());
+    }
+
+    #[test]
+    fn a_token_saved_after_the_daily_login_is_the_one_the_next_request_uses() {
+        let (db, _store, secrets) = a_configured_zerodha();
+        let conn = db.conn.lock().unwrap();
+        let token = |secrets: &Secrets| credential(&conn, secrets, "zerodha", "accessToken").unwrap();
+        assert_eq!(token(&secrets).as_deref(), Some("token"));
+
+        save_config(&conn, &secrets, "zerodha", &values(&[("accessToken", "tomorrows")])).unwrap();
+        assert_eq!(token(&secrets).as_deref(), Some("tomorrows"));
+    }
+
+    #[test]
+    fn forgetting_a_providers_credentials_makes_it_unusable_at_once() {
+        let (db, _store, secrets) = a_configured_zerodha();
+        let conn = db.conn.lock().unwrap();
+        assert!(is_usable(&conn, &secrets, "zerodha").unwrap());
+
+        clear_config(&conn, &secrets, "zerodha").unwrap();
+        assert!(!is_usable(&conn, &secrets, "zerodha").unwrap());
+        assert_eq!(credential(&conn, &secrets, "zerodha", "accessToken").unwrap(), None);
     }
 }

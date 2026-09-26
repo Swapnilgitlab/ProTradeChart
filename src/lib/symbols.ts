@@ -33,15 +33,43 @@ export function joinSymbol(provider: string, ticker: string): string {
   return `${provider.toLowerCase()}:${ticker}`;
 }
 
-/** The canonical `provider:TICKER` form of whatever the user or Vela handed us. */
+/** The brokers list several exchanges and take the exchange as part of the ticker
+ *  (`NSE:RELIANCE`, `BSE:RELIANCE`). */
+const BROKERS = new Set(['dhan', 'zerodha']);
+
+/** The exchange a broker assumes when a ticker names none — and so the one people
+ *  never need to see: `NSE:` is dropped from everything on screen, other exchanges
+ *  (`BSE:`, `NFO:`, `MCX:`) stay because `BSE:RELIANCE` is a different instrument. */
+const IMPLIED_EXCHANGE = 'NSE:';
+
+const hasImpliedExchange = (ticker: string) =>
+  ticker.length > IMPLIED_EXCHANGE.length && ticker.slice(0, IMPLIED_EXCHANGE.length).toUpperCase() === IMPLIED_EXCHANGE;
+
+/** The canonical `provider:TICKER` form of whatever the user or Vela handed us. A
+ *  broker ticker with no exchange means NSE, so it is spelled out: `zerodha:HFCL`
+ *  and `zerodha:NSE:HFCL` are one instrument and must be one string, or a watchlist
+ *  row, an alert and a chart would each think they were looking at something else. */
 export function normalizeSymbol(symbol: string): string {
   const { provider, ticker } = splitSymbol(symbol);
-  return joinSymbol(provider, ticker);
+  const spelledOut = BROKERS.has(provider) && ticker !== '' && !ticker.includes(':') ? `${IMPLIED_EXCHANGE}${ticker}` : ticker;
+  return joinSymbol(provider, spelledOut);
 }
 
-/** The short label for tabs and lists: the ticker without its provider. */
+/** The ticker as people write it: no data source, and no exchange when it is the
+ *  usual one — `zerodha:NSE:HFCL` reads `HFCL`, `zerodha:BSE:HFCL` reads `BSE:HFCL`. */
 export function displayTicker(symbol: string): string {
-  return splitSymbol(symbol).ticker;
+  const { provider, ticker } = splitSymbol(symbol);
+  return BROKERS.has(provider) && hasImpliedExchange(ticker) ? ticker.slice(IMPLIED_EXCHANGE.length) : ticker;
+}
+
+/** The form a chart is given. Vela writes a chart's title, status line and watermark
+ *  from the ticker part of the symbol it was handed, so handing it `zerodha:HFCL`
+ *  rather than `zerodha:NSE:HFCL` is what keeps the exchange off the chart. The
+ *  backends read the short form as NSE, so it loads the same instrument; anything
+ *  Vela reports back goes through `normalizeSymbol` to become the long form again. */
+export function chartSymbol(symbol: string): string {
+  const { provider } = splitSymbol(symbol);
+  return joinSymbol(provider, displayTicker(symbol));
 }
 
 export function providerLabel(provider: string): string {
