@@ -21,7 +21,7 @@ pub struct ResultPost {
     pub data: serde_json::Value,
 }
 
-pub const RESULT_KINDS: [&str; 3] = ["table", "report", "figure"];
+pub const RESULT_KINDS: [&str; 4] = ["table", "report", "figure", "study"];
 pub const MAX_TITLE_CHARS: usize = 200;
 /// The first bytes of every PNG file, as base64. A figure that doesn't start like this isn't one.
 pub const PNG_BASE64_PREFIX: &str = "iVBORw0KGgo";

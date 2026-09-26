@@ -44,6 +44,10 @@ subscription.
 - **Python for screening and research.** A Python tab (`Ctrl+Shift+Y`) beside your charts runs your own scripts against your
   Zerodha or Dhan data: screen a watchlist, backtest with pandas or any library you install, keep the scripts as plain `.py`
   files. It uses your own Python, and your broker credentials stay in the app. See [Python](#python).
+- **Studies: historical market research.** Ask what stocks looked like around past events — *which NSE stocks doubled in
+  twelve months, and what were their returns, trend, 52-week range and volume 12, 6, 3 and 1 months before?* Build the Study
+  in a form (or start from a template), check the data it needs, run it, and read events, distributions, before/after,
+  a control-group comparison and each event on its chart. See [Studies](#studies).
 - **Six themes.** Daylight, Paper, Midnight, Graphite, Ocean and Terminal. The starting theme follows your OS's
   light/dark setting.
 - **Private by design.** No account and no telemetry. Everything (layouts, watchlists, imported data, a small offline
@@ -296,6 +300,41 @@ screens (200-day average, RSI, 52-week highs) and a moving-average crossover bac
 
 `python/README.md` lists the functions and the connection details.
 
+## Studies
+
+A Study measures what stocks looked like around historical events. Open **Studies** from the flask on the right-hand rail.
+
+1. **Pick a template or start your own.** Templates: 100% and 200% Winners, Breakout Winners, Post-Consolidation Breakouts,
+   Volume Expansion, Trend Transition, Relative Strength Leaders, Drawdown Recovery, and a blank Custom Study. Any of them can
+   be edited, duplicated and saved under **My Studies**.
+2. **Describe it.** The universe (a broker's NSE/BSE instrument list, a watchlist, or symbols you list, with a liquidity
+   floor), the period, the **event** (conditions such as *12M return crosses above +100%* or *Close crosses above the prior
+   52-week high*, combined with AND), optional **pre-event conditions** (*above the 200 EMA 3 months before*), the observation
+   windows before it and the forward windows after it, the **metrics** (returns, SMA/EMA distances and slopes, RSI, ATR, MACD,
+   ADX, Bollinger, stochastics, 52-week high/low distances, relative volume, traded value, volatility, drawdowns, relative
+   strength against an index) and yes/no **characteristics** to count.
+3. **Check the data.** The builder reads the Study back in plain words and lists what it needs: price and volume (from
+   Zerodha or Dhan), index data, and what isn't available. **Market cap, sectors and point-in-time universes are not available
+   from these sources**: a market-cap filter can't run, and the builder offers a traded-value floor instead (only if you pick
+   it); results warn about survivorship bias.
+4. **Run Study.** Python does the work (the same setup as the Python tab), with a progress bar. The first run over a whole
+   exchange fetches every symbol's history at your broker's rate limit, which can take a while; it is kept, so reruns are quick.
+   *Only the first N symbols* makes a quick trial.
+5. **Read the results.** A summary, the table of every event (click the chart icon to open that stock framed around the
+   event, with a mark on it), the typical price path through the event, distributions of each metric at each observation
+   point, before vs after, results by liquidity, the events against a **control group** of random non-event dates (or, with
+   an outcome set, the events that went on to a gain against those that didn't), and a stock explorer. Runs are stored and
+   reopen from **Recent results**.
+
+- **Every event, not just today's.** An event is each date the conditions *first* hold, across the whole history, with a
+  cooldown so one move is one event. Filters are judged at the time, with no later data.
+- **Association, not causation.** The results describe what winners looked like; they don't show that any trait caused a move.
+- **The specification is the Study.** It is saved as JSON, carried inside every result with the data span, a data version, and
+  the app, engine, Python and pandas versions, so a result can be reproduced. **Generate Python** turns it into a script you
+  can read, change and run in the Python tab; **Export** saves the specification, the Python, events / stock / metric CSVs,
+  the full result as JSON, or a written report.
+- Prices are used exactly as your broker supplies them (adjusted for corporate actions at source).
+
 ## Price alerts
 
 An alert watches one symbol and fires when its price **crosses** a level — up, down, or either way — once, or every time
@@ -322,8 +361,10 @@ When one fires you get a system notification (so it reaches you with the app min
 src/                     React + TypeScript frontend
   chart/                 The Vela wrapper (a grid of one to sixteen charts per tab)
   data/                  Data providers (crypto, brokers, CSV), symbol search, watchlist quotes
-  features/              Workspace (chart and Python tabs), layouts, watchlist, search, providers, import, about, Pine dock
+  features/              Workspace (chart, Python and Studies tabs), layouts, watchlist, search, providers, import, about, Pine dock
   features/python/       The Python tab: script list, editor, console, results
+  features/studies/      The Studies tab: builder, data readiness, results page
+  studies/               Study Specification, feature grammar, templates, readiness, exports (pure, unit-tested)
   pine/                  Pine Script: engine wiring, layout persistence, backtest report maths (pure, unit-tested)
   lib/                   Pure helpers: timeframes & resampling, CSV and watchlist parsers, IPC wrappers
   theme/                 Theme registry and provider
@@ -336,7 +377,7 @@ src-tauri/               Rust backend
   src/pyapi/             The local data API Python scripts use (read-only, loopback, token-protected)
   src/python/            Finding Python, running and stopping scripts, the scripts folder
 pine/                    Pine indicators bundled with the app (see pine/README.md)
-python/                  The `protrade` package scripts import, example scripts and their tests (see python/README.md)
+python/                  The `protrade` package (incl. the Study engine), example scripts and their tests (see python/README.md)
 docs/                    Architecture notes and screenshots
 ```
 

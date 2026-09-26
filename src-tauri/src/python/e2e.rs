@@ -201,6 +201,38 @@ async fn a_script_shows_a_table_and_a_report_in_the_app() {
     h.cleanup();
 }
 
+#[tokio::test]
+async fn a_study_runs_through_the_real_api_and_posts_one_result_even_with_no_events() {
+    let Some(h) = harness("study").await else { return };
+    let ran = h
+        .run(
+            "import json, sys\n\
+             from protrade import run_study\n\
+             spec = {'name': 'E2E', 'universe': {'source': 'symbols', 'symbols': ['zerodha:NSE:RELIANCE']},\n\
+                     'period': {'start': '2020-01-01'}, 'event': {'conditions': ['return_21 crosses_above 5']},\n\
+                     'metrics': ['return_21', 'rsi_14']}\n\
+             open('e2e-spec.json', 'w').write(json.dumps(spec))\n\
+             sys.exit(run_study.main(['run_study', 'e2e-spec.json']))",
+            None,
+        )
+        .await;
+    let _ = std::fs::remove_file("e2e-spec.json");
+    assert_eq!(ran.outcome, Outcome::Exited(Some(0)), "stderr: {}", ran.stderr);
+    assert!(ran.stdout.contains("[progress] 100% Complete"), "{}", ran.stdout);
+
+    let shown = h.backend.results.lock().unwrap().clone();
+    assert_eq!(shown.len(), 1);
+    assert_eq!(
+        (shown[0].kind.as_str(), shown[0].title.as_deref()),
+        ("study", Some("E2E"))
+    );
+    assert_eq!(shown[0].data["format"], 1);
+    assert_eq!(shown[0].data["summary"]["events"], 0);
+    assert_eq!(shown[0].data["spec"]["event"]["conditions"][0]["left"], "return_21");
+    assert_eq!(shown[0].data["availability"]["market_cap"], false);
+    h.cleanup();
+}
+
 /// A script that isn't started by the app has nowhere to show things, so it prints instead of failing.
 #[tokio::test]
 async fn showing_something_outside_the_app_prints_it() {

@@ -452,7 +452,7 @@ export interface PythonExitEvent {
  *  validates its shape before anything is drawn. */
 export interface PythonResultEvent {
   runId: string;
-  /** `table`, `report` or `figure`. */
+  /** `table`, `report`, `figure`, or `study` (a Study run, `studies/result.ts`). */
   kind: string;
   title: string | null;
   data: unknown;
@@ -507,3 +507,56 @@ export const pythonResearchStats = () => invoke<ResearchStats>('python_research_
 
 /** Forgets it all; resolves with how many bars went. */
 export const clearPythonResearchData = () => invoke<number>('python_clear_research_data');
+
+// ---- Studies ------------------------------------------------------------------
+
+/** A saved Study (mirrors `Study` in models.rs). `specJson` is the Study Specification (`studies/spec.ts`). */
+export interface StudyRow {
+  id: string;
+  name: string;
+  specJson: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A completed run, without its (large) result. `summaryJson` is a `RunSummary` (`studies/result.ts`). */
+export interface StudyResultInfo {
+  id: string;
+  studyId: string;
+  name: string;
+  summaryJson: string;
+  executedAt: string;
+}
+
+/** A completed run with everything it produced. `resultJson` is checked by `parseStudyResult` before use. */
+export interface StudyResultRow extends StudyResultInfo {
+  resultJson: string;
+}
+
+export type StudyExportKind = 'csv' | 'json' | 'py' | 'md';
+
+export const listStudies = () => invoke<StudyRow[]>('list_studies');
+
+export const saveStudy = (study: StudyRow) => invoke<void>('save_study', { study });
+
+/** Deletes a Study and every stored run of it. */
+export const deleteStudy = (id: string) => invoke<void>('delete_study', { id });
+
+/** Stored runs, newest first: of one Study, or of all of them. */
+export const listStudyResults = (studyId: string | null = null) => invoke<StudyResultInfo[]>('list_study_results', { studyId });
+
+export const getStudyResult = (id: string) => invoke<StudyResultRow | null>('get_study_result', { id });
+
+/** Keeps a run; the Study's oldest runs past the last twenty are dropped. */
+export const saveStudyResult = (result: StudyResultRow) => invoke<void>('save_study_result', { result });
+
+export const deleteStudyResult = (id: string) => invoke<void>('delete_study_result', { id });
+
+/** Runs a Study with the Python engine. Output, the result and the end arrive as the Python
+ *  events (`python-output`, `python-result` of kind `study`, `python-exit`) for `runId`. */
+export const runStudy = (specJson: string, runId: string) => invoke<void>('study_run', { specJson, runId });
+
+/** Asks where to save, in the system's dialog, and writes `contents` there. Resolves with the path,
+ *  or null when the dialog was cancelled. */
+export const exportStudyFile = (suggestedName: string, kind: StudyExportKind, contents: string) =>
+  invoke<string | null>('export_study_file', { suggestedName, kind, contents });

@@ -34,6 +34,21 @@ project uses [Semantic Versioning](https://semver.org).
   matplotlib figure. Run outside the app they print instead. Four examples are included: three screens and a backtest.
   See the README's Python section.
 
+- **Studies: a historical market research engine.** A Studies tab (the flask on the rail) asks what stocks looked like around
+  past events rather than what qualifies today. A Study is a saved, rerunnable **Study Specification** — universe, period,
+  event, observation and forward windows, metrics, characteristics and a comparison group — built in a form, read back in
+  plain words, and checked for **data readiness** before it runs (market cap, sectors and point-in-time universes are reported
+  unavailable, never guessed; a market-cap filter is blocked with a traded-value floor offered instead). The Python engine
+  (`protrade.study`) finds **every historical date** the event first happened, measures ~30 families of price, volume and
+  technical features at each observation point, compares with a seeded control group of non-event dates (or splits the events
+  by a later outcome), and returns distributions, characteristic shares, forward returns and the typical price path. The
+  results page has a summary, an event table whose rows open the chart framed and marked at the event, the event timeline,
+  distributions, before vs after, liquidity groups, the comparison and a stock explorer — all labelled historical
+  association. Nine templates (100% and 200% Winners, Breakout Winners, Post-Consolidation Breakouts, Volume Expansion, Trend
+  Transition, Relative Strength Leaders, Drawdown Recovery, Custom). Runs are stored with their spec, data span, data version
+  and software versions; **Generate Python** writes an editable step-by-step script, and **Export** saves the spec, Python,
+  event / stock / metric CSVs, the full result or a report.
+
 ### Fixed
 
 - **Cached daily bars no longer vanish.** The offline cache trimmed old intraday data by comparing against interval names the

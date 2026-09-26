@@ -1,0 +1,528 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, CirclePlay, Code2, Copy, Download, FilePlus2, Pencil, Save, Square, Trash2 } from 'lucide-react';
+import type { StudyEvent } from '../../chart/studyEvent';
+import { useDismiss } from '../../components/useDismiss';
+import { useToast } from '../../components/Toasts';
+import { confirmDelete, confirmDiscard } from '../../lib/dialogs';
+import {
+  deleteStudy,
+  deleteStudyResult,
+  errorMessage,
+  exportStudyFile,
+  getStudyResult,
+  listStudies,
+  listStudyResults,
+  listWatchlists,
+  pythonEnvStatus,
+  runStudy,
+  saveStudy,
+  stopPythonRun,
+  type PythonEnvStatus,
+  type StudyExportKind,
+  type StudyResultInfo,
+  type StudyRow,
+} from '../../lib/ipc';
+import { onPythonExit, onPythonOutput, onPythonResult } from '../../python/events';
+import { formatElapsed } from '../../python/format';
+import { generatePython, scriptName } from '../../studies/codegen';
+import { eventsCsv, metricsCsv, reportMarkdown, resultJson, specJson, stocksCsv } from '../../studies/exports';
+import { parseProgress, type StudyProgress } from '../../studies/progress';
+import { applyFix, checkReadiness, type ReadinessFix } from '../../studies/readiness';
+import { parseRunSummary, parseStudyResult, type StudyResultData } from '../../studies/result';
+import { normalizeSpec, specProblem, type StudySpec } from '../../studies/spec';
+import { fromTemplate, TEMPLATES } from '../../studies/templates';
+import { useProviderState } from '../providers/useProviderState';
+import { AddToWatchlistDialog } from '../python/AddToWatchlistDialog';
+import { PythonDialog } from './PythonDialog';
+import { storeStudyRun } from './storeRun';
+import { StudyBuilder } from './StudyBuilder';
+import { StudyResults } from './StudyResults';
+
+interface Props {
+  /** Whether the tab is showing. Nothing is loaded until it first is. */
+  visible: boolean;
+  onOpenEvent: (event: StudyEvent) => void;
+  onOpenPython: () => void;
+}
+
+interface Current {
+  id: string;
+  spec: StudySpec;
+  /** The spec as last saved or as opened (normalised JSON): what "unsaved changes" is judged against. */
+  baseline: string | null;
+  /** Whether it is one of My Studies. */
+  isSaved: boolean;
+}
+
+interface ActiveRun {
+  id: string;
+  startedAt: number;
+  gotResult: boolean;
+}
+
+/** Lines of console output kept for a run, to show what went wrong if it fails. */
+const LOG_LINES = 60;
+
+function fresh(templateId = 'winners_100'): Current {
+  const spec = fromTemplate(templateId);
+  return { id: crypto.randomUUID(), spec, baseline: JSON.stringify(spec), isSaved: false };
+}
+
+function savedForm(spec: StudySpec): string | null {
+  try {
+    return JSON.stringify(normalizeSpec(spec));
+  } catch {
+    return null;
+  }
+}
+
+/** The Studies workspace: My Studies, templates and past runs on the left; the Study Builder or a
+ *  run's results on the right. A Study runs only when Run Study is pressed. */
+export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
+  const toast = useToast();
+  const { providers } = useProviderState();
+  const [studies, setStudies] = useState<StudyRow[]>([]);
+  const [runs, setRuns] = useState<StudyResultInfo[]>([]);
+  const [watchlists, setWatchlists] = useState<string[]>([]);
+  const [env, setEnv] = useState<PythonEnvStatus | null>(null);
+  const [current, setCurrent] = useState<Current>(() => fresh());
+  const [view, setView] = useState<'build' | 'results'>('build');
+  const [result, setResult] = useState<{ id: string | null; data: StudyResultData } | null>(null);
+  const [run, setRun] = useState<ActiveRun | null>(null);
+  const [progress, setProgress] = useState<StudyProgress | null>(null);
+  const [log, setLog] = useState<{ text: string; error: boolean }[]>([]);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [exportOpen, setExportOpen] = useState(false);
+  const [pythonOpen, setPythonOpen] = useState(false);
+  const [adding, setAdding] = useState<string[] | null>(null);
+  const exportRef = useRef<HTMLDivElement>(null);
+  useDismiss(exportRef, exportOpen, () => setExportOpen(false));
+  const loaded = useRef(false);
+  const runRef = useRef<ActiveRun | null>(null);
+  const currentRef = useRef(current);
+  currentRef.current = current;
+
+  const problem = useMemo(() => specProblem(current.spec), [current.spec]);
+  const dirty = savedForm(current.spec) !== current.baseline;
+  const readiness = useMemo(() => {
+    if (problem) return null;
+    return checkReadiness(normalizeSpec(current.spec), {
+      providers: providers.map((p) => ({ id: p.id, usable: p.enabled && p.configured })),
+      pythonReady: env?.state === 'ready',
+      pythonMessage: env?.message ?? 'Looking for Python…',
+      watchlists,
+      today: new Date().toISOString().slice(0, 10),
+    });
+  }, [problem, current.spec, providers, env, watchlists]);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [s, r] = await Promise.all([listStudies(), listStudyResults(null)]);
+      setStudies(s);
+      setRuns(r);
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    if (!visible || loaded.current) return;
+    loaded.current = true;
+    void refresh();
+    pythonEnvStatus().then(setEnv).catch(() => {});
+    listWatchlists()
+      .then((lists) => setWatchlists(lists.map((l) => l.name)))
+      .catch(() => {});
+  }, [visible, refresh]);
+
+  // Python may have been set up in the Python tab meanwhile.
+  useEffect(() => {
+    if (visible && loaded.current && env?.state !== 'ready') pythonEnvStatus().then(setEnv).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
+  useEffect(() => {
+    if (!run) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, [run]);
+
+  // ---- What the engine reports -----------------------------------------------------------
+
+  useEffect(() => {
+    const stops = [
+      onPythonOutput((e) => {
+        if (e.runId !== runRef.current?.id) return;
+        const step = parseProgress(e.text);
+        if (step) {
+          setProgress(step);
+          return;
+        }
+        if (e.text.trim()) setLog((lines) => [...lines, { text: e.text, error: e.stream === 'stderr' }].slice(-LOG_LINES));
+      }),
+      onPythonResult((e) => {
+        const active = runRef.current;
+        if (!active || e.runId !== active.id) return;
+        if (e.kind !== 'study') return;
+        const data = parseStudyResult(e.data);
+        if (!data) {
+          setFailed('The engine sent a result this version of the app can’t read.');
+          return;
+        }
+        active.gotResult = true;
+        setResult({ id: null, data });
+        setView('results');
+        storeStudyRun(data, currentRef.current.id)
+          .then((id) => {
+            setResult((r) => (r && r.data === data ? { ...r, id } : r));
+            void refresh();
+          })
+          .catch((err) => toast(`The results are shown but couldn’t be stored: ${errorMessage(err)}`, 'error'));
+      }),
+      onPythonExit((e) => {
+        const active = runRef.current;
+        if (!active || e.runId !== active.id) return;
+        runRef.current = null;
+        setRun(null);
+        if (e.stopped) setFailed('Stopped.');
+        else if (e.error) setFailed(e.error);
+        else if (e.code !== 0 || !active.gotResult) setFailed('The Study stopped before it finished. What it said is below.');
+      }),
+    ];
+    return () => stops.forEach((stop) => stop());
+  }, [refresh, toast]);
+
+  // ---- Actions ---------------------------------------------------------------------------
+
+  /** Asks before edits are thrown away; an untouched template or saved Study goes without asking. */
+  const canLeave = useCallback(async () => {
+    if (!dirty) return true;
+    return confirmDiscard(`"${current.spec.name}" has changes that aren’t saved. Discard them?`);
+  }, [dirty, current.spec.name]);
+
+  const startRun = useCallback(async () => {
+    if (runRef.current || problem || !readiness?.ready) return;
+    const spec = normalizeSpec(current.spec);
+    const started: ActiveRun = { id: crypto.randomUUID(), startedAt: Date.now(), gotResult: false };
+    runRef.current = started;
+    setRun(started);
+    setNow(started.startedAt);
+    setProgress({ percent: 0, stage: 'Starting' });
+    setLog([]);
+    setFailed(null);
+    try {
+      await runStudy(JSON.stringify(spec), started.id);
+    } catch (err) {
+      runRef.current = null;
+      setRun(null);
+      setFailed(errorMessage(err));
+    }
+  }, [current.spec, problem, readiness]);
+
+  const save = useCallback(async () => {
+    if (problem) {
+      toast(`Can’t save yet: ${problem}`, 'error');
+      return;
+    }
+    const spec = normalizeSpec(current.spec);
+    const json = JSON.stringify(spec);
+    try {
+      await saveStudy({ id: current.id, name: spec.name, specJson: json, createdAt: '', updatedAt: '' });
+      setCurrent((c) => ({ ...c, spec, baseline: json, isSaved: true }));
+      await refresh();
+      toast(`Saved “${spec.name}”.`, 'success');
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    }
+  }, [current, problem, refresh, toast]);
+
+  const openStudy = async (row: StudyRow) => {
+    if (row.id === current.id || !(await canLeave())) return;
+    try {
+      const spec = normalizeSpec(JSON.parse(row.specJson));
+      setCurrent({ id: row.id, spec, baseline: JSON.stringify(spec), isSaved: true });
+      setView('build');
+      setResult(null);
+      setFailed(null);
+    } catch (err) {
+      toast(`“${row.name}” couldn’t be opened: ${errorMessage(err)}`, 'error');
+    }
+  };
+
+  const openTemplate = async (id: string) => {
+    if (!(await canLeave())) return;
+    setCurrent(fresh(id));
+    setView('build');
+    setResult(null);
+    setFailed(null);
+  };
+
+  const duplicate = () => {
+    setCurrent((c) => ({ id: crypto.randomUUID(), spec: { ...structuredClone(c.spec), name: `${c.spec.name} (copy)`.slice(0, 120) }, baseline: null, isSaved: false }));
+    setResult(null);
+    setView('build');
+  };
+
+  const removeStudy = async (row: StudyRow) => {
+    if (!(await confirmDelete(`Delete the Study “${row.name}” and its stored results?`))) return;
+    try {
+      await deleteStudy(row.id);
+      if (row.id === current.id) setCurrent((c) => ({ ...c, baseline: null, isSaved: false }));
+      await refresh();
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    }
+  };
+
+  const openRun = async (info: StudyResultInfo) => {
+    try {
+      const row = await getStudyResult(info.id);
+      const data = row ? parseStudyResult(JSON.parse(row.resultJson)) : null;
+      if (!data) {
+        toast('That result can’t be read by this version of the app.', 'error');
+        return;
+      }
+      if (info.studyId !== current.id) {
+        if (!(await canLeave())) return;
+        const savedRow = studies.find((s) => s.id === info.studyId);
+        setCurrent({
+          id: info.studyId,
+          spec: data.spec,
+          baseline: savedRow ? savedForm(JSON.parse(savedRow.specJson)) : JSON.stringify(data.spec),
+          isSaved: !!savedRow,
+        });
+      }
+      setResult({ id: info.id, data });
+      setView('results');
+      setFailed(null);
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    }
+  };
+
+  const removeRun = async (info: StudyResultInfo) => {
+    if (!(await confirmDelete(`Delete the stored result of “${info.name}” from ${info.executedAt.slice(0, 16).replace('T', ' ')}?`))) return;
+    try {
+      await deleteStudyResult(info.id);
+      if (result?.id === info.id) setResult(null);
+      await refresh();
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    }
+  };
+
+  const doExport = async (kind: StudyExportKind, suffix: string, contents: string) => {
+    setExportOpen(false);
+    try {
+      const path = await exportStudyFile(`${current.spec.name}${suffix}`, kind, contents);
+      if (path) toast(`Saved ${path}`, 'success');
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    }
+  };
+
+  const running = run !== null;
+  const canRun = !problem && !!readiness?.ready && !running;
+  const runTitle = problem ?? (readiness && !readiness.ready ? readiness.items.find((i) => i.blocking)?.detail : undefined) ?? 'Run the Study';
+  const studyRuns = runs.filter((r) => r.studyId === current.id);
+
+  return (
+    <div className="studies-panel">
+      <aside className="python-side studies-side" aria-label="Studies">
+        <div className="python-side-header">
+          <span>My Studies</span>
+          <button type="button" className="icon-button" aria-label="New Study" title="New Study (Custom)" onClick={() => void openTemplate('custom')}>
+            <FilePlus2 size={14} />
+          </button>
+        </div>
+        <div className="python-side-list studies-side-list">
+          {studies.length === 0 && <div className="python-side-empty small muted">No saved Studies yet. Start from a template below.</div>}
+          {studies.map((s) => (
+            <div key={s.id} className={`python-script${s.id === current.id ? ' active' : ''}`}>
+              <button type="button" className="python-script-name" title={s.name} onClick={() => void openStudy(s)}>
+                {s.name}
+              </button>
+              <button type="button" className="icon-button" aria-label={`Delete ${s.name}`} title="Delete" onClick={() => void removeStudy(s)}>
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+          <div className="python-side-header studies-subhead">Templates</div>
+          {TEMPLATES.map((t) => (
+            <div key={t.id} className="python-script">
+              <button type="button" className="python-script-name" title={t.summary} onClick={() => void openTemplate(t.id)}>
+                {t.name}
+              </button>
+            </div>
+          ))}
+          <div className="python-side-header studies-subhead">Recent results</div>
+          {runs.length === 0 && <div className="python-side-empty small muted">Results appear here after a run.</div>}
+          {runs.slice(0, 30).map((r) => {
+            const summary = parseRunSummary(r.summaryJson);
+            return (
+              <div key={r.id} className={`python-script${result?.id === r.id ? ' active' : ''}`}>
+                <button type="button" className="python-script-name studies-run" onClick={() => void openRun(r)} title={r.name}>
+                  <span>{r.name}</span>
+                  <span className="muted small">
+                    {r.executedAt.slice(0, 10)} · {summary?.events ?? '?'} events
+                  </span>
+                </button>
+                <button type="button" className="icon-button" aria-label="Delete this result" title="Delete" onClick={() => void removeRun(r)}>
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </aside>
+
+      <div className="python-main">
+        <div className="pine-toolbar">
+          <span className="python-current" title={current.spec.name}>
+            {current.spec.name || 'Untitled Study'}
+          </span>
+          <span className={`pine-status${dirty ? ' dirty' : ''}`}>{!current.isSaved ? 'Not saved' : dirty ? 'Unsaved changes' : 'Saved'}</span>
+          <div className="pine-toolbar-spacer" />
+          {view === 'results' ? (
+            <button type="button" className="btn pine-btn" onClick={() => setView('build')} title="Edit the Study">
+              <Pencil size={14} />
+              Edit
+            </button>
+          ) : (
+            result && (
+              <button type="button" className="btn pine-btn" onClick={() => setView('results')}>
+                Results
+              </button>
+            )
+          )}
+          <button type="button" className="btn pine-btn" onClick={duplicate} title="Duplicate as a new Study">
+            <Copy size={14} />
+            Duplicate
+          </button>
+          <button type="button" className="btn pine-btn" onClick={() => void save()} disabled={!dirty && current.isSaved} title="Save the Study">
+            <Save size={14} />
+            Save
+          </button>
+          <button type="button" className="btn pine-btn" onClick={() => setPythonOpen(true)} disabled={!!problem} title="Show the Study as Python you can edit">
+            <Code2 size={14} />
+            Generate Python
+          </button>
+          <div className="menu-anchor" ref={exportRef}>
+            <button type="button" className="btn pine-btn" aria-expanded={exportOpen} onClick={() => setExportOpen((v) => !v)} disabled={!!problem}>
+              <Download size={14} />
+              Export
+              <ChevronDown size={12} />
+            </button>
+            {exportOpen && !problem && (
+              <div className="menu study-export-menu" role="menu">
+                <button type="button" className="menu-item" role="menuitem" onClick={() => void doExport('json', ' spec', `${JSON.stringify(normalizeSpec(current.spec), null, 2)}\n`)}>
+                  Study Specification (.json)
+                </button>
+                <button type="button" className="menu-item" role="menuitem" onClick={() => void doExport('py', '', generatePython(normalizeSpec(current.spec)))}>
+                  Python ({scriptName(normalizeSpec(current.spec))})
+                </button>
+                {result && (
+                  <>
+                    <div className="menu-divider" />
+                    <button type="button" className="menu-item" role="menuitem" onClick={() => void doExport('csv', ' events', eventsCsv(result.data))}>
+                      Events (.csv)
+                    </button>
+                    <button type="button" className="menu-item" role="menuitem" onClick={() => void doExport('csv', ' stocks', stocksCsv(result.data))}>
+                      Stock summary (.csv)
+                    </button>
+                    <button type="button" className="menu-item" role="menuitem" onClick={() => void doExport('csv', ' metrics', metricsCsv(result.data))}>
+                      Metric statistics (.csv)
+                    </button>
+                    <button type="button" className="menu-item" role="menuitem" onClick={() => void doExport('json', ' result', resultJson(result.data))}>
+                      Full result (.json)
+                    </button>
+                    <button type="button" className="menu-item" role="menuitem" onClick={() => void doExport('json', ' result spec', specJson(result.data))}>
+                      Spec of this result (.json)
+                    </button>
+                    <button type="button" className="menu-item" role="menuitem" onClick={() => void doExport('md', ' report', reportMarkdown(result.data))}>
+                      Report (.md)
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+          {running ? (
+            <button type="button" className="btn pine-btn python-stop" onClick={() => run && stopPythonRun(run.id).catch(() => {})}>
+              <Square size={13} />
+              Stop
+            </button>
+          ) : (
+            <button type="button" className="btn btn-primary pine-btn" onClick={() => void startRun()} disabled={!canRun} title={runTitle}>
+              <CirclePlay size={14} />
+              {result && view === 'results' ? 'Rerun' : 'Run Study'}
+            </button>
+          )}
+        </div>
+
+        {(running || failed) && (
+          <div className={`study-run${failed ? ' failed' : ''}`} role="status">
+            {running && progress && (
+              <>
+                <div className="study-progress-label">
+                  <span>{progress.stage}</span>
+                  <span className="muted">
+                    {progress.percent}% · {formatElapsed(now - (run?.startedAt ?? now))}
+                  </span>
+                </div>
+                <div className="study-progress" aria-hidden="true">
+                  <div style={{ width: `${progress.percent}%` }} />
+                </div>
+              </>
+            )}
+            {failed && <div className="study-problem">{failed}</div>}
+            {log.length > 0 && (
+              <pre className="study-log">
+                {log.map((l, i) => (
+                  <div key={i} className={l.error ? 'study-loss' : undefined}>
+                    {l.text}
+                  </div>
+                ))}
+              </pre>
+            )}
+            {failed && !running && (
+              <button type="button" className="btn btn-tiny" onClick={() => setFailed(null)}>
+                Dismiss
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="studies-body">
+          {view === 'results' && result ? (
+            <StudyResults result={result.data} onOpenEvent={onOpenEvent} onAddToWatchlist={setAdding} />
+          ) : (
+            <>
+              {studyRuns.length > 0 && !result && (
+                <div className="study-note small muted">
+                  This Study has {studyRuns.length} stored result{studyRuns.length === 1 ? '' : 's'}; open one from Recent results.
+                </div>
+              )}
+              <StudyBuilder
+                draft={current.spec}
+                onChange={(spec) => setCurrent((c) => ({ ...c, spec }))}
+                problem={problem}
+                readiness={readiness}
+                onApplyFix={(fix: ReadinessFix) => setCurrent((c) => ({ ...c, spec: applyFix(normalizeSpec(c.spec), fix) }))}
+                watchlists={watchlists}
+              />
+            </>
+          )}
+        </div>
+      </div>
+
+      {pythonOpen && !problem && (
+        <PythonDialog spec={normalizeSpec(current.spec)} onClose={() => setPythonOpen(false)} onOpenPython={onOpenPython} say={(kind, text) => toast(text, kind)} />
+      )}
+      {adding && (
+        <AddToWatchlistDialog symbols={adding} onClose={() => setAdding(null)} say={(level, text) => toast(text, level === 'error' ? 'error' : 'success')} />
+      )}
+    </div>
+  );
+}

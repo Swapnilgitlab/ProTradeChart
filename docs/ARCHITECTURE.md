@@ -303,6 +303,7 @@ One SQLite file (`charting.db`, in the OS's per-user app data folder), opened by
 | `datasets`, `dataset_bars` | Imported CSV data |
 | `bars_cache` | Offline fallback for the brokers' bars (keys start `dhan:` / `zerodha:`) |
 | `research_bars`, `research_coverage` | The Python API's store of the brokers' bars, and which span of each series is complete (see "Python") |
+| `studies`, `study_results` | Saved Study Specifications and completed Study runs (see "Studies") |
 | `provider_settings` | Per-provider `enabled` flag and non-secret configuration |
 | `provider_secrets_fallback` | Credentials, **only** when no OS keychain exists (unencrypted; the UI says so) |
 | `dhan_instruments` | Dhan's instrument list, for symbol search and `SecurityId` lookup |
@@ -314,8 +315,8 @@ Schema changes: `CREATE TABLE IF NOT EXISTS` won't alter an existing table, so a
 
 ## Layouts and tabs
 
-A tab is a chart or the Python workspace (`features/workspace/tabs.ts`, pure and tested; at most one
-Python tab, opened by the toolbar button or `Ctrl+Shift+Y`). The Python tab has no symbol and no chart, so:
+A tab is a chart or a workspace — Python or Studies (`features/workspace/tabs.ts`, pure and tested; at most one of
+each, opened from the rail, Python also by `Ctrl+Shift+Y`). A workspace tab has no symbol and no chart, so:
 
 - the chrome that needs a chart — the watchlist's highlight, the Pine dock, a new alert's symbol, and where
   a picked symbol loads — follows `activeChartTab`, which is the active tab when that is a chart and otherwise
@@ -411,7 +412,7 @@ use), keeps them, and answers. It is for research — screening, backtesting, an
 | Scripts | `python/scripts.rs` | Plain `.py` files in `<app data>/python/scripts`, so any editor and `git` work on them. The frontend names a script and never sends a path; `validate_name` refuses anything that could leave the folder, a Windows device name, and a name that would shadow a library (`pandas.py` beside a script replaces pandas for it). Examples (`python/examples/`) are copied in and kept current: the app records a hash of what it wrote (`.examples-seeded`), refreshes an example nobody has touched when a newer one ships, and leaves alone one the user edited or deleted. They must work with no setup (a test runs them for a user with no watchlists). |
 | Client | `python/protrade/` | Standard library plus pandas. It is embedded in the app (`python/client_files.rs`), written to `<app data>/python/lib` at each run and put on the child's `PYTHONPATH`, so it is never `pip install`ed and always matches the running app. A test fails if a module is added to the folder without being listed in `FILES`. |
 | Local API | `pyapi/` | `data.rs` (bars: store reads plus broker fetches), `routes.rs` (auth and routing, against a `Backend` trait), `server.rs` (hyper), `backend.rs` (the real `Backend`, plus the error mapping), `wire.rs` (JSON). Read-only `GET`s: `/v1/bars`, `/v1/instruments`, `/v1/watchlists`, `/v1/watchlist`, `/v1/providers`, `/v1/ping`; plus `POST /v1/results`. |
-| Results | `pyapi` `POST /v1/results` → `python-result` → `python/results.ts` → `features/python/Results*.tsx` | What a script shows: `pt.show` (a table), `pt.report` (a backtest) and `pt.plot` (a matplotlib PNG). Rust checks only what makes forwarding safe — the run id, the kind, a title's length, and that a figure's bytes really start like a PNG — and the webview validates the shape before drawing. The report reuses the Strategy Tester's `EquityChart`. |
+| Results | `pyapi` `POST /v1/results` → `python-result` → `python/results.ts` → `features/python/Results*.tsx` | What a script shows: `pt.show` (a table), `pt.report` (a backtest) and `pt.plot` (a matplotlib PNG); a Study's result is kind `study` (see "Studies"), and one sent by a script in the Python tab is stored with the Studies' results. Rust checks only what makes forwarding safe — the run id, the kind, a title's length, and that a figure's bytes really start like a PNG — and the webview validates the shape before drawing. The report reuses the Strategy Tester's `EquityChart`. |
 | Research store | `store/research_bars.rs` | Bars kept for the API, with a *coverage* per series. See below. |
 | UI | `features/python/`, `python/` (TS) | **A tab of its own**, beside the charts (`features/workspace/tabs.ts`), holding the script list, the editor, the console and the results. `python/console.ts`, `format.ts` and `results.ts` are pure and tested. It loads nothing until the tab is first shown: no Python is probed and no example is written for someone who never opens it. |
 
@@ -462,6 +463,57 @@ use), keeps them, and answers. It is for research — screening, backtesting, an
   returns one, and a script runs only when the user presses Run — never on opening a layout, importing a file or starting the app.
   The environment a script inherits has `TAURI_*` (the updater's signing key, during development) removed.
 
+## Studies
+
+A **Study** asks what stocks looked like around historical market events — *which stocks doubled in twelve months, and
+what did they look like 3, 6 and 12 months before?* It is research, not a scanner (what qualifies today) and not a backtest
+(what trading rules would have made): its output is events, measurements around them, distributions and comparisons.
+
+```
+ Studies tab ── spec (JSON) ── invoke study_run ──▶ study_commands.rs ── writes <app data>/python/studies/<run>.json
+      ▲                                                   │ spawn: python -m protrade.run_study <file>   (start_python)
+      │ python-result (kind "study") ◀── pyapi POST /v1/results ◀── protrade/study.py ── GET /v1/bars … ── research store
+      └── studies/result.ts validates ── save_study_result ── study_results table
+```
+
+The pipeline is fixed — **universe → historical data → event detection → event context → measurement → comparison →
+aggregation → result** — and every part of it is described by the **Study Specification**, which is the product:
+
+| Piece | Where | Notes |
+| --- | --- | --- |
+| Specification | `src/studies/spec.ts`, `protrade/study.py` `normalize_spec` | A JSON document (snake_case, because Python reads it and it is exported). The two sides apply the same rules and defaults — **keep them in step**; the tests on each side list the same refusals. Versioned (`version: 1`). |
+| Features | `protrade/features.py`, `src/studies/metrics.ts` | One grammar of names: a family and a window in bars (`return_252`, `ema_200`, `rsi_14`, `dist_high_252`, `rvol_20`, `rs_126`…) plus aliases (`return_12m`, `distance_from_52w_high`). Python computes them; TypeScript accepts the same names and labels them. Returns and distances are fractions. A rolling feature is NaN until its window is full. |
+| Conditions | both of the above | `{left, op, right}` with `>`, `>=`, `<`, `<=`, `crosses_above`, `crosses_below`; `right` is a number or a feature. Events, pre-event filters and characteristics are all conditions. |
+| Engine | `protrade/study.py` (`ResearchStudy`) | Universe (instrument list, watchlist or symbols) → `load` (daily bars through the local API, in chunks so progress can be reported) → `detect_events` → `measure` → `control_group` or `split_by_outcome` → `analyze`. Each step is callable on its own; "Generate Python" writes a script that calls them one by one. |
+| Runner | `protrade/run_study.py`, `study_commands.rs` | `python -m protrade.run_study spec.json`, started through the same `start_python` as a script (same environment, token and events), and only by the Run Study button. It is a module of its own because `-m protrade.study` would import the module twice. |
+| Result | `studies/result.ts` | Posted as result kind `study`. Untrusted like any script output: re-validated (the spec included) and drawn as text and SVG only. `fixtures/engine-result.json` is real engine output (`python/tests/make_study_fixture.py`); a Python test fails when the engine's output shape drifts from it. |
+| Storage | `store/studies.rs`; `studies`, `study_results` tables | Saved Studies (spec JSON, opaque to Rust) and completed runs (the whole result, so a run reopens without running again). The last 20 runs of each Study are kept. A run of a script's Study is stored under a `script:` id. |
+| UI | `features/studies/` | A tab of its own like Python (`features/workspace/tabs.ts`): My Studies, templates and recent results on the left; the Builder (form, interpretation, **data readiness**) or the Results page (summary, event table, event timeline, distributions, before/after, liquidity groups, comparison, stock explorer) on the right. Pure helpers are in `src/studies/` and tested. |
+| Chart | `chart/studyEvent.ts`, `ChartViewHandle.showEvent` | Opening an event points the followed chart at the symbol, daily, framed by `visibleRange` around the date, with a timeline mark. Vela treats marks as data to re-supply after a market switch, so `ChartView` re-applies the mark when that symbol's market lands and clears it when the chart moves elsewhere. |
+
+- **Events are edges.** An event is the *first* bar on which all its conditions hold together, not every bar they hold, and
+  the same stock can't have another for `cooldown_days` bars. Liquidity, price and pre-event filters are judged at the event
+  (or `at` bars before), never with later data. The measurements at each observation point (`T-252 … T0 … T+252`, in bars)
+  are the feature's value on that bar; a point outside the loaded history is blank, never filled from a neighbour.
+- **Comparison.** Either a control group — random dates (seeded, so reproducible) from the same universe and period that pass
+  the same filters, with no event within `cooldown_days` either side, so a run-up to an event isn't counted as "no event" — or,
+  with an `outcome`, the events split by whether they went on to gain `min_return` within `window` bars. Everything is labelled
+  a **historical association**; nothing in the UI or the report claims a cause.
+- **Data the app doesn't have is said, not invented.** No source supplies market cap (current or historical), sectors, or a
+  point-in-time list of listings. `studies/readiness.ts` reports each as unavailable before a run; a market-cap filter **blocks**
+  the run (and the engine refuses one too) and the builder offers the honest alternative — a floor on 50-day average traded
+  value, judged at the event — applied only when the user picks it. Every result carries a survivorship warning, and events
+  carry `market_cap: null`. Sector grouping isn't shown; grouping by liquidity is.
+- **Prices are used as supplied.** The broker's OHLCV is taken as already adjusted for corporate actions; nothing adjusts it.
+- **Reproducibility.** A result carries its normalised spec, the engine, app, Python and pandas versions, the data span and a
+  *data version* (a hash of each series' span, length and last close), the execution time and how long it took.
+- **Performance.** Nothing heavy runs in the webview: the engine computes, the webview draws. The first run over a whole exchange
+  is bound by the broker's rate limit like any script (see "Python"); what it fetches is kept, so reruns are quick.
+  `universe.max_symbols` makes a quick trial of a large universe.
+- *Not built yet:* a natural-language builder, AI interpretation, a research notebook, historical market cap and point-in-time
+  universes (they need data the app doesn't have), and statistical tests beyond distributions. The spec, the step-by-step
+  engine API and the stored results are what those will build on.
+
 ## Themes
 
 `src/theme/themes.ts` is a registry: each theme supplies every token in `ThemeTokens` (TypeScript enforces it) and a
@@ -480,7 +532,8 @@ properties on `<html>` and persists the choice. To add a theme, append one entry
   backend or a broker credential. Never switch to the in-process `PineEngine`, and don't add other uses of `eval`.
 - Tauri capabilities (`src-tauri/capabilities/default.json`) grant only what's used: window creation, the system
   browser opener, native dialogs, notifications, updates, and logging. The frontend has **no file-system access**; files are read through the
-  browser's file picker.
+  browser's file picker. A Study export is written by Rust (`export_study_file`) where the user chooses in the system's save
+  dialog, which Rust opens: the webview supplies the contents, a suggested name and the kind, never a path.
 - Broker credentials live in the OS keychain and are read only by the Rust backend; the web view never receives an access
   token, and the settings screen can't read one back.
 - The Python data API (see "Python") listens on the loopback interface only, refuses any request without the per-launch token, a

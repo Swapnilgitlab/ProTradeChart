@@ -51,7 +51,7 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   `[]` or toasting — see `isBackfillRequest` in `data/providers/common.ts`.
 - A tab is a grid of up to 16 charts, not one chart. `ws.chart` is only the *active* cell and cells are created and
   destroyed as the grid changes: never cache a chart, and apply per-chart settings to `ws.cells()`.
-- Not every tab is a chart: the Python workspace is a tab too (`features/workspace/tabs.ts`). Anything outside the tab
+- Not every tab is a chart: the Python and Studies workspaces are tabs too (`features/workspace/tabs.ts`). Anything outside the tab
   that needs a chart must go through `activeChartTab`, never `tabs[i].symbol`; layouts save chart tabs only; and the
   last chart tab can't be closed. See "Layouts and tabs" in `docs/ARCHITECTURE.md`.
 - Daily-and-up bars are stamped at local midnight of the exchange's date; intraday bars keep their real instant. Each new
@@ -130,6 +130,16 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
 - The right rail (`features/rail/`) shows one panel at a time; the watchlist panel stays mounted while hidden and must not fetch
   prices then (`visible`). The alerts *list* is that rail's panel; only the new/edit **form** is a dialog. The rail also carries
   the Script Editor, Python and Data providers buttons (actions, not panels) — the tab bar no longer has them.
+- A Study's source of truth is its **Study Specification** (`src/studies/spec.ts`), not Python. `normalizeSpec` (TS) and
+  `normalize_spec` (`python/protrade/study.py`) apply the same rules, and `studies/metrics.ts` accepts exactly the feature
+  grammar `protrade/features.py` computes: change one side, change the other. The engine's result is untrusted script output
+  (`studies/result.ts` re-validates it, spec included, and nothing is drawn as HTML); if its shape changes, regenerate
+  `src/studies/fixtures/engine-result.json` with `python/tests/make_study_fixture.py` (a Python test fails until you do).
+  A Study runs only from Run Study (or a script the user runs). See "Studies" in `docs/ARCHITECTURE.md`.
+- Studies never invent data. There is no market cap, sector or point-in-time universe: say so (`studies/readiness.ts`), block a
+  run that needs it, and offer an alternative only for the user to pick — never substitute silently. Events are the first bar
+  their conditions hold, filters are judged at the time (no look-ahead), prices are used as the broker supplied them (no
+  corporate-action adjustment), and results are labelled historical association, never causation.
 - **Yahoo Finance is not a data source, and shouldn't come back without the owner's say-so.** It was removed entirely: its
   provider, backend client and rate limiter, its terms/opt-in UI, and its `yahoo:` symbols. Symbols saved from it stay in
   users' watchlists, layouts and alerts but can't load: `isSupportedSymbol` (`lib/symbols.ts`) recognises them, and

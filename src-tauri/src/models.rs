@@ -31,6 +31,42 @@ pub struct ChartLayout {
     pub updated_at: String,
 }
 
+// ---- Studies ---------------------------------------------------------------
+
+/// A saved Study. `spec_json` is the Study Specification, opaque to Rust (see `src/studies/spec.ts`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Study {
+    pub id: String,
+    pub name: String,
+    pub spec_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// A completed run of a Study, as a list shows it: no `result_json`, which can be megabytes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudyResultInfo {
+    pub id: String,
+    pub study_id: String,
+    pub name: String,
+    pub summary_json: String,
+    pub executed_at: String,
+}
+
+/// A completed run with everything it produced.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudyResult {
+    pub id: String,
+    pub study_id: String,
+    pub name: String,
+    pub summary_json: String,
+    pub result_json: String,
+    pub executed_at: String,
+}
+
 // ---- Pine scripts ----------------------------------------------------------
 
 /// A saved Pine Script. `kind` is `indicator` or `strategy` (enforced by the

@@ -184,4 +184,29 @@ CREATE TABLE IF NOT EXISTS price_alerts (
   trigger_count INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_price_alerts_status ON price_alerts(status);
+
+-- Saved Studies. `spec_json` is the Study Specification, owned by the frontend
+-- (`src/studies/spec.ts`) and the Python engine (`protrade/study.py`): opaque to Rust.
+CREATE TABLE IF NOT EXISTS studies (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  spec_json   TEXT NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Completed Study runs, so a result reopens without running again. `study_id` is not a
+-- foreign key: a Study that was never saved still keeps its runs. `result_json` holds
+-- everything the run produced (its spec, metadata, events and statistics) and
+-- `summary_json` the few figures a list shows; both are opaque to Rust.
+CREATE TABLE IF NOT EXISTS study_results (
+  id            TEXT PRIMARY KEY,
+  study_id      TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  summary_json  TEXT NOT NULL,
+  result_json   TEXT NOT NULL,
+  executed_at   TEXT NOT NULL,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_study_results_study ON study_results(study_id, executed_at);
 "#;

@@ -45,6 +45,34 @@ Run outside the app — a terminal, a notebook — these print instead, so the s
 - **A broker that won't go back far enough** (Kite: 60 days per call at one minute, capped in total; Dhan: five years of
   intraday) gives you what it has and a `DataLimitWarning`; `df.attrs["limited_from"]` says where the data really starts.
 
+## Studies
+
+The engine behind the app's Studies tab is `protrade.study`, usable from any script:
+
+```python
+from protrade.study import ResearchStudy
+
+study = ResearchStudy({
+    "name": "100% Winners",
+    "universe": {"source": "instruments", "provider": "zerodha", "exchanges": ["NSE"], "min_avg_traded_value": 1e7},
+    "period": {"start": "2018-01-01"},
+    "event": {"conditions": ["return_12m crosses_above 1.0"]},
+    "metrics": ["return_63", "rsi_14", "dist_high_252", "rvol_20"],
+})
+universe = study.universe()
+data = study.load(universe)                                  # {symbol: Features}
+events = study.detect_events(data)                           # one row per event: symbol, event_date, price…
+results = study.measure(events, data)                        # metrics at every observation point, forward returns
+control = study.measure(study.control_group(data, events), data)
+study.analyze(results, control, data)                        # shows the Study in the app (prints outside it)
+```
+
+Each step takes overrides (`study.detect_events(data, conditions=["close crosses_above prior_high_252"])`). The spec's rules are
+in `normalize_spec`; features are named `family_window` (`return_63`, `ema_200`, `dist_high_252`, `rvol_20`, `rs_126`…, see
+`protrade/features.py`) and conditions read `left op right`. Market cap isn't available, so a spec that asks for it is refused
+(`StudyDataError`) rather than run without it. `python -m protrade.run_study spec.json` runs a spec file, which is what the app does.
+
+## Errors
 ## Errors
 
 Every failure is a `ProTradeError`:

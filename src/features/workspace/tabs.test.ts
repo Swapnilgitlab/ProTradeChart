@@ -5,6 +5,8 @@ import {
   canCloseTab,
   chartTabs,
   pythonTab,
+  studiesTab,
+  workspaceTabs,
   tabAfterClosing,
   tabAfterStep,
   type Tab,
@@ -12,6 +14,7 @@ import {
 
 const chart = (id: string, symbol = `zerodha:NSE:${id.toUpperCase()}`): Tab => ({ kind: 'chart', id, symbol });
 const python = (id = 'py'): Tab => ({ kind: 'python', id });
+const studies = (id = 'st'): Tab => ({ kind: 'studies', id });
 
 describe('picking the tabs apart', () => {
   it('finds the charts and the python tab', () => {
@@ -46,6 +49,14 @@ describe('the chart the shared chrome follows', () => {
 });
 
 describe('what may be closed', () => {
+  it('treats the Studies tab as a workspace like Python', () => {
+    const tabs = [chart('a'), python(), studies()];
+    expect(studiesTab(tabs)?.id).toBe('st');
+    expect(workspaceTabs(tabs).map((t) => t.id)).toEqual(['py', 'st']);
+    expect(canCloseTab(tabs, 'st')).toBe(true);
+    expect(activeChartTab(tabs, 'st', 'a')?.id).toBe('a');
+  });
+
   it('always lets the python tab go', () => {
     expect(canCloseTab([chart('a'), python()], 'py')).toBe(true);
   });

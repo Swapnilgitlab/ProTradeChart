@@ -11,6 +11,7 @@ import './styles/tokens.css';
 import './styles/app.css';
 import './styles/pine.css';
 import './styles/python.css';
+import './styles/studies.css';
 
 // Route webview console output into the app's log file, so a bug report can
 // include what the frontend saw.

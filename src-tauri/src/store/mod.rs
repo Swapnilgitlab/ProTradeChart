@@ -11,5 +11,6 @@ pub mod provider_settings;
 pub mod research_bars;
 pub mod retired;
 pub mod scripts;
+pub mod studies;
 pub mod symbol_names;
 pub mod watchlists;

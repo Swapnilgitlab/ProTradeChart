@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import type { TimelineMark } from '@luxalgo/vela';
 import { VelaWorkspace, type WorkspaceState } from '@luxalgo/vela/workspace';
 import { providerFactories } from '../data/providers';
 import { withChartSymbols } from '../features/layouts/layoutDocument';
@@ -7,6 +8,7 @@ import { BUNDLED_MANIFEST } from '../pine/bundled';
 import { useTheme } from '../theme/ThemeProvider';
 import { trackCursorPrice } from './alertActions';
 import { watchHistory } from './historyBackfill';
+import { setEventMark, showStudyEvent, type StudyEvent } from './studyEvent';
 import { installThinMovingAverages } from './thinMovingAverages';
 import { tidyStatusline } from './statuslineMeta';
 import { showCompanyName } from './watermarkName';
@@ -63,6 +65,9 @@ const LOCAL_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 export interface ChartViewHandle {
   /** Points the tab's active chart at a new `provider:TICKER` symbol. */
   setSymbol: (symbol: string) => void;
+  /** Opens a Study's event on the tab's active chart: that symbol, daily, framed around the event
+   *  date, with a mark on its bar. */
+  showEvent: (event: StudyEvent) => void;
   /** Every chart in the tab's grid — layout, timeframes, indicators, drawings,
    *  renderer config — for saving as part of a layout. Not just the symbol. */
   getState: () => WorkspaceState | null;
@@ -112,6 +117,11 @@ export const ChartView = forwardRef<ChartViewHandle, Props>(function ChartView(
   // A symbol chosen before the chart has been built (a brand-new or
   // never-shown tab) is remembered and used for construction, not dropped.
   const pendingSymbolRef = useRef<string | null>(null);
+  /** The same for a Study event asked for before the chart exists. */
+  const pendingEventRef = useRef<StudyEvent | null>(null);
+  /** A Study event's mark and the symbol it belongs to: re-applied when that symbol's load lands, and
+   *  dropped when the chart moves to another. */
+  const markRef = useRef<{ symbol: string; mark: TimelineMark } | null>(null);
   const { theme } = useTheme();
   const modeRef = useRef(theme.baseMode);
   modeRef.current = theme.baseMode;
@@ -123,6 +133,15 @@ export const ChartView = forwardRef<ChartViewHandle, Props>(function ChartView(
       setSymbol: (symbol) => {
         if (wsRef.current) wsRef.current.chart.setMarket({ symbol: chartSymbol(symbol) });
         else pendingSymbolRef.current = symbol;
+      },
+      showEvent: (event) => {
+        if (wsRef.current) {
+          const mark = showStudyEvent(wsRef.current.chart, event, chartSymbol);
+          markRef.current = mark ? { symbol: event.symbol, mark } : null;
+        } else {
+          pendingSymbolRef.current = event.symbol;
+          pendingEventRef.current = event;
+        }
       },
       getState: () => wsRef.current?.getState() ?? null,
     }),
@@ -175,6 +194,11 @@ export const ChartView = forwardRef<ChartViewHandle, Props>(function ChartView(
           // meantime is the more recent intent.
           if (pendingSymbolRef.current) ws.chart.setMarket({ symbol: chartSymbol(pendingSymbolRef.current) });
         }
+        if (pendingEventRef.current) {
+          const mark = showStudyEvent(ws.chart, pendingEventRef.current, chartSymbol);
+          markRef.current = mark ? { symbol: pendingEventRef.current.symbol, mark } : null;
+          pendingEventRef.current = null;
+        }
         applyGridOpacity(ws, theme.baseMode);
         wsRef.current = ws;
         onWorkspaceRef.current?.(ws);
@@ -213,7 +237,18 @@ export const ChartView = forwardRef<ChartViewHandle, Props>(function ChartView(
     let unfollow = () => {};
     const follow = () => {
       unfollow();
-      unfollow = ws.chart.on('market:changed', ({ symbol }) => onSymbolChangeRef.current(normalizeSymbol(symbol)));
+      unfollow = ws.chart.on('market:changed', ({ symbol }) => {
+        const normalized = normalizeSymbol(symbol);
+        // A Study event's mark belongs to its stock: supplied again once its market lands, and not
+        // carried over to the next stock's chart.
+        const marked = markRef.current;
+        if (marked) {
+          const same = marked.symbol === normalized;
+          setEventMark(ws.chart, same ? marked.mark : null);
+          if (!same) markRef.current = null;
+        }
+        onSymbolChangeRef.current(normalized);
+      });
       applyGridOpacity(ws, modeRef.current);
       watchAllCells(ws, watchedRef.current);
       if (ws.active.symbol) onSymbolChangeRef.current(normalizeSymbol(ws.active.symbol));

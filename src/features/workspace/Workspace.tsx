@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AppWindow, Bell, Code, Database, Info, List, Plug, Plus, SquareTerminal, X } from 'lucide-react';
+import { AppWindow, Bell, Code, Database, FlaskConical, Info, List, Plug, Plus, SquareTerminal, X } from 'lucide-react';
 import type { VelaWorkspace, WorkspaceState } from '@luxalgo/vela/workspace';
 import { startAlertEngine } from '../../alerts/engine';
 import { onOpenAlerts, openAlerts } from '../../alerts/ui';
@@ -29,6 +29,8 @@ import { useUpdateState } from '../../updates/useUpdateState';
 import { ImportDataDialog } from '../datasets/ImportDataDialog';
 import { PineDock } from '../pine/PineDock';
 import { PythonPanel } from '../python/PythonPanel';
+import { StudiesPanel } from '../studies/StudiesPanel';
+import type { StudyEvent } from '../../chart/studyEvent';
 import { LayoutMenu, type LayoutSummary } from '../layouts/LayoutMenu';
 import { RightRail, type RailAction, type RailPanelButton } from '../rail/RightRail';
 import {
@@ -52,10 +54,12 @@ import {
   chartTabs,
   isChartTab,
   pythonTab,
+  studiesTab,
   tabAfterClosing,
   tabAfterStep,
   type ChartTab,
   type Tab,
+  workspaceTabs,
 } from './tabs';
 
 /** When the alerts list was last looked at: alerts fired since then wear a badge. */
@@ -152,15 +156,12 @@ export function Workspace() {
           'info',
         );
       }
-      // A layout holds charts; the Python tab is a workspace, not part of a saved session, so it
-      // stays open across a load with its scripts and its run untouched.
+      // A layout holds charts; the Python and Studies tabs are workspaces, not part of a saved session,
+      // so they stay open across a load with their scripts, Studies and runs untouched.
       const next = usable.tabs.map((t) => createTab(t.symbol, t.state));
       chartRefs.current.clear();
       const active = next[usable.activeTabIndex] ?? next[0];
-      setTabs((prev) => {
-        const python = pythonTab(prev);
-        return python ? [...next, python] : next;
-      });
+      setTabs((prev) => [...next, ...workspaceTabs(prev)]);
       setActiveTabId(active.id);
       setLastChartId(active.id);
       setCurrentLayoutId(row.id);
@@ -211,7 +212,7 @@ export function Workspace() {
         if (template) tab = createTab(template.symbol, template.state);
       }
       const created = tab ?? createTab(symbol);
-      // A new chart goes after the last one, so the Python tab stays on the right.
+      // A new chart goes after the last one, so the workspace tabs stay on the right.
       setTabs((prev) => {
         const at = prev.findIndex((t) => !isChartTab(t));
         return at === -1 ? [...prev, created] : [...prev.slice(0, at), created, ...prev.slice(at)];
@@ -230,6 +231,18 @@ export function Workspace() {
       return;
     }
     const created: Tab = { kind: 'python', id: crypto.randomUUID() };
+    setTabs((prev) => [...prev, created]);
+    setActiveTabId(created.id);
+  }, [tabs]);
+
+  /** Opens the Studies workspace, or shows it when it is already open. */
+  const openStudies = useCallback(() => {
+    const existing = studiesTab(tabs);
+    if (existing) {
+      setActiveTabId(existing.id);
+      return;
+    }
+    const created: Tab = { kind: 'studies', id: crypto.randomUUID() };
     setTabs((prev) => [...prev, created]);
     setActiveTabId(created.id);
   }, [tabs]);
@@ -266,6 +279,17 @@ export function Workspace() {
       if (chartTab.id !== activeTabId) showTab(chartTab.id);
     },
     [chartTab, activeTabId, showTab, setTabSymbol, toast],
+  );
+
+  /** Opens a Study's event on the chart the chrome is following: its symbol, framed around the date, marked. */
+  const goToEvent = useCallback(
+    (event: StudyEvent) => {
+      if (!chartTab) return;
+      chartRefs.current.get(chartTab.id)?.showEvent(event);
+      setTabSymbol(chartTab.id, event.symbol);
+      if (chartTab.id !== activeTabId) showTab(chartTab.id);
+    },
+    [chartTab, activeTabId, showTab, setTabSymbol],
   );
 
   const stepTab = useCallback((delta: number) => showTab(tabAfterStep(tabs, activeTabId, delta)), [tabs, activeTabId, showTab]);
@@ -408,8 +432,16 @@ export function Workspace() {
       label: 'Python',
       title: "Python: screen and backtest with your broker's data (Ctrl+Shift+Y)",
       icon: SquareTerminal,
-      pressed: !!activeTab && !isChartTab(activeTab),
+      pressed: activeTab?.kind === 'python',
       onClick: openPython,
+    },
+    {
+      id: 'studies',
+      label: 'Studies',
+      title: 'Studies: what stocks looked like around historical events',
+      icon: FlaskConical,
+      pressed: activeTab?.kind === 'studies',
+      onClick: openStudies,
     },
   ];
   const railFooter: RailAction[] = [
@@ -431,7 +463,7 @@ export function Workspace() {
       <div className="tab-bar">
         <div className="tab-bar-scroll" role="tablist">
           {tabs.map((tab) => {
-            const label = isChartTab(tab) ? displayTicker(tab.symbol) : 'Python';
+            const label = isChartTab(tab) ? displayTicker(tab.symbol) : tab.kind === 'studies' ? 'Studies' : 'Python';
             return (
               <div
                 key={tab.id}
@@ -441,7 +473,8 @@ export function Workspace() {
                 onClick={() => showTab(tab.id)}
                 onAuxClick={(e) => e.button === 1 && closeTab(tab.id)}
               >
-                {!isChartTab(tab) && <SquareTerminal size={13} aria-hidden="true" />}
+                {tab.kind === 'python' && <SquareTerminal size={13} aria-hidden="true" />}
+                {tab.kind === 'studies' && <FlaskConical size={13} aria-hidden="true" />}
                 <span className="tab-chip-label">{label}</span>
                 {isChartTab(tab) && <TabQuote symbol={tab.symbol} quote={tabQuotes.get(tab.symbol)} />}
                 {canCloseTab(tabs, tab.id) && (
@@ -517,6 +550,9 @@ export function Workspace() {
                     onGridGrow={showGridHint}
                     onWorkspace={(ws) => setTabWorkspace(tab.id, ws)}
                   />
+                ) : tab.kind === 'studies' ? (
+                  // Stays mounted, like Python, so a running Study keeps going while charts are looked at.
+                  <StudiesPanel visible={tab.id === activeTabId} onOpenEvent={goToEvent} onOpenPython={openPython} />
                 ) : (
                   // Stays mounted while another tab shows, so a run keeps going and its console
                   // and results are still there when you come back.
@@ -525,7 +561,7 @@ export function Workspace() {
               </div>
             ))}
           </div>
-          {/* The Pine dock belongs to a chart, so it is hidden while the Python tab is showing. */}
+          {/* The Pine dock belongs to a chart, so it is hidden while a workspace tab is showing. */}
           {activeTab && isChartTab(activeTab) && <PineDock workspace={workspaces[activeTab.id] ?? null} onOpenChange={setDockOpen} />}
         </div>
         {/* The watchlist stays mounted while another panel shows, so its list, sort and scroll are still there. */}

@@ -17,12 +17,21 @@ pub const FILES: &[(&str, &str)] = &[
     ),
     ("protrade/api.py", include_str!("../../../python/protrade/api.py")),
     ("protrade/client.py", include_str!("../../../python/protrade/client.py")),
+    (
+        "protrade/features.py",
+        include_str!("../../../python/protrade/features.py"),
+    ),
     ("protrade/frames.py", include_str!("../../../python/protrade/frames.py")),
     (
         "protrade/results.py",
         include_str!("../../../python/protrade/results.py"),
     ),
+    (
+        "protrade/run_study.py",
+        include_str!("../../../python/protrade/run_study.py"),
+    ),
     ("protrade/stats.py", include_str!("../../../python/protrade/stats.py")),
+    ("protrade/study.py", include_str!("../../../python/protrade/study.py")),
 ];
 
 /// Writes any file that is missing or differs from the embedded copy. Returns how many it wrote.

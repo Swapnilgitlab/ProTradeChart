@@ -10,3 +10,8 @@ export function confirmDelete(message: string): Promise<boolean> {
 export function confirmDiscard(message: string): Promise<boolean> {
   return ask(message, { title: 'ProTradeChart', kind: 'warning', okLabel: 'Discard', cancelLabel: 'Keep editing' });
 }
+
+/** Native OS confirmation before a file of the user's is overwritten. */
+export function confirmReplace(message: string): Promise<boolean> {
+  return ask(message, { title: 'ProTradeChart', kind: 'warning', okLabel: 'Replace', cancelLabel: 'Cancel' });
+}

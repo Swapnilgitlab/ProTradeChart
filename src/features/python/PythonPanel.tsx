@@ -23,6 +23,8 @@ import { onPythonExit, onPythonOutput, onPythonResult, onPythonSetupDone, onPyth
 import { exitSummary, formatElapsed } from '../../python/format';
 import { parseResult, type PythonResult } from '../../python/results';
 import { STARTER_SCRIPT, withPyExtension } from '../../python/scriptNames';
+import { parseStudyResult } from '../../studies/result';
+import { storeStudyRun } from '../studies/storeRun';
 import { CodeEditor } from '../pine/CodeEditor';
 import { AddToWatchlistDialog } from './AddToWatchlistDialog';
 import { PythonConsole } from './PythonConsole';
@@ -177,6 +179,18 @@ export function PythonPanel({ visible, onOpenSymbol }: Props) {
       }),
       onPythonResult((e) => {
         if (e.runId !== runRef.current?.id) return;
+        if (e.kind === 'study') {
+          // A Study run from a script (a generated one, say): kept with the Studies' results.
+          const study = parseStudyResult(e.data);
+          if (!study) {
+            push([{ stream: 'error', text: 'The script sent a Study result this version of the app can’t read.' }]);
+            return;
+          }
+          storeStudyRun(study, `script:${runRef.current.name}`)
+            .then(() => push([{ stream: 'info', text: `✓ Study “${study.spec.name}”: ${study.summary.events} events. Open it in the Studies tab, under Recent results.` }]))
+            .catch((err) => push([{ stream: 'error', text: `The Study result couldn’t be stored: ${errorMessage(err)}` }]));
+          return;
+        }
         const result = parseResult(e, nextResultId.current++);
         if (!result) {
           push([{ stream: 'error', text: `A result of kind "${e.kind}" could not be shown; this version of the app doesn't understand it.` }]);

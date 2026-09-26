@@ -1,0 +1,196 @@
+/** Study Data Readiness: before a Study runs, what it needs and whether the app has it.
+ *
+ *  Nothing here invents, estimates or substitutes data. A field no source supplies is reported
+ *  unavailable; when the Study depends on it the run is blocked, and where there is an honest
+ *  alternative (a liquidity floor instead of a market-cap floor) it is offered, never applied
+ *  silently. What can only be known per symbol — how far back each one's history goes — is
+ *  checked by the engine as it runs and reported with the result. Pure. */
+
+import { splitSymbol } from '../lib/symbols';
+import { requiredFeatures, type StudySpec } from './spec';
+import { DEFAULT_MIN_TRADED_VALUE } from './templates';
+
+export type ReadinessStatus = 'available' | 'unavailable' | 'warning' | 'unused';
+
+export type ReadinessFix = 'use_traded_value' | 'drop_benchmark';
+
+export interface ReadinessItem {
+  field: string;
+  status: ReadinessStatus;
+  detail: string;
+  /** The Study can't run until this is dealt with. */
+  blocking: boolean;
+  fix?: { id: ReadinessFix; label: string };
+}
+
+export interface ReadinessFacts {
+  /** The data sources a Study can read and whether each is set up and switched on. */
+  providers: readonly { id: string; usable: boolean }[];
+  pythonReady: boolean;
+  pythonMessage?: string | null;
+  watchlists: readonly string[];
+  /** Today, `YYYY-MM-DD`. */
+  today: string;
+}
+
+export interface Readiness {
+  items: ReadinessItem[];
+  /** Trading days of history needed before the first event date. */
+  historyBars: number;
+  /** The first date the Study loads, and the span of years it covers. */
+  loadFrom: string;
+  years: number;
+  /** Share of the data the Study depends on that the app has, 0–100. */
+  score: number;
+  ready: boolean;
+  notes: string[];
+}
+
+const WARMUP: Record<string, (n: number) => number> = {
+  slope_sma: (n) => n + 21,
+  slope_ema: (n) => n + 21,
+  rsi: (n) => 3 * n,
+  atr: (n) => 3 * n,
+  atr_pct: (n) => 3 * n,
+  adx: (n) => 3 * n,
+  max_drawdown: (n) => 2 * n,
+  gain_from_low: (n) => n + 3,
+  rvol: (n) => n + 3,
+  stoch_d: (n) => n + 3,
+};
+
+/** Bars a feature needs before it has a value; the engine's `features.warmup`. */
+export function warmup(name: string): number {
+  const i = name.lastIndexOf('_');
+  const n = Number(name.slice(i + 1));
+  if (!Number.isInteger(n)) return name.startsWith('macd') ? 35 : 1;
+  const family = name.slice(0, i);
+  return WARMUP[family]?.(n) ?? n;
+}
+
+/** Bars needed before the first event date for every measurement to have a value; the engine's `history_bars`. */
+export function historyBars(spec: StudySpec): number {
+  const deepest = Math.max(...requiredFeatures(spec).map(warmup));
+  const filters = Math.max(0, ...spec.pre_event_filters.map((f) => f.at));
+  return Math.max(...spec.lookback_windows) + Math.max(deepest, filters) + 5;
+}
+
+/** The first date loaded: the engine's `fetch_start`. */
+export function loadFrom(spec: StudySpec): string {
+  const start = new Date(`${spec.period.start}T00:00:00Z`);
+  start.setUTCDate(start.getUTCDate() - (Math.ceil((historyBars(spec) * 365) / 245) + 10));
+  return start.toISOString().slice(0, 10);
+}
+
+function providersOf(spec: StudySpec): string[] {
+  const u = spec.universe;
+  if (u.source === 'instruments') return [u.provider];
+  if (u.source === 'symbols') return [...new Set(u.symbols.map((s) => splitSymbol(s).provider))];
+  return []; // a watchlist's symbols are only known when it runs
+}
+
+export function checkReadiness(spec: StudySpec, facts: ReadinessFacts): Readiness {
+  const items: ReadinessItem[] = [];
+  const notes: string[] = [];
+  const usable = new Set(facts.providers.filter((p) => p.usable).map((p) => p.id));
+  const label = (id: string) => (id === 'zerodha' ? 'Zerodha' : id === 'dhan' ? 'Dhan' : id);
+
+  items.push(
+    facts.pythonReady
+      ? { field: 'Python', status: 'available', detail: 'Ready to run the Study engine', blocking: false }
+      : { field: 'Python', status: 'unavailable', detail: facts.pythonMessage ?? 'Set up Python in the Python tab first.', blocking: true },
+  );
+
+  const sources = providersOf(spec);
+  const unsupported = sources.filter((p) => p !== 'zerodha' && p !== 'dhan');
+  const missing = sources.filter((p) => (p === 'zerodha' || p === 'dhan') && !usable.has(p));
+  if (spec.universe.source === 'watchlist') {
+    const known = facts.watchlists.some((w) => w.toLowerCase() === (spec.universe.watchlist ?? '').toLowerCase());
+    items.push({
+      field: 'Universe',
+      status: known ? 'available' : 'unavailable',
+      detail: known ? `Watchlist "${spec.universe.watchlist}"` : `There is no watchlist called "${spec.universe.watchlist}".`,
+      blocking: !known,
+    });
+  }
+  const priceStatus: ReadinessItem =
+    unsupported.length > 0
+      ? { field: 'OHLC', status: 'unavailable', detail: `Studies read Zerodha and Dhan data only, not ${unsupported.join(', ')}.`, blocking: true }
+      : missing.length > 0
+        ? { field: 'OHLC', status: 'unavailable', detail: `${missing.map(label).join(' and ')} isn't set up and switched on (Data providers).`, blocking: true }
+        : { field: 'OHLC', status: 'available', detail: 'Daily bars, as the broker supplies them (adjusted for corporate actions at source)', blocking: false };
+  items.push(priceStatus);
+  items.push({ ...priceStatus, field: 'Volume', detail: priceStatus.status === 'available' ? 'Part of the daily bars' : priceStatus.detail });
+
+  const capAsked = spec.universe.market_cap_min !== null;
+  items.push({
+    field: 'Market cap',
+    status: 'unavailable',
+    detail: capAsked
+      ? 'No data source supplies market cap, current or historical, so a market-cap filter can’t be applied.'
+      : 'Not supplied by any data source: events carry no market cap.',
+    blocking: capAsked,
+    fix: capAsked ? { id: 'use_traded_value', label: 'Filter on average traded value instead' } : undefined,
+  });
+  items.push({ field: 'Sector', status: 'unavailable', detail: 'No sector or industry metadata: results aren’t grouped by sector.', blocking: false });
+
+  if (spec.benchmark) {
+    const provider = splitSymbol(spec.benchmark).provider;
+    const ok = usable.has(provider);
+    items.push({
+      field: 'Index data',
+      status: ok ? 'available' : 'unavailable',
+      detail: ok ? `${spec.benchmark}, for relative strength` : `${label(provider)} isn't set up, so relative strength would be blank.`,
+      blocking: false,
+      fix: ok ? undefined : { id: 'drop_benchmark', label: 'Remove the benchmark and relative strength' },
+    });
+  } else {
+    items.push({ field: 'Index data', status: 'unused', detail: 'No benchmark: relative strength isn’t measured.', blocking: false });
+  }
+
+  items.push({
+    field: 'Point-in-time universe',
+    status: 'warning',
+    detail:
+      spec.universe.source === 'instruments'
+        ? 'Historical universe data is incomplete: the universe is today’s instrument list, so delisted stocks are missing. Results may contain survivorship bias.'
+        : 'The universe is a list chosen today, so it may carry hindsight (survivorship or selection bias).',
+    blocking: false,
+  });
+
+  const bars = historyBars(spec);
+  const from = loadFrom(spec);
+  const until = spec.period.end ?? facts.today;
+  const years = Math.max(0, (Date.parse(until) - Date.parse(from)) / (365.25 * 86_400_000));
+  notes.push(
+    `Required history: from ${from} (${bars} trading days before the first event date), about ${years.toFixed(1)} years in all. ` +
+      'How far back each symbol’s history really goes is checked as the Study runs; the result reports any with less.',
+  );
+  if (spec.universe.source === 'instruments' && spec.universe.max_symbols === null) {
+    notes.push(
+      'The first run over a whole exchange fetches every symbol’s history at the broker’s rate limit, which can take tens of minutes. ' +
+        'What is fetched is kept, so later runs are quick. Set a symbol limit for a quick trial first.',
+    );
+  }
+
+  const counted = items.filter((i) => i.blocking || i.field === 'OHLC' || i.field === 'Volume' || (i.field === 'Index data' && i.status !== 'unused'));
+  const have = counted.filter((i) => i.status === 'available').length;
+  const score = counted.length ? Math.round((100 * have) / counted.length) : 100;
+  return { items, historyBars: bars, loadFrom: from, years, score, ready: !items.some((i) => i.blocking), notes };
+}
+
+/** Applies an alternative the readiness check offered. The user chooses it; it is never automatic. */
+export function applyFix(spec: StudySpec, fix: ReadinessFix): StudySpec {
+  const next = structuredClone(spec);
+  if (fix === 'use_traded_value') {
+    next.universe.market_cap_min = null;
+    next.universe.min_avg_traded_value ??= DEFAULT_MIN_TRADED_VALUE;
+  } else if (fix === 'drop_benchmark') {
+    next.benchmark = null;
+    const usesRs = (c: { left: string; right: number | string }) => c.left.startsWith('rs_') || (typeof c.right === 'string' && c.right.startsWith('rs_'));
+    next.metrics = next.metrics.filter((m) => !m.startsWith('rs_'));
+    next.characteristics = next.characteristics.filter((c) => !usesRs(c));
+    next.pre_event_filters = next.pre_event_filters.filter((c) => !usesRs(c));
+  }
+  return next;
+}

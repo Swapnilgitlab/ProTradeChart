@@ -10,6 +10,9 @@ Scripts run from the app's Python tab reach market data through it::
 
 The app fetches from the broker (it holds the credentials, and this package never sees
 them), keeps what it fetched, and answers over a local, token-protected connection.
+
+Studies (``pt.ResearchStudy``, see ``protrade.study``) measure what stocks looked like around
+historical events, from a Study Specification the app's Studies tab builds.
 """
 
 from .api import (
@@ -38,6 +41,7 @@ from .client import (
     UpstreamError,
 )
 from .results import plot, report, show
+from .study import ResearchStudy, SpecError, StudyDataError
 
 __all__ = [
     "AuthError",
@@ -50,6 +54,9 @@ __all__ = [
     "NotFoundError",
     "ProTradeError",
     "RateLimitedError",
+    "ResearchStudy",
+    "SpecError",
+    "StudyDataError",
     "UpstreamError",
     "Universe",
     "bars",

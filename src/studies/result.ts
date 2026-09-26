@@ -1,0 +1,301 @@
+/** A Study's result, as the engine posts it (`kind: "study"`) and as it is stored.
+ *
+ *  It comes from a Python process, which runs code the user can edit, so it is untrusted: every
+ *  part is checked and squared off here, anything malformed is refused, and nothing in it is ever
+ *  drawn as HTML. The spec inside is re-validated with the same rules the builder uses. Pure. */
+
+import type { Cell } from '../python/results';
+import { normalizeSpec, type StudySpec } from './spec';
+
+export const RESULT_FORMAT = 1;
+
+export interface Stat {
+  count: number;
+  mean: number | null;
+  median: number | null;
+  min: number | null;
+  max: number | null;
+  p25: number | null;
+  p75: number | null;
+}
+
+export interface Share {
+  count: number;
+  true: number;
+  share: number | null;
+}
+
+export interface ForwardStat extends Stat {
+  positive: Share;
+  max_gain_median: number | null;
+  max_drawdown_median: number | null;
+}
+
+export interface PathBand {
+  offsets: number[];
+  median: (number | null)[];
+  p25: (number | null)[];
+  p75: (number | null)[];
+  count: number[];
+}
+
+export interface StudyMeta {
+  executed_at: string;
+  engine_version: string | null;
+  app_version: string | null;
+  python_version: string | null;
+  pandas_version: string | null;
+  data_source: string | null;
+  data_from: string | null;
+  data_through: string | null;
+  data_version: string | null;
+  symbols_requested: number;
+  symbols_loaded: number;
+  symbols_failed: number;
+  symbols_short_history: number;
+  history_bars_needed: number | null;
+  elapsed_seconds: number | null;
+}
+
+export interface StudySummary {
+  events: number;
+  unique_symbols: number;
+  first_event: string | null;
+  last_event: string | null;
+  median_price: number | null;
+  median_avg_traded_value: number | null;
+  median_event_value: number | null;
+  control_samples: number;
+  control_kind: 'random' | 'outcome' | 'none';
+  outcome: { met: number; not_met: number; unknown: number } | null;
+}
+
+export interface StudyResultData {
+  format: number;
+  spec: StudySpec;
+  meta: StudyMeta;
+  availability: Record<string, boolean>;
+  warnings: { code: string; message: string }[];
+  summary: StudySummary;
+  offsets: number[];
+  events: { columns: string[]; rows: Cell[][]; total: number };
+  stats: { metric: string; offset: number; events: Stat; control: Stat | null }[];
+  characteristics: { index: number; label: string; offset: number; events: Share; control: Share | null }[];
+  forward: { window: number; events: ForwardStat; control: ForwardStat | null }[];
+  histograms: { metric: string; offset: number; edges: number[]; events: number[]; control: number[] }[];
+  path: PathBand | null;
+  control_path: PathBand | null;
+  failed: { symbol: string; error: string }[];
+}
+
+const MAX_ROWS = 10_000;
+const MAX_COLUMNS = 1_000;
+const MAX_LIST = 5_000;
+const MAX_TEXT = 1_000;
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const n = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const count = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+const int = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) ? v : null);
+const text = (v: unknown): string | null => (typeof v === 'string' ? v.slice(0, MAX_TEXT) : null);
+const list = (v: unknown): unknown[] => (Array.isArray(v) ? v.slice(0, MAX_LIST) : []);
+
+function cell(value: unknown): Cell {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') return value.slice(0, MAX_TEXT);
+  return n(value);
+}
+
+function stat(v: unknown): Stat {
+  const r = isRecord(v) ? v : {};
+  return { count: count(r.count), mean: n(r.mean), median: n(r.median), min: n(r.min), max: n(r.max), p25: n(r.p25), p75: n(r.p75) };
+}
+
+function share(v: unknown): Share {
+  const r = isRecord(v) ? v : {};
+  const s = n(r.share);
+  return { count: count(r.count), true: count(r.true), share: s === null ? null : Math.min(Math.max(s, 0), 1) };
+}
+
+function forwardStat(v: unknown): ForwardStat {
+  const r = isRecord(v) ? v : {};
+  return { ...stat(r), positive: share(r.positive), max_gain_median: n(r.max_gain_median), max_drawdown_median: n(r.max_drawdown_median) };
+}
+
+function band(v: unknown): PathBand | null {
+  if (!isRecord(v) || !Array.isArray(v.offsets)) return null;
+  const offsets = list(v.offsets).map(int);
+  if (offsets.length < 2 || offsets.some((o) => o === null)) return null;
+  const column = (x: unknown) => offsets.map((_, i) => (Array.isArray(x) ? n(x[i]) : null));
+  return {
+    offsets: offsets as number[],
+    median: column(v.median),
+    p25: column(v.p25),
+    p75: column(v.p75),
+    count: offsets.map((_, i) => (Array.isArray(v.count) ? count(v.count[i]) : 0)),
+  };
+}
+
+function numbers(v: unknown): number[] | null {
+  if (!Array.isArray(v)) return null;
+  const out = v.slice(0, 200).map(n);
+  return out.some((x) => x === null) ? null : (out as number[]);
+}
+
+/** The result, checked; or null when it isn't one this version can show. */
+export function parseStudyResult(data: unknown): StudyResultData | null {
+  if (!isRecord(data) || data.format !== RESULT_FORMAT) return null;
+  let spec: StudySpec;
+  try {
+    spec = normalizeSpec(data.spec);
+  } catch {
+    return null;
+  }
+  const events = isRecord(data.events) ? data.events : null;
+  if (!events || !Array.isArray(events.columns) || !Array.isArray(events.rows)) return null;
+  if (events.columns.length === 0 || events.columns.length > MAX_COLUMNS || !events.columns.every((c) => typeof c === 'string')) return null;
+  const columns = (events.columns as string[]).map((c) => c.slice(0, 200));
+  const rows: Cell[][] = [];
+  for (const row of events.rows.slice(0, MAX_ROWS)) {
+    if (!Array.isArray(row)) return null;
+    rows.push(columns.map((_, i) => cell(row[i])));
+  }
+  const offsets = list(data.offsets).map(int).filter((o): o is number => o !== null);
+
+  const meta = isRecord(data.meta) ? data.meta : {};
+  const summary = isRecord(data.summary) ? data.summary : {};
+  const outcome = isRecord(summary.outcome) ? summary.outcome : null;
+  const kind = summary.control_kind;
+
+  return {
+    format: RESULT_FORMAT,
+    spec,
+    meta: {
+      executed_at: text(meta.executed_at) ?? '',
+      engine_version: text(meta.engine_version),
+      app_version: text(meta.app_version),
+      python_version: text(meta.python_version),
+      pandas_version: text(meta.pandas_version),
+      data_source: text(meta.data_source),
+      data_from: text(meta.data_from),
+      data_through: text(meta.data_through),
+      data_version: text(meta.data_version),
+      symbols_requested: count(meta.symbols_requested),
+      symbols_loaded: count(meta.symbols_loaded),
+      symbols_failed: count(meta.symbols_failed),
+      symbols_short_history: count(meta.symbols_short_history),
+      history_bars_needed: n(meta.history_bars_needed),
+      elapsed_seconds: n(meta.elapsed_seconds),
+    },
+    availability: Object.fromEntries(
+      Object.entries(isRecord(data.availability) ? data.availability : {})
+        .filter(([, v]) => typeof v === 'boolean')
+        .slice(0, 20) as [string, boolean][],
+    ),
+    warnings: list(data.warnings)
+      .filter(isRecord)
+      .map((w) => ({ code: text(w.code) ?? '', message: text(w.message) ?? '' }))
+      .filter((w) => w.message),
+    summary: {
+      events: count(summary.events),
+      unique_symbols: count(summary.unique_symbols),
+      first_event: text(summary.first_event),
+      last_event: text(summary.last_event),
+      median_price: n(summary.median_price),
+      median_avg_traded_value: n(summary.median_avg_traded_value),
+      median_event_value: n(summary.median_event_value),
+      control_samples: count(summary.control_samples),
+      control_kind: kind === 'random' || kind === 'outcome' ? kind : 'none',
+      outcome: outcome ? { met: count(outcome.met), not_met: count(outcome.not_met), unknown: count(outcome.unknown) } : null,
+    },
+    offsets,
+    events: { columns, rows, total: Math.max(count(events.total), rows.length) },
+    stats: list(data.stats)
+      .filter(isRecord)
+      .flatMap((s) => {
+        const offset = int(s.offset);
+        const metric = text(s.metric);
+        return metric && offset !== null ? [{ metric, offset, events: stat(s.events), control: s.control == null ? null : stat(s.control) }] : [];
+      }),
+    characteristics: list(data.characteristics)
+      .filter(isRecord)
+      .flatMap((c) => {
+        const offset = int(c.offset);
+        const label = text(c.label);
+        return label && offset !== null
+          ? [{ index: count(c.index), label, offset, events: share(c.events), control: c.control == null ? null : share(c.control) }]
+          : [];
+      }),
+    forward: list(data.forward)
+      .filter(isRecord)
+      .flatMap((f) => {
+        const window = int(f.window);
+        return window !== null ? [{ window, events: forwardStat(f.events), control: f.control == null ? null : forwardStat(f.control) }] : [];
+      }),
+    histograms: list(data.histograms)
+      .filter(isRecord)
+      .flatMap((h) => {
+        const offset = int(h.offset);
+        const metric = text(h.metric);
+        const edges = numbers(h.edges);
+        const ev = numbers(h.events);
+        const cv = numbers(h.control);
+        if (!metric || offset === null || !edges || edges.length < 2 || !ev || !cv) return [];
+        const bins = edges.length - 1;
+        if (ev.length !== bins || cv.length !== bins) return [];
+        return [{ metric, offset, edges, events: ev.map((x) => Math.max(0, x)), control: cv.map((x) => Math.max(0, x)) }];
+      }),
+    path: band(data.path),
+    control_path: band(data.control_path),
+    failed: list(data.failed)
+      .filter(isRecord)
+      .map((f) => ({ symbol: text(f.symbol) ?? '', error: text(f.error) ?? '' }))
+      .filter((f) => f.symbol)
+      .slice(0, 200),
+  };
+}
+
+/** The few figures a list of runs shows, stored beside the full result. */
+export interface RunSummary {
+  events: number;
+  uniqueSymbols: number;
+  firstEvent: string | null;
+  lastEvent: string | null;
+  dataThrough: string | null;
+}
+
+export function runSummary(result: StudyResultData): RunSummary {
+  return {
+    events: result.summary.events,
+    uniqueSymbols: result.summary.unique_symbols,
+    firstEvent: result.summary.first_event,
+    lastEvent: result.summary.last_event,
+    dataThrough: result.meta.data_through,
+  };
+}
+
+export function parseRunSummary(json: string): RunSummary | null {
+  try {
+    const v: unknown = JSON.parse(json);
+    if (!isRecord(v)) return null;
+    return {
+      events: count(v.events),
+      uniqueSymbols: count(v.uniqueSymbols),
+      firstEvent: text(v.firstEvent),
+      lastEvent: text(v.lastEvent),
+      dataThrough: text(v.dataThrough),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** One event row as a record, by column name. */
+export function eventRecord(result: StudyResultData, row: Cell[]): Record<string, Cell> {
+  return Object.fromEntries(result.events.columns.map((c, i) => [c, row[i] ?? null]));
+}
+
+export function statFor(result: StudyResultData, metric: string, offset: number) {
+  return result.stats.find((s) => s.metric === metric && s.offset === offset) ?? null;
+}

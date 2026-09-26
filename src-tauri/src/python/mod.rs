@@ -67,6 +67,7 @@ pub struct PythonState {
     pub setting_up: AtomicBool,
 }
 
+#[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// A command for a Python tool: no console window flashing up on Windows, no stdin (so

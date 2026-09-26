@@ -12,6 +12,7 @@ mod python_commands;
 mod schema;
 mod secrets;
 mod store;
+mod study_commands;
 mod throttle;
 mod update_commands;
 mod zerodha;
@@ -201,6 +202,15 @@ pub fn run() {
             python_commands::python_stop,
             python_commands::python_research_stats,
             python_commands::python_clear_research_data,
+            study_commands::list_studies,
+            study_commands::save_study,
+            study_commands::delete_study,
+            study_commands::list_study_results,
+            study_commands::get_study_result,
+            study_commands::save_study_result,
+            study_commands::delete_study_result,
+            study_commands::study_run,
+            study_commands::export_study_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the application");

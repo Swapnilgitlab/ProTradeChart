@@ -24,7 +24,7 @@ use crate::store::{preferences, research_bars};
 /// The interpreter the user chose instead of the app's own environment. Empty means none.
 const INTERPRETER_PREF: &str = "python_interpreter";
 
-fn paths(app: &AppHandle) -> Result<Paths, String> {
+pub(crate) fn paths(app: &AppHandle) -> Result<Paths, String> {
     app.path()
         .app_local_data_dir()
         .map(|dir| Paths::under(&dir))
@@ -222,24 +222,62 @@ pub async fn python_run(
     state: State<'_, PythonState>,
     db: State<'_, Database>,
 ) -> Result<(), String> {
+    let paths = paths(&app)?;
+    let script = scripts::path_of(&paths.scripts, &name)?;
+    if !scripts::exists(&paths.scripts, &name) {
+        return Err(format!("There is no script called {name}."));
+    }
+    start_python(
+        &app,
+        &state,
+        &db,
+        StartRun {
+            args: vec![script.into_os_string()],
+            cwd: paths.scripts.clone(),
+            run_id,
+            remove_after: None,
+        },
+    )
+    .await
+}
+
+/// What to start: Python's arguments after `-u`, where, and a file to delete once it has ended.
+pub(crate) struct StartRun {
+    pub args: Vec<OsString>,
+    pub cwd: PathBuf,
+    pub run_id: String,
+    pub remove_after: Option<PathBuf>,
+}
+
+/// Starts Python with the client on its path and the local API's address and token in its
+/// environment, streaming its output as `python-output` and its end as `python-exit`. Shared by
+/// scripts and Studies, which are both only ever started by the user.
+pub(crate) async fn start_python(
+    app: &AppHandle,
+    state: &PythonState,
+    db: &Database,
+    run: StartRun,
+) -> Result<(), String> {
+    let StartRun {
+        args,
+        cwd,
+        run_id,
+        remove_after,
+    } = run;
     if !valid_run_id(&run_id) {
         return Err("That isn't a valid run id.".into());
     }
     if state.runs.lock().map_err(|e| e.to_string())?.contains_key(&run_id) {
         return Err("That run id is already in use.".into());
     }
-    let paths = paths(&app)?;
-    let script = scripts::path_of(&paths.scripts, &name)?;
-    if !scripts::exists(&paths.scripts, &name) {
-        return Err(format!("There is no script called {name}."));
-    }
-    let custom = custom_interpreter(&db);
+    let paths = paths(app)?;
+    let custom = custom_interpreter(db);
     let interpreter = env::python_to_run(&paths, custom.as_deref());
     if !interpreter.exists() {
         return Err("Python isn't set up yet. Choose Set up in the Python panel first.".into());
     }
     client_files::ensure(&paths.lib).map_err(|e| format!("Couldn't prepare the Python client: {e}"))?;
-    let (url, token) = ensure_api(&app, &state).await?;
+    let (url, token) = ensure_api(app, state).await?;
 
     let mut cmd = python::command(&interpreter);
     // Removed first, so the values set below are the ones the script sees.
@@ -247,8 +285,8 @@ pub async fn python_run(
         cmd.env_remove(stale);
     }
     cmd.arg("-u")
-        .arg(&script)
-        .current_dir(&paths.scripts)
+        .args(&args)
+        .current_dir(&cwd)
         .env("PYTHONUNBUFFERED", "1")
         .env("PYTHONUTF8", "1")
         .env("PYTHONIOENCODING", "utf-8")
@@ -286,6 +324,9 @@ pub async fn python_run(
         let result = runner::run_streaming(cmd, Some(stop_rx), emit).await;
         if let Ok(mut runs) = handle.state::<PythonState>().runs.lock() {
             runs.remove(&finished_run);
+        }
+        if let Some(file) = remove_after {
+            let _ = std::fs::remove_file(file);
         }
         let event = match result {
             Ok(Outcome::Exited(code)) => ExitEvent {
