@@ -544,7 +544,7 @@ export function StudyResults({ result, onOpenEvent, onAddToWatchlist }: Props) {
       </section>
 
       <footer className="study-repro muted small">
-        Reproducibility: spec v{spec.version} · engine {meta.engine_version ?? '?'} · app {meta.app_version ?? '?'} · Python {meta.python_version ?? '?'} · pandas{' '}
+        Reproducibility: spec v{spec.version} · engine {meta.engine_version ?? '?'}{meta.engine_build ? ` (${meta.engine_build})` : ''} · app {meta.app_version ?? '?'} · Python {meta.python_version ?? '?'} · pandas{' '}
         {meta.pandas_version ?? '?'} · data {meta.data_from ?? '?'} to {meta.data_through ?? '?'} ({meta.data_version ?? '?'}) · took {meta.elapsed_seconds ?? '?'} s
         {Object.keys(meta.timings).length > 0 && ` (${Object.entries(meta.timings).map(([stage, sec]) => `${stage.replace(/_/g, ' ')} ${sec} s`).join(', ')})`}. Prices
         are used as the data source supplied them (adjusted for corporate actions at source).

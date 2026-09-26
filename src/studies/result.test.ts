@@ -14,6 +14,7 @@ describe('parseStudyResult', () => {
     expect(r.spec.name).toBe('100% Winners');
     expect(r.summary.events).toBe(1);
     expect(r.summary.control_kind).toBe('random');
+    expect(r.meta.engine_build).toBe('fixture0');
     expect(r.offsets).toEqual([-252, -126, -63, -21, 0, 63, 126]);
     expect(r.events.columns.slice(0, 3)).toEqual(['symbol', 'name', 'event_date']);
     const event = eventRecord(r, r.events.rows[0]);

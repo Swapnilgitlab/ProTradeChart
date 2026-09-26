@@ -961,6 +961,7 @@ class ResearchStudy:
         meta = {
             "executed_at": executed.isoformat(timespec="seconds"),
             "engine_version": ENGINE_VERSION,
+            "engine_build": engine_build(),
             "app_version": _app_version(),
             "python_version": platform.python_version(),
             "pandas_version": pd.__version__,
@@ -1128,6 +1129,19 @@ def _show(result: dict) -> None:
     for warning in result["warnings"]:
         print(f"  note: {warning['message']}")
     print("  Historical association only: none of this shows that a characteristic caused a move.")
+
+
+def engine_build() -> str:
+    """A fingerprint of the engine's own code, so a run says exactly which engine it was, and one that
+    ran an out-of-date copy is plain to see."""
+    digest = hashlib.sha256()
+    for module in (__file__, feat.__file__):
+        try:
+            with open(module, "rb") as f:
+                digest.update(f.read().replace(b"\r\n", b"\n"))
+        except OSError:
+            return "unknown"
+    return digest.hexdigest()[:8]
 
 
 def run_spec(spec: dict) -> dict:

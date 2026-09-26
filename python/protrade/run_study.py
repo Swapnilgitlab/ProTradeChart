@@ -11,7 +11,7 @@ import json
 import sys
 
 from . import client
-from .study import SpecError, StudyDataError, run_spec
+from .study import ENGINE_VERSION, SpecError, StudyDataError, engine_build, run_spec
 
 
 def main(argv: list[str]) -> int:
@@ -24,6 +24,7 @@ def main(argv: list[str]) -> int:
     except (OSError, ValueError) as e:
         print(f"Couldn't read the Study Specification: {e}", file=sys.stderr)
         return 2
+    print(f"[engine] protrade {ENGINE_VERSION} ({engine_build()})", flush=True)
     try:
         run_spec(spec)
     except (SpecError, StudyDataError, client.ProTradeError) as e:

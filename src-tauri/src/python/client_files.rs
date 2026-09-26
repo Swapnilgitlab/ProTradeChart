@@ -5,6 +5,7 @@
 //! `PYTHONPATH`. So it is never `pip install`ed: there is nothing to keep in step, and a
 //! script always talks to an API of the version that started it.
 
+use std::borrow::Cow;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -34,10 +35,28 @@ pub const FILES: &[(&str, &str)] = &[
     ("protrade/study.py", include_str!("../../../python/protrade/study.py")),
 ];
 
-/// Writes any file that is missing or differs from the embedded copy. Returns how many it wrote.
+/// A file of the package as this build writes it. A release build writes what it embedded. A debug
+/// build (`npm run tauri:dev`) reads the repository's copy when it can: the dev watcher rebuilds only
+/// for changes under `src-tauri/`, so after a `git pull` that changed only `python/`, an embedded copy
+/// would keep running the old engine until the app was restarted by hand.
+fn contents(relative: &str, embedded: &'static str) -> Cow<'static, str> {
+    #[cfg(debug_assertions)]
+    {
+        let live = Path::new(env!("CARGO_MANIFEST_DIR")).join("../python").join(relative);
+        if let Ok(text) = fs::read_to_string(live) {
+            return Cow::Owned(text);
+        }
+    }
+    let _ = relative;
+    Cow::Borrowed(embedded)
+}
+
+/// Writes any file that is missing or differs from the package's current contents. Returns how many
+/// it wrote.
 pub fn ensure(lib: &Path) -> io::Result<usize> {
     let mut written = 0;
-    for (relative, contents) in FILES {
+    for (relative, embedded) in FILES {
+        let contents = contents(relative, embedded);
         let path = lib.join(relative);
         if fs::read_to_string(&path).is_ok_and(|existing| existing == *contents) {
             continue;
@@ -45,7 +64,7 @@ pub fn ensure(lib: &Path) -> io::Result<usize> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(&path, contents)?;
+        fs::write(&path, contents.as_bytes())?;
         written += 1;
     }
     Ok(written)
@@ -66,8 +85,11 @@ mod tests {
         let dir = temp("write");
         assert_eq!(ensure(&dir).unwrap(), FILES.len());
         assert_eq!(ensure(&dir).unwrap(), 0);
-        for (relative, contents) in FILES {
-            assert_eq!(&fs::read_to_string(dir.join(relative)).unwrap(), contents);
+        for (relative, embedded) in FILES {
+            assert_eq!(
+                fs::read_to_string(dir.join(relative)).unwrap(),
+                *contents(relative, embedded)
+            );
         }
         let _ = fs::remove_dir_all(&dir);
     }
@@ -82,6 +104,22 @@ mod tests {
             .unwrap()
             .contains("ProTradeChart"));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_debug_build_writes_the_repositorys_current_python() {
+        // So `git pull` + Run Study picks up an engine fix without restarting `tauri:dev`.
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../python");
+        for (relative, embedded) in FILES {
+            let on_disk = fs::read_to_string(repo.join(relative)).unwrap();
+            let written = contents(relative, embedded);
+            if cfg!(debug_assertions) {
+                assert_eq!(*written, on_disk, "{relative}");
+            } else {
+                assert_eq!(&*written, *embedded, "{relative}");
+            }
+        }
+        assert_eq!(&*contents("protrade/no_such_module.py", "embedded"), "embedded");
     }
 
     #[test]

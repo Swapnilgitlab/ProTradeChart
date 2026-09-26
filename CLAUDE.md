@@ -111,7 +111,8 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   calendar (`market.rs`), not the age of the last sync: a settled session's bar never changes, and an age-based ttl re-fetched every
   symbol on every run. Keep `plan` pure (`now` is an argument) and don't add a holiday list.
 - `python/protrade/*.py` is embedded in the binary (`python/client_files.rs`, `FILES`); a test fails when a module is added to the
-  folder and not listed. The package is standard library plus pandas, and must work on pandas 2 and 3. Script names refuse
+  folder and not listed. A debug build writes the repository's copy instead (so Python changes need no rebuild under `tauri:dev`);
+  a release build always writes the embedded one. The package is standard library plus pandas, and must work on pandas 2 and 3. Script names refuse
   anything that could shadow a library (`scripts.rs`), because a script's folder is first on Python's import path.
 - A broker symbol is stored and compared in its long form (`zerodha:NSE:HFCL`) but *shown* short (`HFCL`) — never render
   `symbol` or `splitSymbol(...).ticker` to the user; use `displayTicker`. A chart is given the short form (`chartSymbol`), so

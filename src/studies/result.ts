@@ -42,6 +42,8 @@ export interface PathBand {
 export interface StudyMeta {
   executed_at: string;
   engine_version: string | null;
+  /** A fingerprint of the engine's code that produced this result. */
+  engine_build: string | null;
   app_version: string | null;
   python_version: string | null;
   pandas_version: string | null;
@@ -180,6 +182,7 @@ export function parseStudyResult(data: unknown): StudyResultData | null {
     meta: {
       executed_at: text(meta.executed_at) ?? '',
       engine_version: text(meta.engine_version),
+      engine_build: text(meta.engine_build),
       app_version: text(meta.app_version),
       python_version: text(meta.python_version),
       pandas_version: text(meta.pandas_version),
