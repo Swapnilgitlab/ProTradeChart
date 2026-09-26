@@ -1,5 +1,6 @@
-//! Tauri commands for the AI Study Builder: the user's Anthropic API key, and the two things it is
-//! used for — drafting or revising a Study Specification, and explaining a stored result.
+//! Tauri commands for the AI Study Builder: the user's Anthropic API key, and what it is used for —
+//! drafting or revising a Study Specification, explaining a stored result, and the research agent's
+//! plans and syntheses.
 //!
 //! The key is a secret like a broker's: it is saved through [`Secrets::set`], read only here, and
 //! never returned to the webview or logged. The commands send only what the Studies tab passes in
@@ -8,11 +9,12 @@
 
 use serde::Serialize;
 use serde_json::Value;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
-use crate::ai::client::{ClaudeClient, Reply};
-use crate::ai::prompts::{self, DraftRequest, ExplainRequest};
+use crate::ai::client::{ClaudeClient, Progress, Reply};
+use crate::ai::prompts::{self, DraftRequest, ExplainRequest, PlanRequest, SynthesisRequest};
 use crate::db::Database;
+use crate::pyapi::valid_run_id;
 use crate::secrets::Secrets;
 
 /// Where the key is kept, in `Secrets`' terms.
@@ -91,9 +93,47 @@ fn answer(reply: Reply) -> Result<AiAnswer, String> {
     })
 }
 
-async fn ask(db: &Database, secrets: &Secrets, client: &ClaudeClient, body: Value) -> Result<AiAnswer, String> {
+async fn ask(
+    db: &Database,
+    secrets: &Secrets,
+    client: &ClaudeClient,
+    body: Value,
+    on_progress: &mut (dyn FnMut(Progress) + Send),
+) -> Result<AiAnswer, String> {
     let key = saved_key(db, secrets)?;
-    answer(client.message(&key, &body).await.map_err(|e| e.to_string())?)
+    answer(
+        client
+            .message(&key, &body, on_progress)
+            .await
+            .map_err(|e| e.to_string())?,
+    )
+}
+
+/// What the Studies tab hears while an answer streams in (`ai-progress`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProgressEvent<'a> {
+    request_id: &'a str,
+    #[serde(flatten)]
+    progress: Progress,
+}
+
+/// Sends a request, telling the webview how it is going under `request_id`.
+async fn ask_with_progress(
+    app: &AppHandle,
+    request_id: &str,
+    db: &Database,
+    secrets: &Secrets,
+    client: &ClaudeClient,
+    body: Value,
+) -> Result<AiAnswer, String> {
+    if !valid_run_id(request_id) {
+        return Err("A request id is short and plain.".into());
+    }
+    let mut report = |progress: Progress| {
+        let _ = app.emit("ai-progress", ProgressEvent { request_id, progress });
+    };
+    ask(db, secrets, client, body, &mut report).await
 }
 
 #[tauri::command]
@@ -123,24 +163,56 @@ pub fn ai_delete_key(db: State<'_, Database>, secrets: State<'_, Secrets>) -> Re
 #[tauri::command]
 pub async fn ai_draft_study(
     request: DraftRequest,
+    request_id: String,
+    app: AppHandle,
     db: State<'_, Database>,
     secrets: State<'_, Secrets>,
     client: State<'_, ClaudeClient>,
 ) -> Result<AiAnswer, String> {
     let body = prompts::draft_body(&request)?;
-    ask(&db, &secrets, &client, body).await
+    ask_with_progress(&app, &request_id, &db, &secrets, &client, body).await
 }
 
 /// A stored result's summary → a plain-language explanation.
 #[tauri::command]
 pub async fn ai_explain_result(
     request: ExplainRequest,
+    request_id: String,
+    app: AppHandle,
     db: State<'_, Database>,
     secrets: State<'_, Secrets>,
     client: State<'_, ClaudeClient>,
 ) -> Result<AiAnswer, String> {
     let body = prompts::explain_body(&request)?;
-    ask(&db, &secrets, &client, body).await
+    ask_with_progress(&app, &request_id, &db, &secrets, &client, body).await
+}
+
+/// A research question → a plan of Studies for the user to approve. Nothing here runs one.
+#[tauri::command]
+pub async fn ai_plan_research(
+    request: PlanRequest,
+    request_id: String,
+    app: AppHandle,
+    db: State<'_, Database>,
+    secrets: State<'_, Secrets>,
+    client: State<'_, ClaudeClient>,
+) -> Result<AiAnswer, String> {
+    let body = prompts::plan_body(&request)?;
+    ask_with_progress(&app, &request_id, &db, &secrets, &client, body).await
+}
+
+/// A finished round's result summaries → a synthesis across them, with follow-up questions.
+#[tauri::command]
+pub async fn ai_synthesize_research(
+    request: SynthesisRequest,
+    request_id: String,
+    app: AppHandle,
+    db: State<'_, Database>,
+    secrets: State<'_, Secrets>,
+    client: State<'_, ClaudeClient>,
+) -> Result<AiAnswer, String> {
+    let body = prompts::synthesis_body(&request)?;
+    ask_with_progress(&app, &request_id, &db, &secrets, &client, body).await
 }
 
 #[cfg(test)]
@@ -243,7 +315,7 @@ mod tests {
         let (db, secrets) = setup();
         let (base, count) = anthropic(200, json!({})).await;
         let client = ClaudeClient::with_base(reqwest::Client::new(), &base);
-        let err = ask(&db, &secrets, &client, json!({})).await.unwrap_err();
+        let err = ask(&db, &secrets, &client, json!({}), &mut |_| {}).await.unwrap_err();
         assert!(err.contains("API key"), "{err}");
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
@@ -262,7 +334,7 @@ mod tests {
         )
         .await;
         let client = ClaudeClient::with_base(reqwest::Client::new(), &base);
-        let got = ask(&db, &secrets, &client, json!({})).await.unwrap();
+        let got = ask(&db, &secrets, &client, json!({}), &mut |_| {}).await.unwrap();
         assert_eq!(got.answer["reply"], "Done.");
         assert_eq!(got.model, "claude-opus-5");
 
@@ -272,7 +344,7 @@ mod tests {
         )
         .await;
         let client = ClaudeClient::with_base(reqwest::Client::new(), &base);
-        assert!(ask(&db, &secrets, &client, json!({})).await.is_err());
+        assert!(ask(&db, &secrets, &client, json!({}), &mut |_| {}).await.is_err());
     }
 
     #[test]

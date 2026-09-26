@@ -68,6 +68,10 @@ project uses [Semantic Versioning](https://semver.org).
   into the builder when you choose; nothing runs until you press Run Study. **Explain with Claude** reads a result back in plain
   words, as historical association. The key is checked with Anthropic and kept in the OS keychain; requests are made by the app's
   backend, not the web view.
+- **Studies: research with Claude.** Ask a research question and Claude plans up to four complementary Studies; approve the
+  ones to run and they run one after another, then Claude writes a synthesis across the results — what they agree on, where the
+  evidence is thin — and suggests follow-up questions, each needing its own approval. Every round is recorded in a Research
+  Notebook. Claude's answers now stream, so long plans don't time out, and every Claude button shows its progress.
 
 ### Fixed
 

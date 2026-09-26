@@ -342,6 +342,13 @@ A Study measures what stocks looked like around historical events. Open **Studie
    question, the spec and a summary of the result (never the events or prices) are sent to Anthropic under your account and
    billed to it.
 
+8. **Research with Claude (optional).** Ask a bigger question — “what do stocks look like before they double, and does it differ
+   for those that keep going?” — and Claude proposes up to four Studies that together answer it, each with its purpose and a
+   data check. Tick the ones to run and press **Run**: they run one after another (**Stop** skips the rest). Then **Write the
+   synthesis** has Claude read across the results, say what they agree on and where the evidence is thin, and suggest follow-up
+   questions, each of which becomes a new plan for you to approve. The question, the plan, the Studies, the results and the
+   synthesis are all kept in a Research Notebook.
+
 - **Every event, not just today's.** An event is each date the conditions *first* hold, across the whole history, with a
   cooldown so one move is one event. Filters are judged at the time, with no later data.
 - **Association, not causation.** The results describe what winners looked like; they don't show that any trait caused a move.

@@ -283,3 +283,10 @@ export function explainSummary(result: StudyResultData): Record<string, unknown>
     })),
   };
 }
+
+/** What a streaming answer is doing, for a busy button: "Thinking…", "Writing… 2.1k characters". */
+export function progressText(progress: { stage: 'thinking' | 'writing'; chars: number } | null): string {
+  if (!progress || progress.stage === 'thinking') return 'Thinking…';
+  const chars = progress.chars < 1000 ? `${progress.chars}` : `${(progress.chars / 1000).toFixed(1)}k`;
+  return `Writing… ${chars} characters`;
+}

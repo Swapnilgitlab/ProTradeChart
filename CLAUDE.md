@@ -155,6 +155,11 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   prompts (`ai/prompts.rs`) forbid substituting unavailable data; `SPEC_SCHEMA` / `specReference` (`studies/assistant.ts`)
   describe the spec and must change with it (a test checks the schema against every template). See "AI Study Builder" in
   `docs/ARCHITECTURE.md`.
+- The research agent (`ResearchView.tsx`, `studies/research.ts`) never runs a Study the user didn't approve: only the **Run N
+  approved Studies** press queues them, exactly the ticked ones, one at a time through `useStudyRunner` (shared with Run Study;
+  don't start runs any other way). A synthesis is a separate press, drawn as text; follow-ups are *questions* that become a new
+  plan needing a new approval. Claude's answers stream (`SseAccumulator`): judge `stop_reason` at the end, and drop text written
+  before a `fallback` block.
 - **Yahoo Finance is not a data source, and shouldn't come back without the owner's say-so.** It was removed entirely: its
   provider, backend client and rate limiter, its terms/opt-in UI, and its `yahoo:` symbols. Symbols saved from it stay in
   users' watchlists, layouts and alerts but can't load: `isSupportedSymbol` (`lib/symbols.ts`) recognises them, and

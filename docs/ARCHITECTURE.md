@@ -568,6 +568,35 @@ it never runs anything.
   text, labelled as Claude's and as association, and not stored.
 - What leaves the machine is said where the key is entered: the question, the spec and, for an explanation, that summary, sent
   under the user's account and billed to it.
+- **Answers stream.** `ClaudeClient::message` sets `"stream": true` and reads the server-sent events with `Response::chunk()`
+  (no extra reqwest feature), giving up only when the stream goes quiet for 120 s (`IDLE_TIMEOUT`; Anthropic pings while the
+  model thinks) rather than after a fixed total, so `max_tokens` can be 32 000. `SseAccumulator` (pure, tested with frames split
+  at every byte) keeps `text_delta`s only; a `fallback` block discards what the declining model had written (the non-streamed
+  `parse_reply` does the same with content blocks); `stop_reason` is judged at the end as before, and a stream that ends without
+  one is an error. Every command takes a `requestId` and emits `ai-progress {requestId, stage, chars}` (at most 4 a second),
+  which `useAiRequest` turns into "Thinking…" / "Writing… 2.1k characters".
+
+#### Research agent
+
+*Research with Claude* in the Studies sidebar (`ResearchView.tsx`, pure logic in `studies/research.ts`) runs rounds of
+question → plan → approval → runs → synthesis → follow-up questions.
+
+- **Plan** (`ai_plan_research`): one to four complementary Studies, each with its purpose, assumptions and what it can't study,
+  plus what the question asks for that no Study can. `parsePlan` validates each spec as `parseDraft` does and makes names unique
+  within the plan. Each card shows `interpret(spec)` and its readiness against this machine (`checkReadiness` with the universe's
+  `estimateUniverse`); a Study that isn't ready can't be approved (open it in the builder instead).
+- **Approval is the only way anything runs.** Studies start *proposed*; ticking makes them *approved*; the one **Run N approved
+  Studies** press (which says how long the data will take) moves exactly those to *queued* (`queue` in `research.ts`, a pure
+  reducer). The runs go one at a time through `useStudyRunner` — the hook Run Study uses too, extracted from `StudiesPanel` —
+  because the broker's pace is shared. A failure moves on to the next; **Stop** stops the current run and skips the rest.
+- **Everything is recorded as it happens** in a Research Notebook (created on the first Run, "Research: <question>"): each
+  round's question and plan in its notes, each approved Study saved and added with its purpose as the entry's note, each result
+  added as it lands (so a notebook keeps it from being pruned).
+- **Synthesis** (`ai_synthesize_research`) is its own press, as it is a billed call. It is given each finished Study's purpose,
+  spec and `explainSummary` (never events or prices) and returns paragraphs, a note per Study (matched by index; others are
+  dropped), caveats and up to five follow-up *questions*. It is appended to the notebook's notes and the per-Study notes to the
+  result entries — text only, labelled as association.
+- **A follow-up** is a new plan with the synthesis as context, and needs its own approval; its Studies join the same notebook.
 
 ## Themes
 

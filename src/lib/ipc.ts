@@ -675,8 +675,42 @@ export const aiSetKey = (key: string) => invoke<AiKeyStatus>('ai_set_key', { key
 
 export const aiDeleteKey = () => invoke<void>('ai_delete_key');
 
-/** Sends a question (or a revision of `currentSpec`) to Claude. Billed to the user's Anthropic account. */
-export const aiDraftStudy = (request: AiDraftRequest) => invoke<AiAnswer>('ai_draft_study', { request });
+/** How a streamed answer is going (the `ai-progress` event), for the request with `requestId`. */
+export interface AiProgressEvent {
+  requestId: string;
+  stage: 'thinking' | 'writing';
+  /** Characters of the answer so far. */
+  chars: number;
+}
 
-/** Asks Claude to explain a stored result's summary. Billed to the user's Anthropic account. */
-export const aiExplainResult = (request: AiExplainRequest) => invoke<AiAnswer>('ai_explain_result', { request });
+/** Mirrors `PlanRequest` in `ai/prompts.rs`. */
+export interface AiPlanRequest {
+  question: string;
+  reference: string;
+  specSchema: object;
+  today: string;
+  /** The previous round's synthesis, when planning a follow-up. */
+  context: string | null;
+}
+
+/** Mirrors `SynthesisRequest` in `ai/prompts.rs`. */
+export interface AiSynthesisRequest {
+  question: string;
+  studies: { purpose: string; spec: object; summary: object; warnings: string[] }[];
+}
+
+// Each call below is billed to the user's Anthropic account, and reports progress as `ai-progress`
+// events carrying its `requestId`.
+
+/** Sends a question (or a revision of `currentSpec`) to Claude. */
+export const aiDraftStudy = (request: AiDraftRequest, requestId: string) => invoke<AiAnswer>('ai_draft_study', { request, requestId });
+
+/** Asks Claude to explain a stored result's summary. */
+export const aiExplainResult = (request: AiExplainRequest, requestId: string) => invoke<AiAnswer>('ai_explain_result', { request, requestId });
+
+/** Asks Claude for a plan of Studies answering a research question. Runs nothing. */
+export const aiPlanResearch = (request: AiPlanRequest, requestId: string) => invoke<AiAnswer>('ai_plan_research', { request, requestId });
+
+/** Asks Claude to synthesise a finished round's results. */
+export const aiSynthesizeResearch = (request: AiSynthesisRequest, requestId: string) =>
+  invoke<AiAnswer>('ai_synthesize_research', { request, requestId });

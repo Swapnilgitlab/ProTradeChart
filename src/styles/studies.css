@@ -769,3 +769,117 @@
     animation: none;
   }
 }
+
+/* ---- Research with Claude --------------------------------------------------------------- */
+
+.studies-research-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.studies-research-entry svg {
+  color: var(--accent);
+}
+.study-research {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 980px;
+  padding: 12px 16px 24px;
+}
+.study-research > p {
+  margin: 0;
+}
+.study-research-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.study-research-head h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 15px;
+}
+.study-research-head h2 svg {
+  color: var(--accent);
+}
+.study-research-round {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+.study-research-round > p {
+  margin: 0;
+}
+.study-research-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.study-research-study {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+.study-research-study p {
+  margin: 0;
+}
+.study-research-study ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.study-research-study.approved,
+.study-research-study.queued,
+.study-research-study.running {
+  border-color: var(--accent);
+}
+.study-research-study-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.study-research-approve,
+.study-research-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.study-research-approve {
+  cursor: pointer;
+}
+.study-research-status.done {
+  color: var(--profit);
+}
+.study-research-status.failed {
+  color: var(--loss);
+}
+.study-research-status.queued,
+.study-research-status.skipped {
+  color: var(--text-muted);
+}
+.study-research-synthesis p {
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+.study-research-follow {
+  list-style: none;
+  padding-left: 0 !important;
+}
+.study-research-follow li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+}

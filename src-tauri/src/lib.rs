@@ -233,6 +233,8 @@ pub fn run() {
             ai_commands::ai_delete_key,
             ai_commands::ai_draft_study,
             ai_commands::ai_explain_result,
+            ai_commands::ai_plan_research,
+            ai_commands::ai_synthesize_research,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the application");

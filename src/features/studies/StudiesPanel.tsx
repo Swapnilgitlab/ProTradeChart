@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, BookPlus, ChevronDown, CirclePlay, Code2, Copy, Download, FilePlus2, GitCompare, Pencil, Plus, Save, Square, Trash2, X } from 'lucide-react';
+import { BookOpen, BookPlus, ChevronDown, CirclePlay, Code2, Copy, Download, FilePlus2, GitCompare, Pencil, Plus, Save, Sparkles, Square, Trash2, X } from 'lucide-react';
 import type { StudyEvent } from '../../chart/studyEvent';
 import { useDismiss } from '../../components/useDismiss';
 import { useToast } from '../../components/Toasts';
@@ -11,17 +11,13 @@ import {
   exportStudyFile,
   addNotebookItem,
   getStudyResult,
-  getWatchlist,
   listNotebooks,
   saveNotebook,
   listStudies,
   listStudyResults,
   listWatchlists,
   pythonEnvStatus,
-  runStudy,
   saveStudy,
-  stopPythonRun,
-  studyEstimate,
   type NotebookItemKind,
   type NotebookSummary,
   type PythonEnvStatus,
@@ -29,11 +25,9 @@ import {
   type StudyResultInfo,
   type StudyRow,
 } from '../../lib/ipc';
-import { onPythonExit, onPythonOutput, onPythonResult } from '../../python/events';
 import { formatElapsed } from '../../python/format';
 import { generatePython, scriptName } from '../../studies/codegen';
 import { eventsCsv, metricsCsv, reportMarkdown, resultJson, specJson, stocksCsv } from '../../studies/exports';
-import { parseProgress, type StudyProgress } from '../../studies/progress';
 import { applyFix, checkReadiness, loadFrom, type ReadinessFix, type UniverseEstimate } from '../../studies/readiness';
 import { parseRunSummary, parseStudyResult, type StudyResultData } from '../../studies/result';
 import { normalizeSpec, specProblem, type StudySpec } from '../../studies/spec';
@@ -44,9 +38,11 @@ import { AssistantPanel, ResultExplainer } from './AssistantPanel';
 import { CompareView, type ComparedRun } from './CompareView';
 import { NotebookView } from './NotebookView';
 import { PythonDialog } from './PythonDialog';
-import { storeStudyRun } from './storeRun';
+import { ResearchView } from './ResearchView';
 import { StudyBuilder } from './StudyBuilder';
 import { StudyResults } from './StudyResults';
+import { estimateUniverse } from './estimate';
+import { useStudyRunner } from './useStudyRunner';
 
 interface Props {
   /** Whether the tab is showing. Nothing is loaded until it first is. */
@@ -63,15 +59,6 @@ interface Current {
   /** Whether it is one of My Studies. */
   isSaved: boolean;
 }
-
-interface ActiveRun {
-  id: string;
-  startedAt: number;
-  gotResult: boolean;
-}
-
-/** Lines of console output kept for a run, to show what went wrong if it fails. */
-const LOG_LINES = 60;
 
 function fresh(templateId = 'winners_100'): Current {
   const spec = fromTemplate(templateId);
@@ -98,7 +85,9 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
   const [estimate, setEstimate] = useState<UniverseEstimate | null>(null);
   const [env, setEnv] = useState<PythonEnvStatus | null>(null);
   const [current, setCurrent] = useState<Current>(() => fresh());
-  const [view, setView] = useState<'build' | 'results' | 'compare' | 'notebook'>('build');
+  const [view, setView] = useState<'build' | 'results' | 'compare' | 'notebook' | 'research'>('build');
+  // The research view stays mounted once opened, so a session survives a look at a result.
+  const [researchOpened, setResearchOpened] = useState(false);
   const [notebooks, setNotebooks] = useState<NotebookSummary[]>([]);
   const [openNotebook, setOpenNotebook] = useState<string | null>(null);
   /** The first of two results picked to compare, waiting for the second. */
@@ -108,20 +97,17 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
   const notebookRef = useRef<HTMLDivElement>(null);
   useDismiss(notebookRef, notebookMenu, () => setNotebookMenu(false));
   const [result, setResult] = useState<{ id: string | null; data: StudyResultData } | null>(null);
-  const [run, setRun] = useState<ActiveRun | null>(null);
-  const [progress, setProgress] = useState<StudyProgress | null>(null);
-  const [log, setLog] = useState<{ text: string; error: boolean }[]>([]);
   const [failed, setFailed] = useState<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
   const [exportOpen, setExportOpen] = useState(false);
   const [pythonOpen, setPythonOpen] = useState(false);
   const [adding, setAdding] = useState<string[] | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   useDismiss(exportRef, exportOpen, () => setExportOpen(false));
   const loaded = useRef(false);
-  const runRef = useRef<ActiveRun | null>(null);
-  const currentRef = useRef(current);
-  currentRef.current = current;
+  // `refresh` is defined below; a finished run re-reads the lists through this.
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
+  const runner = useStudyRunner({ onStored: () => void refreshRef.current(), onStoreError: (message) => toast(message, 'error') });
+  const { run, progress, log, now } = runner;
 
   const problem = useMemo(() => specProblem(current.spec), [current.spec]);
   const dirty = savedForm(current.spec) !== current.baseline;
@@ -141,22 +127,7 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
     const timer = window.setTimeout(async () => {
       try {
         const { universe: u, from } = JSON.parse(estimateKey) as { universe: StudySpec['universe']; from: string };
-        let symbols: string[] | null = null;
-        if (u.source === 'symbols') symbols = u.symbols;
-        if (u.source === 'watchlist') {
-          const row = watchlistRows.find((w) => w.name.toLowerCase() === (u.watchlist ?? '').toLowerCase());
-          if (!row) return;
-          symbols = (await getWatchlist(row.id)).items.map((i) => i.symbol).filter((sym) => /^(zerodha|dhan):/.test(sym));
-        }
-        const result = await studyEstimate({
-          provider: u.provider,
-          exchanges: u.exchanges,
-          series: u.series,
-          symbols,
-          // The first bar loaded, at midnight IST, as the engine asks for it.
-          fromMs: Date.parse(`${from}T00:00:00+05:30`),
-          maxSymbols: u.max_symbols,
-        });
+        const result = await estimateUniverse(u, from, watchlistRows);
         if (!cancelled) setEstimate(result);
       } catch {
         if (!cancelled) setEstimate(null);
@@ -181,6 +152,20 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
     });
   }, [problem, current.spec, providers, env, watchlists, estimate]);
 
+  /** Readiness of any spec against what this machine has: the research view's planned Studies. */
+  const readinessOf = useCallback(
+    (spec: StudySpec, estimate: UniverseEstimate | null) =>
+      checkReadiness(spec, {
+        providers: providers.map((p) => ({ id: p.id, usable: p.enabled && p.configured })),
+        pythonReady: env?.state === 'ready',
+        pythonMessage: env?.message ?? 'Looking for Python…',
+        watchlists,
+        today: new Date().toISOString().slice(0, 10),
+        estimate,
+      }),
+    [providers, env, watchlists],
+  );
+
   const refresh = useCallback(async () => {
     try {
       const [s, r, n] = await Promise.all([listStudies(), listStudyResults(null), listNotebooks()]);
@@ -191,6 +176,7 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
       toast(errorMessage(err), 'error');
     }
   }, [toast]);
+  refreshRef.current = refresh;
 
   useEffect(() => {
     if (!visible || loaded.current) return;
@@ -208,57 +194,6 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
-  useEffect(() => {
-    if (!run) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 500);
-    return () => window.clearInterval(timer);
-  }, [run]);
-
-  // ---- What the engine reports -----------------------------------------------------------
-
-  useEffect(() => {
-    const stops = [
-      onPythonOutput((e) => {
-        if (e.runId !== runRef.current?.id) return;
-        const step = parseProgress(e.text);
-        if (step) {
-          setProgress(step);
-          return;
-        }
-        if (e.text.trim()) setLog((lines) => [...lines, { text: e.text, error: e.stream === 'stderr' }].slice(-LOG_LINES));
-      }),
-      onPythonResult((e) => {
-        const active = runRef.current;
-        if (!active || e.runId !== active.id) return;
-        if (e.kind !== 'study') return;
-        const data = parseStudyResult(e.data);
-        if (!data) {
-          setFailed('The engine sent a result this version of the app can’t read.');
-          return;
-        }
-        active.gotResult = true;
-        setResult({ id: null, data });
-        setView('results');
-        storeStudyRun(data, currentRef.current.id)
-          .then((id) => {
-            setResult((r) => (r && r.data === data ? { ...r, id } : r));
-            void refresh();
-          })
-          .catch((err) => toast(`The results are shown but couldn’t be stored: ${errorMessage(err)}`, 'error'));
-      }),
-      onPythonExit((e) => {
-        const active = runRef.current;
-        if (!active || e.runId !== active.id) return;
-        runRef.current = null;
-        setRun(null);
-        if (e.stopped) setFailed('Stopped.');
-        else if (e.error) setFailed(e.error);
-        else if (e.code !== 0 || !active.gotResult) setFailed('The Study stopped before it finished. What it said is below.');
-      }),
-    ];
-    return () => stops.forEach((stop) => stop());
-  }, [refresh, toast]);
-
   // ---- Actions ---------------------------------------------------------------------------
 
   /** Asks before edits are thrown away; an untouched template or saved Study goes without asking. */
@@ -268,23 +203,17 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
   }, [dirty, current.spec.name]);
 
   const startRun = useCallback(async () => {
-    if (runRef.current || problem || !readiness?.ready) return;
-    const spec = normalizeSpec(current.spec);
-    const started: ActiveRun = { id: crypto.randomUUID(), startedAt: Date.now(), gotResult: false };
-    runRef.current = started;
-    setRun(started);
-    setNow(started.startedAt);
-    setProgress({ percent: 0, stage: 'Starting' });
-    setLog([]);
+    if (runner.run || problem || !readiness?.ready) return;
     setFailed(null);
-    try {
-      await runStudy(JSON.stringify(spec), started.id);
-    } catch (err) {
-      runRef.current = null;
-      setRun(null);
-      setFailed(errorMessage(err));
-    }
-  }, [current.spec, problem, readiness]);
+    const outcome = await runner.start(normalizeSpec(current.spec), current.id, {
+      onResult: (data) => {
+        setResult({ id: null, data });
+        setView('results');
+      },
+      onStored: (data, id) => setResult((r) => (r && r.data === data ? { ...r, id } : r)),
+    });
+    if (outcome.error) setFailed(outcome.error);
+  }, [current.spec, current.id, problem, readiness, runner]);
 
   const save = useCallback(async () => {
     if (problem) {
@@ -329,7 +258,7 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
   };
 
   // The builder is what shows whenever the chosen view has nothing to show.
-  const builderShown = !((view === 'compare' && comparing) || (view === 'notebook' && openNotebook) || (view === 'results' && result));
+  const builderShown = !((view === 'compare' && comparing) || (view === 'notebook' && openNotebook) || (view === 'results' && result) || view === 'research');
 
   /** A proposal from Claude, opened as a new Study that isn't saved until Save is pressed. */
   const openProposal = async (spec: StudySpec) => {
@@ -394,6 +323,21 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
       toast(errorMessage(err), 'error');
       return null;
     }
+  };
+
+  const openRunById = async (id: string) => {
+    try {
+      const row = await getStudyResult(id);
+      if (row) await openRun(row);
+      else toast('That result is no longer stored.', 'info');
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    }
+  };
+
+  const showResearch = () => {
+    setResearchOpened(true);
+    setView('research');
   };
 
   const showNotebook = (id: string) => {
@@ -489,6 +433,12 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
           </button>
         </div>
         <div className="python-side-list studies-side-list">
+          <div className={`python-script${view === 'research' ? ' active' : ''}`}>
+            <button type="button" className="python-script-name studies-research-entry" onClick={showResearch} title="Plan and run several Studies with Claude">
+              <Sparkles size={13} />
+              Research with Claude
+            </button>
+          </div>
           {studies.length === 0 && <div className="python-side-empty small muted">No saved Studies yet. Start from a template below.</div>}
           {studies.map((s) => (
             <div key={s.id} className={`python-script${s.id === current.id ? ' active' : ''}`}>
@@ -674,7 +624,7 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
             )}
           </div>
           {running ? (
-            <button type="button" className="btn pine-btn python-stop" onClick={() => run && stopPythonRun(run.id).catch(() => {})}>
+            <button type="button" className="btn pine-btn python-stop" onClick={runner.stop}>
               <Square size={13} />
               Stop
             </button>
@@ -691,7 +641,10 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
             {running && progress && (
               <>
                 <div className="study-progress-label">
-                  <span>{progress.stage}</span>
+                  <span>
+                    {run && run.label !== current.spec.name && <strong>{run.label} · </strong>}
+                    {progress.stage}
+                  </span>
                   <span className="muted">
                     {progress.percent}% · {formatElapsed(now - (run?.startedAt ?? now))}
                   </span>
@@ -738,7 +691,23 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
               say={toast}
             />
           </div>
-          {view === 'compare' && comparing ? (
+          {researchOpened && (
+            <div hidden={view !== 'research'}>
+              <ResearchView
+                startRun={runner.start}
+                stopRun={runner.stop}
+                busyRunning={run !== null}
+                readinessOf={readinessOf}
+                watchlistRows={watchlistRows}
+                onOpenResult={(id) => void openRunById(id)}
+                onOpenInBuilder={(spec) => void openProposal(spec)}
+                onOpenNotebook={showNotebook}
+                onChanged={() => void refresh()}
+                say={toast}
+              />
+            </div>
+          )}
+          {view === 'research' ? null : view === 'compare' && comparing ? (
             <CompareView
               a={comparing.a}
               b={comparing.b}

@@ -3,10 +3,11 @@ import { AlertTriangle, KeyRound, Loader2, MessageSquarePlus, Send, Sparkles, X 
 import { Dialog } from '../../components/Dialog';
 import { confirmDelete } from '../../lib/dialogs';
 import { aiDeleteKey, aiDraftStudy, aiExplainResult, aiKeyStatus, aiSetKey, errorMessage, type AiKeyStatus } from '../../lib/ipc';
-import { explainSummary, parseDraft, parseExplanation, SPEC_SCHEMA, specReference, type Draft, type Explanation, type Turn } from '../../studies/assistant';
+import { explainSummary, parseDraft, parseExplanation, progressText, SPEC_SCHEMA, specReference, type Draft, type Explanation, type Turn } from '../../studies/assistant';
 import { specChanges } from '../../studies/compare';
 import type { StudyResultData } from '../../studies/result';
 import { interpret, type StudySpec } from '../../studies/spec';
+import { useAiRequest } from './useAiRequest';
 
 type Say = (text: string, kind: 'success' | 'error' | 'info') => void;
 
@@ -16,7 +17,7 @@ const today = () => {
 };
 
 /** The key's status, re-read when the dialog changes it. */
-function useKeyStatus(): [AiKeyStatus | null, () => void] {
+export function useKeyStatus(): [AiKeyStatus | null, () => void] {
   const [status, setStatus] = useState<AiKeyStatus | null>(null);
   const reload = useCallback(() => {
     aiKeyStatus()
@@ -27,7 +28,7 @@ function useKeyStatus(): [AiKeyStatus | null, () => void] {
   return [status, reload];
 }
 
-const PRIVACY =
+export const PRIVACY =
   'Your question, the Study Specification and, when you ask for an explanation, a summary of the result (counts, medians and tests — not the ' +
   'events or prices) are sent to Anthropic under your account, and each request is billed to it.';
 
@@ -211,7 +212,8 @@ export function AssistantPanel({ current, onUseNew, onUseRevision, say }: Props)
   const [mode, setMode] = useState<'new' | 'change'>('new');
   const [question, setQuestion] = useState('');
   const [conversation, setConversation] = useState<Exchange[]>([]);
-  const [busy, setBusy] = useState(false);
+  const ai = useAiRequest();
+  const busy = ai.busy;
 
   const restart = (next: 'new' | 'change' = mode) => {
     setMode(next);
@@ -234,22 +236,14 @@ export function AssistantPanel({ current, onUseNew, onUseRevision, say }: Props)
         { role: 'user' as const, text: e.question },
         { role: 'assistant' as const, text: e.raw! },
       ]);
-    setBusy(true);
     setQuestion('');
     try {
-      const reply = await aiDraftStudy({
-        question: q,
-        reference: specReference(),
-        specSchema: SPEC_SCHEMA,
-        currentSpec: base,
-        history,
-        today: today(),
-      });
+      const reply = await ai.call((id) =>
+        aiDraftStudy({ question: q, reference: specReference(), specSchema: SPEC_SCHEMA, currentSpec: base, history, today: today() }, id),
+      );
       setConversation((c) => [...c, { question: q, base, draft: parseDraft(reply.answer), raw: JSON.stringify(reply.answer), error: null, model: reply.model }]);
     } catch (err) {
       setConversation((c) => [...c, { question: q, base, draft: null, raw: null, error: errorMessage(err), model: null }]);
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -330,7 +324,7 @@ export function AssistantPanel({ current, onUseNew, onUseRevision, say }: Props)
             />
             <button type="button" className="btn btn-primary pine-btn" disabled={busy || !question.trim()} onClick={() => void ask()} title="Ask (Ctrl+Enter)">
               {busy ? <Loader2 size={14} className="spin" /> : <Send size={14} />}
-              {busy ? 'Thinking…' : 'Ask'}
+              {busy ? progressText(ai.progress) : 'Ask'}
             </button>
           </div>
           <p className="muted small">
@@ -349,7 +343,8 @@ export function AssistantPanel({ current, onUseNew, onUseRevision, say }: Props)
 export function ResultExplainer({ result, say }: { result: StudyResultData; say: Say }) {
   const [status, reloadStatus] = useKeyStatus();
   const [keyDialog, setKeyDialog] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const ai = useAiRequest();
+  const busy = ai.busy;
   const [explanation, setExplanation] = useState<Explanation | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -358,21 +353,16 @@ export function ResultExplainer({ result, say }: { result: StudyResultData; say:
       setKeyDialog(true);
       return;
     }
-    setBusy(true);
     setError(null);
     try {
-      const reply = await aiExplainResult({
-        spec: result.spec,
-        summary: explainSummary(result),
-        warnings: result.warnings.map((w) => w.message),
-      });
+      const reply = await ai.call((id) =>
+        aiExplainResult({ spec: result.spec, summary: explainSummary(result), warnings: result.warnings.map((w) => w.message) }, id),
+      );
       const parsed = parseExplanation(reply.answer);
       if (!parsed) throw new Error('Claude’s explanation was empty.');
       setExplanation(parsed);
     } catch (err) {
       setError(errorMessage(err));
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -382,7 +372,7 @@ export function ResultExplainer({ result, say }: { result: StudyResultData; say:
         <div className="study-ai-actions">
           <button type="button" className="btn pine-btn" disabled={busy} onClick={() => void explain()} title="Send this result’s summary to Claude for a plain-language explanation">
             {busy ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
-            {busy ? 'Explaining…' : 'Explain with Claude'}
+            {busy ? progressText(ai.progress) : 'Explain with Claude'}
           </button>
           {error && <span className="study-problem small">{error}</span>}
         </div>
