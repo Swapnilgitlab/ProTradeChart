@@ -34,5 +34,8 @@ describe('significance wording', () => {
     expect(describeFinding({ kind: 'forward', window: 126, test: t({ effect: -0.3 }) }, 'events', 'control dates')).toBe(
       'Over the next 6M, returns were lower among events than among control dates (small effect, q = 0.004).',
     );
+    expect(describeFinding({ kind: 'measure', index: 0, label: 'Closed within 3% above its 21 EMA', test: t() }, 'events', 'control dates')).toBe(
+      '“Closed within 3% above its 21 EMA” was higher among events than among control dates (large effect, q = 0.004).',
+    );
   });
 });

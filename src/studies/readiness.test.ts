@@ -61,6 +61,27 @@ describe('checkReadiness', () => {
     expect(() => normalizeSpec(dropped)).not.toThrow();
   });
 
+  it('drops a measure that needs the benchmark along with it', () => {
+    const spec = normalizeSpec({
+      ...fromTemplate('winners_100'),
+      measures: [
+        { stat: 'mean', feature: 'rs_126', window: { start: { offset: -63 }, end: { offset: 0 } } },
+        { stat: 'return', window: { start: { offset: -63 }, end: { offset: 0 } } },
+      ],
+    });
+    const dropped = applyFix(spec, 'drop_benchmark');
+    expect(dropped.measures.map((m) => m.stat)).toEqual(['return']);
+    expect(() => normalizeSpec(dropped)).not.toThrow();
+  });
+
+  it('loads enough history for the furthest window a measure reads', () => {
+    const base = fromTemplate('winners_100');
+    const deep = normalizeSpec({ ...base, measures: [{ stat: 'return', window: { start: { offset: -600 }, end: { offset: 0 } } }] });
+    expect(historyBars(deep)).toBe(600 + 504 + 5);
+    const found = normalizeSpec({ ...base, measures: [{ stat: 'length', window: { start: { find: 'lowest', feature: 'close', within: 700 }, end: { offset: 0 } } }] });
+    expect(historyBars(found)).toBe(700 + 504 + 5);
+  });
+
   it('works out the history the engine will load', () => {
     const spec = fromTemplate('winners_100');
     // 252 bars of look-back plus a 252-bar max drawdown measured there (twice its window).

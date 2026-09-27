@@ -106,7 +106,11 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
   const loaded = useRef(false);
   // `refresh` is defined below; a finished run re-reads the lists through this.
   const refreshRef = useRef<() => Promise<void>>(async () => {});
-  const runner = useStudyRunner({ onStored: () => void refreshRef.current(), onStoreError: (message) => toast(message, 'error') });
+  const runner = useStudyRunner({
+    onStored: () => void refreshRef.current(),
+    onStoreError: (message) => toast(message, 'error'),
+    onWarning: (message) => toast(message, 'error'),
+  });
   const { run, progress, log, now } = runner;
 
   const problem = useMemo(() => specProblem(current.spec), [current.spec]);

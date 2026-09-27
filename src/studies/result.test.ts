@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import engineResult from './fixtures/engine-result.json';
-import { eventRecord, parseRunSummary, parseStudyResult, runSummary, statFor } from './result';
+import { eventRecord, measuredCount, parseRunSummary, parseStudyResult, runSummary, statFor } from './result';
+import { measureColumn } from './spec';
 
 /** `fixtures/engine-result.json` is real output of the Python engine (python/tests, a synthetic
  *  stock that doubles; regenerate it with python/tests/make_study_fixture.py), so this checks the two
@@ -68,6 +69,64 @@ describe('parseStudyResult', () => {
     expect(r.histograms).toEqual([]);
     expect(r.stats).toEqual([]);
     expect(r.warnings).toEqual([]);
+  });
+});
+
+describe('measures in a result', () => {
+  it('reads each measure with its comparison, status counts, histogram and timeline', () => {
+    const r = parseStudyResult(fresh())!;
+    expect(r.spec.question).toBe('What did stocks look like on the way to doubling?');
+    expect(r.measures.map((m) => [m.index, m.label, m.stat])).toEqual([
+      [0, 'Above the 50 EMA', 'share'],
+      [1, 'The run from the 12-month low', 'length'],
+    ]);
+    const [share, run] = r.measures;
+    expect(measuredCount(share.events)).toBe(1);
+    expect(share.events.status.ok).toBe(1);
+    expect(share.control).not.toBeNull();
+    expect(share.histogram?.edges.length).toBe((share.histogram?.events.length ?? 0) + 1);
+    expect(share.timeline?.offsets).toContain(0);
+    expect(share.timeline?.events.length).toBe(share.timeline?.offsets.length);
+    expect(run.timeline).toBeNull();
+    expect(run.window_bars?.median).toBe(run.events.median);
+    expect(r.events.columns).toContain(measureColumn(1, 'from'));
+  });
+
+  it('opens a run made before measures existed, with none', () => {
+    const raw = fresh();
+    delete raw.measures;
+    const spec = raw.spec as Record<string, unknown>;
+    delete spec.measures;
+    delete spec.question;
+    const r = parseStudyResult(raw)!;
+    expect(r).not.toBeNull();
+    expect(r.measures).toEqual([]);
+    expect(r.spec.measures).toEqual([]);
+    expect(r.spec.question).toBe('');
+  });
+
+  it('drops a measure that doesn’t belong to the spec or is malformed, keeping the rest', () => {
+    const raw = fresh();
+    const measures = raw.measures as unknown[] as Record<string, unknown>[];
+    measures.push({ ...measures[0], index: 7 }, { ...measures[0], stat: 'mood' });
+    (measures as unknown[]).push('nope');
+    measures[0].timeline = { offsets: [0, 1], events: [0.5], count: [1, 1] }; // misaligned: dropped, measure kept
+    measures[0].histogram = { edges: [0, 1, 2], events: [1], control: [1, 1] };
+    const r = parseStudyResult(raw)!;
+    expect(r.measures.map((m) => m.index)).toEqual([0, 1]);
+    expect(r.measures[0].timeline).toBeNull();
+    expect(r.measures[0].histogram).toBeNull();
+  });
+
+  it('reads a measure finding and refuses one without an index', () => {
+    const raw = fresh();
+    (raw.summary as Record<string, unknown>).findings = [
+      { kind: 'measure', index: 0, label: 'Above the 50 EMA', test: { p: 0.001, q: 0.002, effect: 0.5, n_events: 30, n_control: 60 } },
+      { kind: 'measure', label: 'No index', test: { p: 0.001, q: 0.002, effect: 0.5 } },
+    ];
+    const findings = parseStudyResult(raw)!.summary.findings;
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ kind: 'measure', index: 0, label: 'Above the 50 EMA' });
   });
 });
 

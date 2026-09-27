@@ -44,4 +44,17 @@ describe('comparing runs', () => {
     expect(c.summary[0]).toMatchObject({ label: 'Events', a: 1, b: 5, gap: 4 });
     expect(compareRuns(a, b, -63).metrics[0].a).toBe(a.stats.find((s) => s.metric === 'return_63' && s.offset === -63)!.events.median);
   });
+
+  it('lines up the measures both runs have, by label and stat', () => {
+    const a = run();
+    const b = run((raw) => {
+      raw.measures[0].events.median = 0.5;
+      raw.measures[1].label = 'Another measure';
+      raw.spec.measures[1].label = 'Another measure';
+    });
+    const c = compareRuns(a, b);
+    expect(c.measures.map((m) => m.label)).toEqual(['Above the 50 EMA (share of days)']);
+    expect(c.measures[0]).toMatchObject({ unit: 'share', b: 0.5 });
+    expect(c.measures[0].gap).toBeCloseTo(0.5 - (a.measures[0].events.median ?? 0));
+  });
 });

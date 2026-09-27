@@ -1,6 +1,7 @@
 /** Two stored runs side by side: how their specifications differ, and what each measured where they
  *  overlap. Read-only — nothing reruns. Pure. */
 
+import { measureUnit, STAT_LABEL, type MeasureUnit } from './measures';
 import { featureLabel, featureUnit, windowLabel, type Unit } from './metrics';
 import type { StudyResultData } from './result';
 import { interpret, type StudySpec } from './spec';
@@ -44,6 +45,14 @@ export interface Comparison {
   metrics: CompareRow[];
   characteristics: CompareRow[];
   forward: CompareRow[];
+  /** Measures both runs have (same label and stat): the median per event. */
+  measures: CompareRow[];
+}
+
+function measureCompareUnit(unit: MeasureUnit): CompareRow['unit'] {
+  if (unit === 'bars' || unit === 'count') return 'count';
+  if (unit === 'points') return 'percent';
+  return unit;
 }
 
 const gap = (a: number | null, b: number | null) => (a !== null && b !== null ? b - a : null);
@@ -77,7 +86,13 @@ export function compareRuns(a: StudyResultData, b: StudyResultData, offset?: num
   const forward = a.spec.forward_windows
     .filter((w) => b.spec.forward_windows.includes(w))
     .map((w) => numberRow(`Median return, next ${windowLabel(w)}`, 'percent', fwd(a, w), fwd(b, w)));
-  return { differences: specDifferences(a, b), offsets, summary, metrics, characteristics, forward };
+  const measures = a.measures.flatMap((ma) => {
+    const mb = b.measures.find((x) => x.label === ma.label && x.stat === ma.stat);
+    const spec = a.spec.measures[ma.index];
+    if (!mb || !spec) return [];
+    return [numberRow(`${ma.label} (${STAT_LABEL[ma.stat].toLowerCase()})`, measureCompareUnit(measureUnit(spec)), ma.events.median, mb.events.median)];
+  });
+  return { differences: specDifferences(a, b), offsets, summary, metrics, characteristics, forward, measures };
 }
 
 /** The observation point `compareRuns` settled on, for a selector's initial value. */

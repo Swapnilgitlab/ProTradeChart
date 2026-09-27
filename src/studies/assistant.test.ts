@@ -4,6 +4,7 @@ import { explainSummary, parseDraft, parseExplanation, SPEC_SCHEMA, specReferenc
 import { specChanges } from './compare';
 import { ALIASES, FAMILIES, PLAIN } from './metrics';
 import { parseStudyResult } from './result';
+import { MEASURE_STATS, normalizeSpec } from './spec';
 import { TEMPLATES } from './templates';
 
 type Schema = Record<string, any>;
@@ -92,6 +93,32 @@ describe('the spec reference', () => {
     for (const a of Object.keys(ALIASES)) expect(text).toContain(a);
     expect(text).toContain(JSON.stringify(SPEC_SCHEMA));
   });
+
+  it('explains measures and tells Claude not to answer a question about time with snapshots', () => {
+    const text = specReference();
+    for (const stat of MEASURE_STATS) expect(text).toContain(stat);
+    expect(text).toContain('Never answer such a question with snapshots or characteristics sampled at observation points');
+    expect(text).toContain('"find": "lowest"');
+    expect(text).toContain('so a band is two conditions');
+  });
+
+  it('stays within the size the app sends', () => {
+    expect(new TextEncoder().encode(specReference()).length).toBeLessThan(64 * 1024);
+  });
+
+  it('describes a spec with every kind of window', () => {
+    const measures = [
+      { stat: 'share', conditions: [{ left: 'close', op: '>', right: 'ema_50', label: null }], window: { start: { offset: -252 }, end: { offset: 0 } } },
+      { stat: 'length', window: { start: { find: 'lowest', feature: 'close', within: 252 }, end: { offset: 0 } } },
+      {
+        stat: 'bars_to_first',
+        conditions: [{ left: 'close', op: '<', right: 'sma_50', label: null }],
+        window: { start: { offset: 0 }, end: { find: 'first', conditions: [{ left: 'close', op: '<', right: 'sma_50', label: null }], direction: 'after', within: 252, if_not_found: 'skip' } },
+      },
+    ];
+    const spec = normalizeSpec({ ...TEMPLATES[0].spec, metrics: [], measures });
+    expect(matches(SPEC_SCHEMA, withLabels(spec))).toBe(true);
+  });
 });
 
 describe('reading a draft', () => {
@@ -157,6 +184,16 @@ describe('explanations', () => {
       const symbol = row[result.events.columns.indexOf('symbol')];
       if (typeof symbol === 'string') expect(text).not.toContain(symbol);
     }
+  });
+
+  it('start from the Study’s question and its own answer, and carry each measure', () => {
+    const result = parseStudyResult(engineResult)!;
+    const summary = explainSummary(result) as { question: string; answer: string[]; measures: Record<string, unknown>[] };
+    expect(summary.question).toBe(result.spec.question);
+    expect(summary.answer[0]).toContain('“Above the 50 EMA” held on');
+    expect(summary.measures.map((m) => m.label)).toEqual(['Above the 50 EMA', 'The run from the 12-month low']);
+    expect(summary.measures[0]).toMatchObject({ stat: 'share', side: 'before', window: 'in the 12 months up to and including the event', headline: true });
+    expect(summary.measures[0].events_status).toMatchObject({ ok: 1 });
   });
 });
 

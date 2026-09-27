@@ -8,7 +8,8 @@
  *  Field names are snake_case because the document is shared with Python and exported as a file.
  *  Pure. */
 
-import { canonicalFeature, featureLabel, needsBenchmark, windowLabel } from './metrics';
+import { measureLine } from './measures';
+import { canonicalFeature, describeCondition, featureLabel, needsBenchmark, windowLabel } from './metrics';
 
 export const SPEC_VERSION = 1;
 
@@ -36,10 +37,60 @@ export interface PreEventFilter extends Condition {
   at: number;
 }
 
+/** Stats a measure can take over its window. Condition stats count the bars on which the measure's
+ *  conditions all held; feature stats sum up one feature's values; price stats read the closes. The
+ *  engine's `protrade/measures.py` defines each, in the same words. */
+export const CONDITION_STATS = ['share', 'count', 'longest_run', 'runs', 'bars_to_first', 'bars_since_last'] as const;
+export const FEATURE_STATS = ['mean', 'min', 'max', 'start_value', 'end_value', 'change'] as const;
+export const PRICE_STATS = ['return', 'max_gain', 'max_drawdown', 'length'] as const;
+export const MEASURE_STATS = [...CONDITION_STATS, ...FEATURE_STATS, ...PRICE_STATS] as const;
+export type MeasureStat = (typeof MEASURE_STATS)[number];
+/** Stats with no number for an event whose conditions never held in the window ("never"). */
+export const CENSORED_STATS: readonly MeasureStat[] = ['bars_to_first', 'bars_since_last'];
+export const FINDS = ['lowest', 'highest', 'first', 'last'] as const;
+
+/** A bar a fixed number of bars from the event bar (0); negative is before. */
+export interface FixedPoint {
+  offset: number;
+}
+
+/** A bar found near the event: the lowest or highest value of a feature, or the first or last bar
+ *  on which conditions all held, searched in bars −within…0 (`before`) or 1…within (`after`). A
+ *  first/last that didn't happen puts the endpoint at the search's far edge (`cap`, a lower bound) or
+ *  leaves the event unmeasured (`skip`). */
+export interface AnchorPoint {
+  find: (typeof FINDS)[number];
+  feature: string | null;
+  conditions: Condition[];
+  direction: 'before' | 'after';
+  within: number;
+  if_not_found: 'skip' | 'cap';
+}
+
+export type Endpoint = FixedPoint | AnchorPoint;
+
+/** What a Study reads over a stretch of time, one number per event: a window from bar A to bar B.
+ *  Day-counting stats read bars A+1…B; price stats the closes at A and B. */
+export interface Measure {
+  label: string;
+  stat: MeasureStat;
+  /** All must hold (AND). For condition stats; empty otherwise. */
+  conditions: Condition[];
+  /** For feature stats; null otherwise. */
+  feature: string | null;
+  window: { start: Endpoint; end: Endpoint };
+  /** Shown first, in the answer. At most three; with none flagged, the first measure is. */
+  headline: boolean;
+}
+
+export const isAnchor = (e: Endpoint): e is AnchorPoint => 'find' in e;
+
 export interface StudySpec {
   version: number;
   name: string;
   description: string;
+  /** The question the Study answers, shown above its answer. */
+  question: string;
   /** The template this Study started from, if any. */
   template: string | null;
   universe: {
@@ -67,6 +118,9 @@ export interface StudySpec {
   metrics: string[];
   /** Yes/no traits counted at every observation point ("Above 200 EMA"). */
   characteristics: Condition[];
+  /** What is read over a window of bars around each event: the journey to it, its aftermath, or an
+   *  episode between two bars found near it. */
+  measures: Measure[];
   /** An index symbol, for relative strength. */
   benchmark: string | null;
   /** When set, the events are split by what came after: those whose price reached `min_return`
@@ -86,6 +140,11 @@ export const LIMITS = {
   symbols: 10_000,
   maxEvents: 10_000,
   window: 1000,
+  measures: 12,
+  headlines: 3,
+  measureConditions: 8,
+  question: 500,
+  label: 120,
 } as const;
 
 export class SpecError extends Error {}
@@ -156,22 +215,116 @@ function conditions(value: unknown, field: string, limit: number, needOne: boole
   return list.map((item, i) => parseCondition(item, `${field}[${i}]`));
 }
 
-/** `return_252 crosses_above 1` as a person reads it: "12M return crosses above +100%". */
-export function describeCondition(c: Condition): string {
-  const op = c.op.replace('_', ' ');
-  const right = typeof c.right === 'string' ? featureLabel(c.right) : formatThreshold(c.left, c.right);
-  return `${featureLabel(c.left)} ${op} ${right}`;
+function measureConditions(value: unknown, field: string): Condition[] {
+  const list = value ?? [];
+  if (!Array.isArray(list)) throw new SpecError(`${field} must be a list of conditions.`);
+  if (list.length === 0) throw new SpecError(`${field} needs 1 to ${LIMITS.measureConditions} conditions.`);
+  if (list.length > LIMITS.measureConditions) throw new SpecError(`${field} can hold at most ${LIMITS.measureConditions} conditions.`);
+  return list.map((item, i) => parseCondition(item, `${field}[${i}]`));
 }
+
+function measureFeature(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !value.trim()) throw new SpecError(`${field} needs a feature.`);
+  const key = canonicalFeature(value);
+  if (!key) throw new SpecError(`${field}: unknown feature ${JSON.stringify(value)}.`);
+  return key;
+}
+
+function endpoint(value: unknown, field: string): Endpoint {
+  if (!isRecord(value)) throw new SpecError(`${field} must be {offset} or {find, …}.`);
+  if (!('find' in value)) {
+    if (!('offset' in value)) throw new SpecError(`${field} must be {offset} or {find, …}.`);
+    return { offset: int(value.offset, `${field}.offset`, -LIMITS.window, LIMITS.window) };
+  }
+  const find = value.find;
+  if (!(FINDS as readonly unknown[]).includes(find)) throw new SpecError(`${field}.find must be lowest, highest, first or last.`);
+  const direction = 'direction' in value ? value.direction : 'before';
+  if (direction !== 'before' && direction !== 'after') throw new SpecError(`${field}.direction must be before or after.`);
+  const ifNotFound = 'if_not_found' in value ? value.if_not_found : 'cap';
+  if (ifNotFound !== 'skip' && ifNotFound !== 'cap') throw new SpecError(`${field}.if_not_found must be skip or cap.`);
+  const within = int(value.within, `${field}.within`, 1, LIMITS.window);
+  const f = find as AnchorPoint['find'];
+  if (f === 'lowest' || f === 'highest') {
+    return { find: f, feature: measureFeature(value.feature, `${field}.feature`), conditions: [], direction, within, if_not_found: ifNotFound };
+  }
+  return { find: f, feature: null, conditions: measureConditions(value.conditions, `${field}.conditions`), direction, within, if_not_found: ifNotFound };
+}
+
+/** The bars (from the event) an endpoint can resolve to: `[k, k]` for a fixed one, its search range for an anchor. */
+export function endpointRange(e: Endpoint): [number, number] {
+  if (!isAnchor(e)) return [e.offset, e.offset];
+  return e.direction === 'before' ? [-e.within, 0] : [1, e.within];
+}
+
+export const isAnchoredWindow = (w: Measure['window']) => isAnchor(w.start) || isAnchor(w.end);
+
+/** The label a measure gets when none is given; the engine's `default_label`. */
+function defaultLabel(stat: MeasureStat, conds: Condition[], feature: string | null): string {
+  if ((CONDITION_STATS as readonly string[]).includes(stat)) return conds.map(conditionText).join(' and ');
+  if ((FEATURE_STATS as readonly string[]).includes(stat)) return `${stat} of ${feature}`;
+  return stat;
+}
+
+function measure(value: unknown, field: string): Measure {
+  if (!isRecord(value)) throw new SpecError(`${field} must be an object.`);
+  const stat = value.stat as MeasureStat;
+  if (!(MEASURE_STATS as readonly unknown[]).includes(stat)) throw new SpecError(`${field}.stat must be one of ${MEASURE_STATS.join(', ')}.`);
+  const conds = (CONDITION_STATS as readonly string[]).includes(stat) ? measureConditions(value.conditions, `${field}.conditions`) : [];
+  const feature = (FEATURE_STATS as readonly string[]).includes(stat) ? measureFeature(value.feature, `${field}.feature`) : null;
+  const w = value.window;
+  if (!isRecord(w) || !('start' in w) || !('end' in w)) throw new SpecError(`${field}.window needs a start and an end.`);
+  const window = { start: endpoint(w.start, `${field}.window.start`), end: endpoint(w.end, `${field}.window.end`) };
+  if (endpointRange(window.start)[0] >= endpointRange(window.end)[1]) {
+    throw new SpecError(`${field}.window can never contain a bar: its start can't come before its end.`);
+  }
+  if (stat === 'length' && !isAnchoredWindow(window)) {
+    throw new SpecError(`${field}: length needs a window with a found start or end (a fixed window is the same length for every event).`);
+  }
+  if (value.label !== null && value.label !== undefined && typeof value.label !== 'string') throw new SpecError(`${field}.label must be text.`);
+  const label = typeof value.label === 'string' && value.label.trim() ? value.label.trim() : defaultLabel(stat, conds, feature);
+  if (label.length > LIMITS.label) throw new SpecError(`${field}.label can be at most ${LIMITS.label} characters.`);
+  return { label, stat, conditions: conds, feature, window, headline: value.headline === undefined ? false : Boolean(value.headline) };
+}
+
+function measures(value: unknown): Measure[] {
+  if (value === null || value === undefined) return [];
+  if (!Array.isArray(value)) throw new SpecError('measures must be a list.');
+  if (value.length > LIMITS.measures) throw new SpecError(`measures can hold at most ${LIMITS.measures} measures.`);
+  const out = value.map((item, i) => measure(item, `measures[${i}]`));
+  if (out.filter((m) => m.headline).length > LIMITS.headlines) throw new SpecError(`At most ${LIMITS.headlines} measures can be headline measures.`);
+  return out;
+}
+
+/** Every feature a measure reads, anchors included; the engine's `measure_features`. */
+export function measureFeatures(m: Measure): string[] {
+  const names = ['close'];
+  const add = (c: Condition) => {
+    names.push(c.left);
+    if (typeof c.right === 'string') names.push(c.right);
+  };
+  m.conditions.forEach(add);
+  if (m.feature) names.push(m.feature);
+  for (const e of [m.window.start, m.window.end]) {
+    if (!isAnchor(e)) continue;
+    if (e.feature) names.push(e.feature);
+    e.conditions.forEach(add);
+  }
+  return [...new Set(names)];
+}
+
+/** How many bars before the event a measure can read; the engine's `reach`. */
+export function measureReach(m: Measure): number {
+  const earliest = Math.min(endpointRange(m.window.start)[0], endpointRange(m.window.end)[0]);
+  const groups = [m.conditions, ...[m.window.start, m.window.end].filter(isAnchor).map((e) => e.conditions)];
+  const crosses = groups.some((g) => g.some((c) => c.op.startsWith('crosses')));
+  return Math.max(0, -earliest) + (crosses ? 1 : 0);
+}
+
+export { describeCondition };
 
 /** The engine's own wording, used as a label when none is given: `return_252 >= 1`. */
 export function conditionText(c: Condition): string {
   return `${c.left} ${c.op} ${typeof c.right === 'number' ? String(c.right) : c.right}`;
-}
-
-function formatThreshold(feature: string, value: number): string {
-  const f = canonicalFeature(feature) ?? feature;
-  const percentLike = /^(return|gain_from_low|dist_|slope_|atr_pct|range|volatility|drawdown|max_drawdown|rs|bb_width|macd)/.test(f);
-  return percentLike ? `${value > 0 ? '+' : ''}${Math.round(value * 1000) / 10}%` : String(value);
 }
 
 /** The spec checked and completed, with every feature name in its canonical spelling. Throws
@@ -225,8 +378,13 @@ export function normalizeSpec(input: unknown): StudySpec {
     at: int(isRecord(item) ? item.at : undefined, `pre_event_filters[${i}].at`, 0, LIMITS.window, 0),
   }));
 
-  const metricsRaw = input.metrics;
-  if (!Array.isArray(metricsRaw) || metricsRaw.length === 0) throw new SpecError('metrics must list at least one feature to measure.');
+  if (input.question !== null && input.question !== undefined && typeof input.question !== 'string') throw new SpecError('question must be text.');
+  const question = typeof input.question === 'string' ? input.question.trim() : '';
+  if (question.length > LIMITS.question) throw new SpecError(`question can be at most ${LIMITS.question} characters.`);
+  const studyMeasures = measures(input.measures);
+
+  const metricsRaw = input.metrics ?? [];
+  if (!Array.isArray(metricsRaw)) throw new SpecError('metrics must be a list of features.');
   if (metricsRaw.length > LIMITS.metrics) throw new SpecError(`metrics can hold at most ${LIMITS.metrics} features.`);
   const metrics = [
     ...new Set(
@@ -237,6 +395,7 @@ export function normalizeSpec(input: unknown): StudySpec {
       }),
     ),
   ];
+  if (metrics.length === 0 && studyMeasures.length === 0) throw new SpecError('A Study needs at least one metric or one measure.');
 
   const characteristics = conditions(input.characteristics, 'characteristics', LIMITS.characteristics, false).map((c) => ({
     ...c,
@@ -261,6 +420,7 @@ export function normalizeSpec(input: unknown): StudySpec {
     version: SPEC_VERSION,
     name,
     description: typeof input.description === 'string' ? input.description : '',
+    question,
     template: typeof input.template === 'string' ? input.template : null,
     universe: {
       source,
@@ -281,6 +441,7 @@ export function normalizeSpec(input: unknown): StudySpec {
     forward_windows: windows(input.forward_windows ?? [63, 126, 252], 'forward_windows'),
     metrics,
     characteristics,
+    measures: studyMeasures,
     benchmark: typeof benchmarkRaw === 'string' ? benchmarkRaw.trim() : null,
     outcome,
     control_group: {
@@ -314,6 +475,7 @@ export function requiredFeatures(spec: StudySpec): string[] {
     names.push(c.left);
     if (typeof c.right === 'string') names.push(c.right);
   }
+  for (const m of spec.measures) names.push(...measureFeatures(m));
   return [...new Set(names)];
 }
 
@@ -325,6 +487,13 @@ export function studyOffsets(spec: StudySpec): number[] {
 /** The event table's column for a metric at an observation point: `rsi_14@-63`, `rsi_14@0`, `rsi_14@+63`. */
 export function metricColumn(metric: string, offset: number): string {
   return `${metric}@${offset === 0 ? '0' : offset > 0 ? `+${offset}` : String(offset)}`;
+}
+
+/** The event table's columns for measure `index`: its value (`measure_0`), its status
+ *  (`measure_0_status`) and, for a window with a found endpoint, where it began (`measure_0_from`)
+ *  and how many bars it spans (`measure_0_bars`). The engine's `measure_column`. */
+export function measureColumn(index: number, part?: 'status' | 'from' | 'bars'): string {
+  return part ? `measure_${index}_${part}` : `measure_${index}`;
 }
 
 /** A plain-language reading of the spec, as the builder shows it before anything runs. */
@@ -347,7 +516,9 @@ export function interpret(spec: StudySpec): Interpretation[] {
   if (u.min_avg_traded_value !== null) universe.push(`Average traded value (50D) ≥ ₹${(u.min_avg_traded_value / 1e7).toLocaleString('en-IN')} Cr a day, at the event`);
   if (u.min_price !== null) universe.push(`Price ≥ ₹${u.min_price}`);
   if (u.max_symbols !== null) universe.push(`First ${u.max_symbols} symbols only (a trial run)`);
-  const out: Interpretation[] = [
+  const out: Interpretation[] = [];
+  if (spec.question) out.push({ heading: 'Question', lines: [spec.question] });
+  out.push(
     { heading: 'Universe', lines: universe },
     { heading: 'Study period', lines: [`Events from ${spec.period.start} to ${spec.period.end ?? 'the latest data'}`] },
     {
@@ -357,7 +528,8 @@ export function interpret(spec: StudySpec): Interpretation[] {
         `First day it holds; then no new event for the same stock for ${spec.event.cooldown_days} bars`,
       ],
     },
-  ];
+  );
+  if (spec.measures.length) out.push({ heading: 'What is measured', lines: spec.measures.map(measureLine) });
   if (spec.pre_event_filters.length) {
     out.push({
       heading: 'Pre-event conditions',
@@ -367,8 +539,8 @@ export function interpret(spec: StudySpec): Interpretation[] {
   out.push(
     { heading: 'Observation windows', lines: spec.lookback_windows.map((w) => `${windowLabel(w)} before the event`).reverse() },
     { heading: 'Forward windows', lines: spec.forward_windows.map((w) => `${windowLabel(w)} after`) },
-    { heading: 'Metrics', lines: spec.metrics.map(featureLabel) },
   );
+  if (spec.metrics.length) out.push({ heading: 'Metrics', lines: spec.metrics.map(featureLabel) });
   if (spec.characteristics.length) out.push({ heading: 'Characteristics counted', lines: spec.characteristics.map((c) => c.label ?? describeCondition(c)) });
   out.push({
     heading: 'Comparison',

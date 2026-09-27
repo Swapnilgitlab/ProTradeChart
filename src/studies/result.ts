@@ -5,7 +5,7 @@
  *  drawn as HTML. The spec inside is re-validated with the same rules the builder uses. Pure. */
 
 import type { Cell } from '../python/results';
-import { normalizeSpec, type StudySpec } from './spec';
+import { MEASURE_STATS, normalizeSpec, type MeasureStat, type StudySpec } from './spec';
 
 export const RESULT_FORMAT = 1;
 
@@ -84,7 +84,34 @@ export interface TestResult {
 export type Finding =
   | { kind: 'metric'; metric: string; offset: number; test: TestResult }
   | { kind: 'characteristic'; label: string; offset: number; test: TestResult }
-  | { kind: 'forward'; window: number; test: TestResult };
+  | { kind: 'forward'; window: number; test: TestResult }
+  | { kind: 'measure'; index: number; label: string; test: TestResult };
+
+/** Why an event has, or hasn't, a value for a measure (see `python/protrade/measures.py`). */
+export const MEASURE_STATUSES = ['ok', 'capped', 'never', 'too_recent', 'no_history', 'not_found', 'empty'] as const;
+export type MeasureStatus = (typeof MEASURE_STATUSES)[number];
+/** Statuses that carry a value: `capped` is a lower bound, `never` ranks after every number. */
+export const MEASURED_STATUSES: readonly MeasureStatus[] = ['ok', 'capped', 'never'];
+
+/** A measure's values across a group. Percentiles that fall among `never` values are null. */
+export interface MeasureSummary extends Stat {
+  status: Record<MeasureStatus, number>;
+}
+
+export interface MeasureResult {
+  index: number;
+  label: string;
+  stat: MeasureStat;
+  events: MeasureSummary;
+  control: MeasureSummary | null;
+  /** For a window with a found endpoint: how long the windows were. */
+  window_bars: Stat | null;
+  test: TestResult | null;
+  histogram: { edges: number[]; events: number[]; control: number[] } | null;
+  /** For a condition measure: the share of events (and control dates) where the conditions held,
+   *  day by day across the window. */
+  timeline: { offsets: number[]; events: (number | null)[]; control: (number | null)[] | null; count: number[] } | null;
+}
 
 export interface StudySummary {
   events: number;
@@ -112,6 +139,8 @@ export interface StudyResultData {
   stats: { metric: string; offset: number; events: Stat; control: Stat | null; test: TestResult | null }[];
   characteristics: { index: number; label: string; offset: number; events: Share; control: Share | null; test: TestResult | null }[];
   forward: { window: number; events: ForwardStat; control: ForwardStat | null; test: TestResult | null }[];
+  /** One per `spec.measures` entry. Empty for runs made before measures existed. */
+  measures: MeasureResult[];
   histograms: { metric: string; offset: number; edges: number[]; events: number[]; control: number[] }[];
   path: PathBand | null;
   control_path: PathBand | null;
@@ -193,7 +222,62 @@ function finding(v: unknown): Finding | null {
     const window = int(v.window);
     return window !== null ? { kind: 'forward', window, test } : null;
   }
+  if (v.kind === 'measure') {
+    const index = int(v.index);
+    const label = text(v.label);
+    return index !== null && index >= 0 && label ? { kind: 'measure', index, label, test } : null;
+  }
   return null;
+}
+
+function measureSummary(v: unknown): MeasureSummary {
+  const r = isRecord(v) ? v : {};
+  const s = isRecord(r.status) ? r.status : {};
+  return { ...stat(r), status: Object.fromEntries(MEASURE_STATUSES.map((k) => [k, count(s[k])])) as Record<MeasureStatus, number> };
+}
+
+function shares(v: unknown, length: number): (number | null)[] | null {
+  if (!Array.isArray(v) || v.length !== length) return null;
+  return v.map(unit);
+}
+
+function measureResult(v: unknown, spec: StudySpec): MeasureResult | null {
+  if (!isRecord(v)) return null;
+  const index = int(v.index);
+  const label = text(v.label);
+  const stat_ = v.stat as MeasureStat;
+  if (index === null || index < 0 || index >= spec.measures.length || !label || !(MEASURE_STATS as readonly unknown[]).includes(stat_)) return null;
+  let histogram: MeasureResult['histogram'] = null;
+  if (isRecord(v.histogram)) {
+    const edges = numbers(v.histogram.edges);
+    const ev = numbers(v.histogram.events);
+    const cv = numbers(v.histogram.control);
+    if (edges && edges.length >= 2 && ev && cv && ev.length === edges.length - 1 && cv.length === edges.length - 1) {
+      histogram = { edges, events: ev.map((x) => Math.max(0, x)), control: cv.map((x) => Math.max(0, x)) };
+    }
+  }
+  let timeline: MeasureResult['timeline'] = null;
+  if (isRecord(v.timeline) && Array.isArray(v.timeline.offsets)) {
+    const offsets = v.timeline.offsets.slice(0, 200).map(int);
+    const events = shares(v.timeline.events, offsets.length);
+    const counts = Array.isArray(v.timeline.count) && v.timeline.count.length === offsets.length ? v.timeline.count.map(count) : null;
+    const control = v.timeline.control == null ? null : shares(v.timeline.control, offsets.length);
+    const controlOk = v.timeline.control == null || control !== null;
+    if (offsets.length >= 2 && offsets.every((o) => o !== null) && events && counts && controlOk) {
+      timeline = { offsets: offsets as number[], events, control, count: counts };
+    }
+  }
+  return {
+    index,
+    label,
+    stat: stat_,
+    events: measureSummary(v.events),
+    control: v.control == null ? null : measureSummary(v.control),
+    window_bars: v.window_bars == null ? null : stat(v.window_bars),
+    test: testResult(v.test),
+    histogram,
+    timeline,
+  };
 }
 
 function band(v: unknown): PathBand | null {
@@ -319,6 +403,9 @@ export function parseStudyResult(data: unknown): StudyResultData | null {
         const window = int(f.window);
         return window !== null ? [{ window, events: forwardStat(f.events), control: f.control == null ? null : forwardStat(f.control), test: testResult(f.test) }] : [];
       }),
+    measures: list(data.measures)
+      .map((m) => measureResult(m, spec))
+      .filter((m): m is MeasureResult => m !== null),
     histograms: list(data.histograms)
       .filter(isRecord)
       .flatMap((h) => {
@@ -384,4 +471,9 @@ export function eventRecord(result: StudyResultData, row: Cell[]): Record<string
 
 export function statFor(result: StudyResultData, metric: string, offset: number) {
   return result.stats.find((s) => s.metric === metric && s.offset === offset) ?? null;
+}
+
+/** How many events a measure has a value for (`ok`, `capped` and `never`). */
+export function measuredCount(s: MeasureSummary): number {
+  return MEASURED_STATUSES.reduce((sum, k) => sum + s.status[k], 0);
 }

@@ -4,6 +4,8 @@
  *  the same names — same families, same aliases, same window limits — so the builder never saves a
  *  spec the engine refuses. Here they are also labelled and given a unit, for display. Pure. */
 
+import type { Condition } from './spec';
+
 export const PLAIN = ['open', 'high', 'low', 'close', 'volume', 'macd', 'macd_signal', 'macd_hist'] as const;
 
 export const FAMILIES = [
@@ -233,7 +235,18 @@ export function featureLabel(name: string): string {
   }
 }
 
+/** `return_252 crosses_above 1` as a person reads it: "12M return crosses above +100%". */
+export function describeCondition(c: Condition): string {
+  const op = c.op.replace('_', ' ');
+  const right = typeof c.right === 'string' ? featureLabel(c.right) : formatThreshold(c.left, c.right);
+  return `${featureLabel(c.left)} ${op} ${right}`;
+}
 
+function formatThreshold(feature: string, value: number): string {
+  const f = canonicalFeature(feature) ?? feature;
+  const percentLike = /^(return|gain_from_low|dist_|slope_|atr_pct|range|volatility|drawdown|max_drawdown|rs|bb_width|macd)/.test(f);
+  return percentLike ? `${value > 0 ? '+' : ''}${Math.round(value * 1000) / 10}%` : String(value);
+}
 
 /** A value of a feature as text. Fractions become percentages; rupee amounts are shortened to
  *  crore / lakh, the units Indian markets are read in. */

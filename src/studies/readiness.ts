@@ -7,7 +7,7 @@
  *  checked by the engine as it runs and reported with the result. Pure. */
 
 import { splitSymbol } from '../lib/symbols';
-import { requiredFeatures, type StudySpec } from './spec';
+import { measureFeatures, measureReach, requiredFeatures, type StudySpec } from './spec';
 import { DEFAULT_MIN_TRADED_VALUE } from './templates';
 
 export type ReadinessStatus = 'available' | 'unavailable' | 'warning' | 'unused';
@@ -96,7 +96,8 @@ export function warmup(name: string): number {
 export function historyBars(spec: StudySpec): number {
   const deepest = Math.max(...requiredFeatures(spec).map(warmup));
   const filters = Math.max(0, ...spec.pre_event_filters.map((f) => f.at));
-  return Math.max(...spec.lookback_windows) + Math.max(deepest, filters) + 5;
+  const reach = Math.max(...spec.lookback_windows, ...spec.measures.map(measureReach));
+  return reach + Math.max(deepest, filters) + 5;
 }
 
 /** The first date loaded: the engine's `fetch_start`. */
@@ -247,6 +248,7 @@ export function applyFix(spec: StudySpec, fix: ReadinessFix): StudySpec {
     next.metrics = next.metrics.filter((m) => !m.startsWith('rs_'));
     next.characteristics = next.characteristics.filter((c) => !usesRs(c));
     next.pre_event_filters = next.pre_event_filters.filter((c) => !usesRs(c));
+    next.measures = next.measures.filter((m) => !measureFeatures(m).some((f) => f.startsWith('rs_')));
   }
   return next;
 }

@@ -1,5 +1,81 @@
 import { describe, expect, it } from 'vitest';
-import { conditionText, describeCondition, interpret, metricColumn, normalizeSpec, parseCondition, specProblem, studyOffsets, type StudySpec } from './spec';
+import cases from './fixtures/spec-cases.json';
+import {
+  conditionText,
+  describeCondition,
+  interpret,
+  measureColumn,
+  measureReach,
+  metricColumn,
+  normalizeSpec,
+  parseCondition,
+  specProblem,
+  studyOffsets,
+  type StudySpec,
+} from './spec';
+
+/** The placeholders spec-cases.json uses for values too long to write out (test_measures.py expands them the same way). */
+function expand(value: unknown): unknown {
+  const one = cases.base.measures[0];
+  if (value === 'QUESTION_TOO_LONG') return 'x'.repeat(501);
+  if (value === 'LABEL_TOO_LONG') return 'x'.repeat(121);
+  if (value === 'THIRTEEN_MEASURES') return Array.from({ length: 13 }, () => structuredClone(one));
+  if (value === 'FOUR_HEADLINES') return Array.from({ length: 4 }, () => structuredClone(one));
+  if (Array.isArray(value)) return value.map(expand);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, expand(v)]));
+  return value;
+}
+
+const patched = (patch: object) => ({ ...structuredClone(cases.base), ...(expand(structuredClone(patch)) as object) });
+
+describe('the cases shared with the engine (fixtures/spec-cases.json)', () => {
+  it('accepts the base case', () => {
+    expect(specProblem(cases.base)).toBeNull();
+  });
+
+  it('refuses each refused case, naming the problem as the engine does', () => {
+    for (const c of cases.refused) expect(specProblem(patched(c.patch)), c.word).toContain(c.word);
+  });
+
+  it('normalises each accepted case to exactly the measures the engine does', () => {
+    for (const c of cases.accepted) {
+      const spec = normalizeSpec(patched(c.patch));
+      if ('measures' in c) expect(spec.measures, c.name).toEqual(c.measures);
+      expect(normalizeSpec(spec), c.name).toEqual(spec);
+    }
+  });
+});
+
+describe('measures', () => {
+  it('name their table columns as the engine does', () => {
+    expect(measureColumn(0)).toBe('measure_0');
+    expect(measureColumn(2, 'status')).toBe('measure_2_status');
+    expect(measureColumn(1, 'from')).toBe('measure_1_from');
+  });
+
+  it('say how far back they read, including a found start and the bar before a cross', () => {
+    const spec = normalizeSpec(
+      patched({
+        measures: [
+          { stat: 'return', window: { start: { offset: -300 }, end: { offset: 0 } } },
+          { stat: 'length', window: { start: { find: 'lowest', feature: 'close', within: 400 }, end: { offset: 0 } } },
+          { stat: 'count', conditions: ['rsi_14 crosses_above 50'], window: { start: { offset: 0 }, end: { offset: 63 } } },
+        ],
+      }),
+    );
+    expect(spec.measures.map(measureReach)).toEqual([300, 400, 1]);
+  });
+
+  it('are read out in the interpretation, with the question', () => {
+    const spec = normalizeSpec(patched({ question: 'How often did doublers sit near the 21 EMA?' }));
+    const text = interpret(spec)
+      .map((s) => `${s.heading}: ${s.lines.join('; ')}`)
+      .join('\n');
+    expect(text).toContain('Question: How often did doublers sit near the 21 EMA?');
+    expect(text).toContain('What is measured: “Closed within 3% above its 21 EMA” — share of days, in the 12 months up to and including the event');
+    expect(text).not.toContain('Metrics:');
+  });
+});
 
 const minimal = (over: Record<string, unknown> = {}) => ({
   name: '100% Winners',
@@ -22,6 +98,8 @@ describe('normalizeSpec', () => {
     expect(spec.control_group).toEqual({ enabled: true, samples_per_event: 2, seed: 42 });
     expect(spec.output.max_events).toBe(5000);
     expect(spec.outcome).toBeNull();
+    expect(spec.question).toBe('');
+    expect(spec.measures).toEqual([]);
     expect(normalizeSpec(spec)).toEqual(spec);
   });
 

@@ -3,10 +3,12 @@ import { AlertTriangle, LineChart, ListPlus } from 'lucide-react';
 import type { StudyEvent } from '../../chart/studyEvent';
 import { displayTicker } from '../../lib/symbols';
 import type { Cell } from '../../python/results';
+import { answer } from '../../studies/answer';
+import { formatMeasure, measureUnit, STAT_LABEL, windowPhrase } from '../../studies/measures';
 import { featureLabel, featureUnit, formatRupees, formatValue, offsetLabel, windowLabel, type Unit } from '../../studies/metrics';
-import { statFor, type Share, type Stat, type StudyResultData } from '../../studies/result';
+import { measuredCount, statFor, type Share, type Stat, type StudyResultData } from '../../studies/result';
 import { describeCondition } from '../../studies/spec';
-import { beforeAfterWindows, eventColumns, eventGrid, headline, liquidityBuckets, medianGap, type TableColumn } from '../../studies/views';
+import { beforeAfterWindows, eventColumns, eventGrid, headline, liquidityBuckets, medianGap, STATUS_WORD, type TableColumn } from '../../studies/views';
 import { describeFinding, formatEffect, formatQ, formatShareDiff, standsOut } from '../../studies/significance';
 import { Histogram, PathChart } from './charts';
 
@@ -22,10 +24,28 @@ function formatCellAs(value: Cell, unit: TableColumn['unit']): string {
   if (value === null) return '—';
   if (unit === 'symbol') return typeof value === 'string' ? displayTicker(value) : String(value);
   if (unit === 'date' || unit === 'text') return String(value);
-  return typeof value === 'number' ? (unit === 'money' ? formatRupees(value) : formatValue(value, unit)) : String(value);
+  if (typeof value !== 'number') return String(value);
+  if (unit === 'money') return formatRupees(value);
+  return formatMeasure(value, unit);
 }
 
-function columnTitle(col: TableColumn, offset: number): string {
+/** A table cell, or for a measure without a value, why it has none ("too recent", "never"). */
+function cellText(row: Cell[], col: TableColumn): string {
+  const value = row[col.index];
+  if (value === null && col.measure) {
+    const status = row[col.measure.statusIndex];
+    if (typeof status === 'string' && STATUS_WORD[status]) return STATUS_WORD[status];
+  }
+  return formatCellAs(value, col.unit);
+}
+
+function columnTitle(col: TableColumn, offset: number, measures: StudyResultData['spec']['measures']): string {
+  if (col.measure) {
+    const m = measures[col.measure.index];
+    // Two measures can share a label (the share and the count of the same days), so the stat says which.
+    return m ? `${m.label} · ${STAT_LABEL[m.stat].toLowerCase()}` : col.key;
+  }
+  if (/^measure_\d+_from$/.test(col.key)) return `${measures[Number(col.key.split('_')[1])]?.label ?? 'Window'}: began`;
   switch (col.key) {
     case 'symbol':
       return 'Symbol';
@@ -72,7 +92,8 @@ export function StudyResults({ result, onOpenEvent, onAddToWatchlist }: Props) {
   const lookbacks = result.offsets.filter((o) => o < 0);
   const [tableOffset, setTableOffset] = useState<number>(0);
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
-  const [metric, setMetric] = useState(spec.metrics[0]);
+  // A Study may have measures and no metrics at all.
+  const [metric, setMetric] = useState<string>(spec.metrics[0] ?? '');
   const [distOffset, setDistOffset] = useState(lookbacks.includes(-63) ? -63 : (lookbacks[lookbacks.length - 1] ?? 0));
   const [compareOffset, setCompareOffset] = useState(lookbacks.includes(-63) ? -63 : (lookbacks[lookbacks.length - 1] ?? 0));
   const [selected, setSelected] = useState(0);
@@ -108,6 +129,7 @@ export function StudyResults({ result, onOpenEvent, onAddToWatchlist }: Props) {
     if (typeof symbol === 'string' && typeof date === 'string') onOpenEvent({ symbol, date, label: spec.event.label });
   };
   const returnStat = (window: number) => statFor(result, `return_${window}`, 0);
+  const found = useMemo(() => answer(result), [result]);
 
   return (
     <div className="study-results">
@@ -135,6 +157,75 @@ export function StudyResults({ result, onOpenEvent, onAddToWatchlist }: Props) {
           ))}
         </div>
       </div>
+
+      {result.measures.length > 0 && (
+        <section className="study-block">
+          <h3>Answer</h3>
+          {spec.question && <p className="study-question">{spec.question}</p>}
+          <ul className="study-answer">
+            {found.lines.map((line, i) => (
+              <li key={i}>
+                {line.text}
+                {line.coverage && <span className="muted small"> {line.coverage}</span>}
+              </li>
+            ))}
+          </ul>
+          <div className="python-table-scroll">
+            <table className="python-table study-stats">
+              <thead>
+                <tr>
+                  <th>Measure</th>
+                  <th>Over</th>
+                  <th>{groupLabel}: median</th>
+                  <th>Middle half</th>
+                  {controlLabel && <th>{controlLabel}</th>}
+                  {controlLabel && <th>Difference</th>}
+                  <th>Measured</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.measures.map((m) => {
+                  const s = spec.measures[m.index];
+                  if (!s) return null;
+                  const unit = measureUnit(s);
+                  return (
+                    <tr key={m.index}>
+                      <td>
+                        {m.label}
+                        <span className="muted small"> · {STAT_LABEL[m.stat].toLowerCase()}</span>
+                      </td>
+                      <td className="study-wrap">{windowPhrase(s.window)}</td>
+                      <td className="numeric">{formatMeasure(m.events.median, unit)}</td>
+                      <td className="numeric muted">
+                        {formatMeasure(m.events.p25, unit)} – {formatMeasure(m.events.p75, unit)}
+                      </td>
+                      {controlLabel && <td className="numeric">{formatMeasure(m.control?.median, unit)}</td>}
+                      {controlLabel && (
+                        <td className={`numeric${standsOut(m.test) ? ' study-significant' : ' muted'}`}>
+                          {m.test ? (
+                            <>
+                              {formatEffect(m.test.effect)}
+                              <div className="small">{formatQ(m.test.q)}</div>
+                            </>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                      )}
+                      <td className="numeric muted">
+                        {measuredCount(m.events)} of {summary.events}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="muted small">
+            Each measure is one number per event, over the window shown. Every event’s value is in the Events table below.
+          </p>
+        </section>
+      )}
 
       <section className="study-block">
         <h3>1 · Summary</h3>
@@ -207,7 +298,7 @@ export function StudyResults({ result, onOpenEvent, onAddToWatchlist }: Props) {
                       type="button"
                       onClick={() => setSort((s) => (s?.key === c.key ? (s.dir === 1 ? { key: c.key, dir: -1 } : null) : { key: c.key, dir: 1 }))}
                     >
-                      {columnTitle(c, tableOffset)}
+                      {columnTitle(c, tableOffset, spec.measures)}
                       {sort?.key === c.key && <span aria-hidden="true">{sort.dir === 1 ? ' ▲' : ' ▼'}</span>}
                     </button>
                   </th>
@@ -233,7 +324,7 @@ export function StudyResults({ result, onOpenEvent, onAddToWatchlist }: Props) {
                   </td>
                   {columns.map((c) => (
                     <td key={c.key} className={c.unit === 'text' || c.unit === 'symbol' || c.unit === 'date' ? undefined : 'numeric'}>
-                      {formatCellAs(row[c.index], c.unit)}
+                      {cellText(row, c)}
                     </td>
                   ))}
                 </tr>
@@ -252,27 +343,34 @@ export function StudyResults({ result, onOpenEvent, onAddToWatchlist }: Props) {
       <section className="study-block">
         <div className="study-block-head">
           <h3>4 · Characteristics</h3>
-          <select className="python-input" value={metric} aria-label="Metric" onChange={(e) => setMetric(e.currentTarget.value)}>
-            {spec.metrics.map((m) => (
-              <option key={m} value={m}>
-                {featureLabel(m)}
-              </option>
-            ))}
-          </select>
-          <select className="python-input" value={distOffset} aria-label="Observation point" onChange={(e) => setDistOffset(Number(e.currentTarget.value))}>
-            {result.offsets.map((o) => (
-              <option key={o} value={o}>
-                {offsetLabel(o)}
-              </option>
-            ))}
-          </select>
+          {spec.metrics.length > 0 && (
+            <>
+              <select className="python-input" value={metric} aria-label="Metric" onChange={(e) => setMetric(e.currentTarget.value)}>
+                {spec.metrics.map((m) => (
+                  <option key={m} value={m}>
+                    {featureLabel(m)}
+                  </option>
+                ))}
+              </select>
+              <select className="python-input" value={distOffset} aria-label="Observation point" onChange={(e) => setDistOffset(Number(e.currentTarget.value))}>
+                {result.offsets.map((o) => (
+                  <option key={o} value={o}>
+                    {offsetLabel(o)}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
         </div>
-        {hist ? (
+        {spec.metrics.length === 0 && spec.characteristics.length === 0 && (
+          <p className="muted small">This Study takes no snapshots: it has measures over windows instead (above).</p>
+        )}
+        {spec.metrics.length > 0 && (hist ? (
           <Histogram edges={hist.edges} events={hist.events} control={hist.control} unit={featureUnit(metric)} controlLabel={controlLabel} />
         ) : (
           <div className="study-empty muted small">No values for {featureLabel(metric)} at {offsetLabel(distOffset)}.</div>
-        )}
-        <table className="python-table study-stats">
+        ))}
+        {spec.metrics.length > 0 && <table className="python-table study-stats">
           <thead>
             <tr>
               <th>Group</th>
@@ -295,7 +393,7 @@ export function StudyResults({ result, onOpenEvent, onAddToWatchlist }: Props) {
               </tr>
             )}
           </tbody>
-        </table>
+        </table>}
         {spec.characteristics.length > 0 && (
           <div className="python-table-scroll">
             <table className="python-table study-stats">

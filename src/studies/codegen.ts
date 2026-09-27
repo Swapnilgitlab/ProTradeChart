@@ -68,7 +68,8 @@ ${
     : 'control = study.control_group(data, events)'
 }
 
-# 5. Measurement: each metric at every observation point, and what happened afterwards.
+# 5. Measurement: each metric at every observation point, each measure over its window, and what
+#    happened afterwards.
 results = study.measure(events, data)
 control = study.measure(control, data) if len(control) else control
 

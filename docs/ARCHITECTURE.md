@@ -482,10 +482,10 @@ aggregation → result** — and every part of it is described by the **Study Sp
 
 | Piece | Where | Notes |
 | --- | --- | --- |
-| Specification | `src/studies/spec.ts`, `protrade/study.py` `normalize_spec` | A JSON document (snake_case, because Python reads it and it is exported). The two sides apply the same rules and defaults — **keep them in step**; the tests on each side list the same refusals. Versioned (`version: 1`). |
+| Specification | `src/studies/spec.ts`, `protrade/study.py` `normalize_spec` | A JSON document (snake_case, because Python reads it and it is exported). The two sides apply the same rules and defaults — **keep them in step**; both run the cases in `src/studies/fixtures/spec-cases.json`. Versioned (`version: 1`). `question` is the Study's question, shown above its answer; `measures` are read over windows (see "Three lenses" below). |
 | Features | `protrade/features.py`, `src/studies/metrics.ts` | One grammar of names: a family and a window in bars (`return_252`, `ema_200`, `rsi_14`, `dist_high_252`, `rvol_20`, `rs_126`…) plus aliases (`return_12m`, `distance_from_52w_high`). Python computes them; TypeScript accepts the same names and labels them. Returns and distances are fractions. A rolling feature is NaN until its window is full. |
 | Conditions | both of the above | `{left, op, right}` with `>`, `>=`, `<`, `<=`, `crosses_above`, `crosses_below`; `right` is a number or a feature. Events, pre-event filters and characteristics are all conditions. |
-| Engine | `protrade/study.py` (`ResearchStudy`) | Universe (instrument list, watchlist or symbols) → `load` (daily bars through the local API, in chunks so progress can be reported) → `detect_events` → `measure` → `control_group` or `split_by_outcome` → `analyze`. Each step is callable on its own; "Generate Python" writes a script that calls them one by one. |
+| Engine | `protrade/study.py` (`ResearchStudy`), `protrade/measures.py` | Universe (instrument list, watchlist or symbols) → `load` (daily bars through the local API, in chunks so progress can be reported) → `detect_events` → `measure` (snapshots, measures, forward returns) → `control_group` or `split_by_outcome` → `analyze`. Each step is callable on its own; "Generate Python" writes a script that calls them one by one. `engine_build()` hashes every module the numbers depend on. |
 | Runner | `protrade/run_study.py`, `study_commands.rs` | `python -m protrade.run_study spec.json`, started through the same `start_python` as a script (same environment, token and events), and only by the Run Study button. It is a module of its own because `-m protrade.study` would import the module twice. |
 | Result | `studies/result.ts` | Posted as result kind `study`. Untrusted like any script output: re-validated (the spec included) and drawn as text and SVG only. `fixtures/engine-result.json` is real engine output (`python/tests/make_study_fixture.py`); a Python test fails when the engine's output shape drifts from it. |
 | Storage | `store/studies.rs`; `studies`, `study_results` tables | Saved Studies (spec JSON, opaque to Rust) and completed runs (the whole result, so a run reopens without running again). The last 20 runs of each Study are kept. A run of a script's Study is stored under a `script:` id. |
@@ -496,6 +496,36 @@ aggregation → result** — and every part of it is described by the **Study Sp
   the same stock can't have another for `cooldown_days` bars. Liquidity, price and pre-event filters are judged at the event
   (or `at` bars before), never with later data. The measurements at each observation point (`T-252 … T0 … T+252`, in bars)
   are the feature's value on that bar; a point outside the loaded history is blank, never filled from a neighbour.
+- **Three lenses: snapshots, measures, episodes.** Metrics and characteristics are *snapshots*: one bar at an observation
+  point ("what did it look like 3 months before?", "what share of events were above the 200 EMA that day?"). *Measures*
+  (`spec.measures`, `protrade/measures.py`) read a window of bars and give one number per event — the journey to the event or
+  its aftermath: `share`/`count` of days a set of conditions all held (a band is two conditions), `longest_run`, `runs`
+  (separate stretches, e.g. pullbacks into a zone), `bars_to_first`/`bars_since_last`, a feature's `mean`/`min`/`max`/
+  `start_value`/`end_value`/`change`, and on price `return`, `max_gain`, `max_drawdown`, `length`. An *episode* is a measure
+  whose window starts or ends on a day found near the event (`{find: lowest|highest|first|last, …, direction, within}`): from
+  its 12-month low to the event, from the event until its first close below the 50 SMA.
+  - **The window model.** Bar A → bar B (A < B). Counting stats read bars A+1…B; price stats the closes at A and B and the path
+    between. So `{offset:-252}→{offset:0}` is the 252 days up to and including the event bar (its `return` is `return_252`) and
+    `{0}→{126}` the 126 days after (its return is `fwd_return_126`). A before-search reads bars −within…0 only; ties for a
+    lowest/highest go to the latest bar. `measures.ts` words every window ("in the 12 months up to and including the event").
+  - **Nothing is filled in.** Each event gets a status: `ok`; `capped` (a first/last that didn't happen in `within` bars, with
+    `if_not_found: cap` — the window runs to that edge and the value is a lower bound); `never` (a `bars_to_first`/
+    `bars_since_last` whose conditions never held: it ranks after every number, and a median that lands among them is null);
+    `too_recent` (the window runs past the data); `no_history` (it reaches before the data, or reads a bar with no value yet);
+    `not_found`; `empty`. The per-event columns are `measure_k`, `measure_k_status`, and for an episode `measure_k_from` and
+    `measure_k_bars`. `history_bars` reaches back as far as any window.
+  - **Result.** `measures[]` per measure: `describe` of the values (censored-aware) with status counts, the control group's,
+    episode lengths (`window_bars`), a Mann–Whitney test in the same Benjamini–Hochberg pool (finding kind `measure`), a
+    histogram, and for a condition measure a day-by-day `timeline` of the share of events where the conditions held. Old runs
+    parse with `measures: []`; nothing about the spec or result format changed version (additive fields with defaults).
+  - **The answer.** `studies/answer.ts` turns the headline measures into sentences ("For the typical stock, “…” held on 24% of
+    days in the 12 months up to and including the event (about 60 of 252). Middle half: 18%–31%. Random stock-dates: 14% — a
+    large difference (q < 0.001).") plus a coverage line (how many events were measured, and why not the rest) — from the
+    numbers, deterministically, drawn as text. A Study without measures gets a fallback answer from forward returns and findings.
+  - **Keeping the validators in step.** `src/studies/fixtures/spec-cases.json` lists refused specs (with the word the message must
+    contain) and accepted ones (with their exact normalised measures); `spec.test.ts` and `python/tests/test_measures.py` both
+    run it. Every stat is also checked against a bar-by-bar reference on random series, and a no-look-ahead test rewrites the
+    bars after each event and checks that no before-window changes.
 - **Comparison.** Either a control group — random dates (seeded, so reproducible) from the same universe and period that pass
   the same filters, with no event within `cooldown_days` either side, so a run-up to an event isn't counted as "no event" — or,
   with an `outcome`, the events split by whether they went on to gain `min_return` within `window` bars. Everything is labelled

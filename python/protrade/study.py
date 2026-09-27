@@ -43,10 +43,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 import pandas as pd
 
-from . import api, client, features as feat, results, stats_tests as tests_mod
+from . import api, client, features as feat, measures as msr, results, stats_tests as tests_mod
 
 SPEC_VERSION = 1
-ENGINE_VERSION = "1.0"
+# 1.1: measures (what a Study reads over a window of bars) and the Study's question.
+ENGINE_VERSION = "1.1"
 RESULT_FORMAT = 1
 
 PROVIDERS = ("zerodha", "dhan")
@@ -226,15 +227,30 @@ def normalize_spec(spec: dict) -> dict:
     label = event.get("label")
     label = label.strip() if isinstance(label, str) and label.strip() else " and ".join(map(feat.describe_condition, conditions))
 
+    question = spec.get("question")
+    if question is not None and not isinstance(question, str):
+        raise SpecError("question must be text.")
+    question = question.strip() if isinstance(question, str) else ""
+    if len(question) > msr.MAX_QUESTION:
+        raise SpecError(f"question can be at most {msr.MAX_QUESTION} characters.")
+    try:
+        measures = msr.normalize_measures(spec.get("measures"))
+    except msr.MeasureError as e:
+        raise SpecError(str(e)) from None
+
     metrics = spec.get("metrics")
-    if not isinstance(metrics, list) or not metrics:
-        raise SpecError("metrics must list at least one feature to measure.")
+    if metrics is None:
+        metrics = []
+    if not isinstance(metrics, list):
+        raise SpecError("metrics must be a list of features.")
     if len(metrics) > MAX_METRICS:
         raise SpecError(f"metrics can hold at most {MAX_METRICS} features.")
     try:
         metrics = list(dict.fromkeys(feat.canonical(m) for m in metrics))
     except feat.FeatureError as e:
         raise SpecError(f"metrics: {e}") from None
+    if not metrics and not measures:
+        raise SpecError("A Study needs at least one metric or one measure.")
 
     control = spec.get("control_group") or {}
     output = spec.get("output") or {}
@@ -254,6 +270,7 @@ def normalize_spec(spec: dict) -> dict:
         "version": SPEC_VERSION,
         "name": name.strip(),
         "description": spec.get("description") if isinstance(spec.get("description"), str) else "",
+        "question": question,
         "template": spec.get("template") if isinstance(spec.get("template"), str) else None,
         "universe": universe,
         "period": {"start": start, "end": end},
@@ -267,6 +284,7 @@ def normalize_spec(spec: dict) -> dict:
         "forward_windows": _windows(spec.get("forward_windows", [63, 126, 252]), "forward_windows"),
         "metrics": metrics,
         "characteristics": _conditions(spec.get("characteristics"), "characteristics", MAX_CHARACTERISTICS, need_one=False, need_label=True),
+        "measures": measures,
         "benchmark": benchmark.strip() if isinstance(benchmark, str) else None,
         "outcome": outcome,
         "control_group": {
@@ -289,6 +307,8 @@ def required_features(spec: dict) -> list[str]:
     for group in (spec["event"]["conditions"], spec["pre_event_filters"], spec["characteristics"]):
         for condition in group:
             names += feat.condition_features(condition)
+    for measure in spec.get("measures", []):
+        names += msr.measure_features(measure)
     return list(dict.fromkeys(names))
 
 
@@ -306,12 +326,29 @@ def column(metric: str, offset: int) -> str:
     return f"{metric}@{offset_key(offset)}"
 
 
+def measure_column(index: int, part: str | None = None) -> str:
+    """The event table's columns for measure ``index``: its value (``measure_0``), its status
+    (``measure_0_status``) and, for a window with a found endpoint, where it began (``measure_0_from``)
+    and how many bars it spans (``measure_0_bars``)."""
+    return f"measure_{index}" if part is None else f"measure_{index}_{part}"
+
+
+def measure_columns(spec: dict) -> list[str]:
+    out = []
+    for k, measure in enumerate(spec.get("measures", [])):
+        out += [measure_column(k), measure_column(k, "status")]
+        if msr.is_anchored(measure["window"]):
+            out += [measure_column(k, "from"), measure_column(k, "bars")]
+    return out
+
+
 def history_bars(spec: dict) -> int:
     """Bars needed before the first possible event date for every measurement to have a value."""
     names = required_features(spec)
     deepest = max(feat.warmup(n) for n in names)
     filters = max((f["at"] for f in spec["pre_event_filters"]), default=0)
-    return max(spec["lookback_windows"]) + max(deepest, filters) + 5
+    reach = max([max(spec["lookback_windows"])] + [msr.reach(m) for m in spec.get("measures", [])])
+    return reach + max(deepest, filters) + 5
 
 
 def fetch_start(spec: dict) -> _dt.date:
@@ -786,9 +823,9 @@ class ResearchStudy:
             return out
         columns: dict[str, np.ndarray] = {}
 
-        def put(name: str, i: np.ndarray, values: np.ndarray) -> None:
+        def put(name: str, i: np.ndarray, values: np.ndarray, kind: str = "number") -> None:
             if name not in columns:
-                columns[name] = np.full(len(events), np.nan)
+                columns[name] = np.full(len(events), np.nan) if kind == "number" else np.full(len(events), None, dtype=object)
             columns[name][i] = values
 
         groups = events.groupby("symbol", sort=False)
@@ -814,13 +851,24 @@ class ResearchStudy:
                 for offset in points:
                     put(column(metric, offset), rows, at(series, offset))
             for k, condition in enumerate(spec["characteristics"]):
-                held = feat.evaluate(features, condition).to_numpy(dtype="float64")
+                # A copy: under pandas 3's copy-on-write, to_numpy() can be a read-only view.
+                held = feat.evaluate(features, condition).to_numpy(dtype="float64", copy=True)
                 known = np.ones(n, dtype=bool)
                 for name in feat.condition_features(condition):
                     known &= features.get(name).notna().to_numpy()
                 held[~known] = np.nan
                 for offset in points:
                     put(f"char_{k}@{offset_key(offset)}", rows, at(held, offset))
+            for k, measure in enumerate(spec["measures"]):
+                got = msr.measure_symbol(measure, features, pos)
+                put(measure_column(k), rows, got["value"])
+                put(measure_column(k, "status"), rows, got["status"], kind="text")
+                if msr.is_anchored(measure["window"]):
+                    dates = np.full(len(pos), None, dtype=object)
+                    found = got["start"] >= 0
+                    dates[found] = [features.index[s] for s in got["start"][found]]
+                    put(measure_column(k, "from"), rows, dates, kind="text")
+                    put(measure_column(k, "bars"), rows, got["bars"])
             close = features.get("close").to_numpy()
             high = features.get("high").to_numpy()
             low = features.get("low").to_numpy()
@@ -929,13 +977,16 @@ class ResearchStudy:
                 }
             )
 
-        findings = self._test_differences(measured, control, stats, characteristics, forward) if has_control else []
+        measures = self._measures_section(measured, control if has_control else None, data or {})
+
+        findings = self._test_differences(measured, control, stats, characteristics, forward, measures) if has_control else []
 
         max_events = spec["output"]["max_events"]
         table_columns = ["symbol", "name", "event_date", "event_value", "price", "market_cap", "avg_traded_value"]
         table_columns += [column(m, o) for m in spec["metrics"] for o in points]
         for window in spec["forward_windows"]:
             table_columns += [f"fwd_return_{window}", f"fwd_max_gain_{window}", f"fwd_max_drawdown_{window}"]
+        table_columns += measure_columns(spec)
         table = measured.reindex(columns=table_columns)
         rows = [[_cell(v) for v in row] for row in table.head(max_events).itertuples(index=False, name=None)]
         if len(measured) > max_events:
@@ -1010,6 +1061,7 @@ class ResearchStudy:
             "stats": stats,
             "characteristics": characteristics,
             "forward": forward,
+            "measures": measures,
             "histograms": histograms,
             "path": self.path(measured, loaded) if loaded else None,
             "control_path": self.path(control, loaded) if loaded and has_control else None,
@@ -1020,6 +1072,67 @@ class ResearchStudy:
             _show(result)
         self.progress(100, "Complete")
         return result
+
+    def _measures_section(self, measured: pd.DataFrame, control: pd.DataFrame | None, data: dict) -> list[dict]:
+        """Each measure summed up across the events (and the comparison group): the spread of its
+        values, how many events it could be measured for and why not, the episode lengths of a window
+        with a found endpoint, a histogram, and for a condition measure the day-by-day share of events
+        where the conditions held."""
+        out = []
+        for k, measure in enumerate(self.spec["measures"]):
+            name = measure_column(k)
+
+            def summary(frame: pd.DataFrame | None) -> dict | None:
+                if frame is None:
+                    return None
+                values = frame[name] if name in frame else []
+                statuses = frame[measure_column(k, "status")] if measure_column(k, "status") in frame else []
+                return {**msr.describe_censored(values, _round), "status": msr.status_counts(statuses)}
+
+            anchored = msr.is_anchored(measure["window"])
+            bars_name = measure_column(k, "bars")
+            ev = measured[name] if name in measured else pd.Series(dtype="float64")
+            cv = control[name] if control is not None and name in control else pd.Series(dtype="float64")
+            finite_ev = pd.to_numeric(ev, errors="coerce").replace([np.inf, -np.inf], np.nan)
+            finite_cv = pd.to_numeric(cv, errors="coerce").replace([np.inf, -np.inf], np.nan)
+            item = {
+                "index": k,
+                "label": measure["label"],
+                "stat": measure["stat"],
+                "events": summary(measured),
+                "control": summary(control),
+                "window_bars": describe(measured[bars_name]) if anchored and bars_name in measured else None,
+                "test": None,
+                "histogram": histogram(finite_ev, finite_cv if control is not None else []),
+                "timeline": None,
+            }
+            if measure["stat"] in msr.CONDITION_STATS and data:
+                grid = msr.timeline_grid(measure)
+                events_share, events_count = msr.timeline(measure, self._groups(measured, data), grid)
+                control_share = None
+                if control is not None and not control.empty:
+                    control_share, _ = msr.timeline(measure, self._groups(control, data), grid)
+                item["timeline"] = {
+                    "offsets": grid,
+                    "events": [_round(v) for v in events_share],
+                    "control": [_round(v) for v in control_share] if control_share is not None else None,
+                    "count": events_count,
+                }
+            out.append(item)
+        return out
+
+    @staticmethod
+    def _groups(frame: pd.DataFrame, data: dict):
+        """``(features, positions)`` per symbol of a frame of events, releasing each symbol's features
+        once it has been read."""
+        if frame.empty:
+            return
+        for symbol, group in frame.groupby("symbol", sort=False):
+            features = data.get(symbol)
+            if features is None:
+                continue
+            yield features, group["pos"].to_numpy(dtype=np.int64)
+            features.release()
 
     def split_by_outcome(self, events: pd.DataFrame, data: dict[str, feat.Features]) -> tuple[pd.DataFrame, pd.DataFrame]:
         """With an ``outcome`` in the spec: the events that went on to gain at least ``min_return``
@@ -1040,12 +1153,12 @@ class ResearchStudy:
         missed = events[reached == 0].reset_index(drop=True)
         return met, missed
 
-    def _test_differences(self, measured, control, stats, characteristics, forward) -> list[dict]:
+    def _test_differences(self, measured, control, stats, characteristics, forward, measures=()) -> list[dict]:
         """Tests every comparison of the events with the comparison group, in place: a Mann–Whitney
-        test for each measurement and forward return, a two-proportion test for each characteristic.
-        The p-values are adjusted together (Benjamini–Hochberg), since a Study makes dozens of
-        comparisons and some would look significant by chance. Returns the differences that stand
-        out: q < 0.05 and at least a small effect, strongest first."""
+        test for each measurement, forward return and measure, a two-proportion test for each
+        characteristic. The p-values are adjusted together (Benjamini–Hochberg), since a Study makes
+        dozens of comparisons and some would look significant by chance. Returns the differences that
+        stand out: q < 0.05 and at least a small effect, strongest first."""
         tests: list[dict] = []
         for item in stats:
             name = column(item["metric"], item["offset"])
@@ -1065,6 +1178,14 @@ class ResearchStudy:
             item["test"] = _test_json(result, "effect")
             if item["test"]:
                 tests.append({"kind": "forward", "window": item["window"], "test": item["test"]})
+        for item in measures:
+            name = measure_column(item["index"])
+            # "never" (conditions that never held in the window) ranks after every number.
+            ev, cv = msr.ranked(measured.get(name, []), control.get(name, []))
+            result = tests_mod.mann_whitney(ev, cv)
+            item["test"] = _test_json(result, "effect")
+            if item["test"]:
+                tests.append({"kind": "measure", "index": item["index"], "label": item["label"], "test": item["test"]})
         qs = tests_mod.benjamini_hochberg([t["test"]["p"] for t in tests])
         for t, q in zip(tests, qs):
             t["test"]["q"] = _round(q)
@@ -1086,7 +1207,7 @@ class ResearchStudy:
         # several traits rather than one trait at every point.
         seen, out = set(), []
         for t in notable:
-            key = (t["kind"], t.get("metric") or t.get("label") or t.get("window"))
+            key = (t["kind"], t["index"]) if t["kind"] == "measure" else (t["kind"], t.get("metric") or t.get("label") or t.get("window"))
             if key not in seen:
                 seen.add(key)
                 out.append(t)
@@ -1191,7 +1312,13 @@ def _show(result: dict) -> None:
         return
     s = result["summary"]
     print(f"\n{title}")
+    if result["spec"].get("question"):
+        print(f"  {result['spec']['question']}")
     print(f"  {s['events']} events, {s['unique_symbols']} unique stocks, {s['first_event']} to {s['last_event']}")
+    for item in result.get("measures", []):
+        e = item["events"]
+        measured = sum(e["status"][k] for k in msr.MEASURED)
+        print(f"  {item['label']} ({item['stat']}): median {e['median']}  (p25 {e['p25']}, p75 {e['p75']}; measured for {measured} of {s['events']})")
     for item in result["stats"]:
         if item["offset"] < 0 and item["events"]["count"]:
             e = item["events"]
@@ -1205,7 +1332,8 @@ def engine_build() -> str:
     """A fingerprint of the engine's own code, so a run says exactly which engine it was, and one that
     ran an out-of-date copy is plain to see."""
     digest = hashlib.sha256()
-    for module in (__file__, feat.__file__):
+    # Every module a Study's numbers depend on: a new one belongs here as well as in client_files.rs.
+    for module in (__file__, feat.__file__, msr.__file__):
         try:
             with open(module, "rb") as f:
                 digest.update(f.read().replace(b"\r\n", b"\n"))

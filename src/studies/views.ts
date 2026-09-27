@@ -3,15 +3,42 @@
  *  numbers themselves come from the engine; this only arranges them. Pure. */
 
 import type { Cell } from '../python/results';
+import { measureUnit, type MeasureUnit } from './measures';
 import { featureUnit, type Unit } from './metrics';
 import type { Stat, StudyResultData } from './result';
-import { metricColumn } from './spec';
+import { measureColumn, metricColumn } from './spec';
 
 export interface TableColumn {
   key: string;
   index: number;
   metric: string | null;
-  unit: Unit | 'date' | 'text' | 'symbol';
+  unit: Unit | MeasureUnit | 'date' | 'text' | 'symbol';
+  /** For a measure's column: its index in the spec, and where the row's status is (shown when there is no value). */
+  measure?: { index: number; statusIndex: number };
+}
+
+/** Why a measure has no value for an event, in a word or two. */
+export const STATUS_WORD: Record<string, string> = {
+  never: 'never',
+  too_recent: 'too recent',
+  no_history: 'no history',
+  not_found: 'not found',
+  empty: 'empty window',
+};
+
+/** The event table's columns for the measures: each one's value and, for a window with a found
+ *  endpoint, the day it began. */
+export function measureColumns(result: StudyResultData): TableColumn[] {
+  const at = (key: string) => result.events.columns.indexOf(key);
+  const out: TableColumn[] = [];
+  result.spec.measures.forEach((m, k) => {
+    const index = at(measureColumn(k));
+    if (index < 0) return;
+    out.push({ key: measureColumn(k), index, metric: null, unit: measureUnit(m), measure: { index: k, statusIndex: at(measureColumn(k, 'status')) } });
+    const from = at(measureColumn(k, 'from'));
+    if (from >= 0) out.push({ key: measureColumn(k, 'from'), index: from, metric: null, unit: 'date' });
+  });
+  return out;
 }
 
 const BASE: Record<string, TableColumn['unit']> = {
@@ -41,6 +68,7 @@ export function eventColumns(result: StudyResultData, offset: number): TableColu
     const key = `fwd_return_${w}`;
     if (at(key) >= 0) out.push({ key, index: at(key), metric: key, unit: 'percent' });
   }
+  out.push(...measureColumns(result));
   return out;
 }
 

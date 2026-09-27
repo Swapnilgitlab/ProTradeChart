@@ -2,6 +2,8 @@
  *  specification, and a written report. Everything a user needs to continue outside the app. Pure. */
 
 import type { Cell } from '../python/results';
+import { answer, groupNames, measureSentence } from './answer';
+import { measureLine, windowPhrase } from './measures';
 import { featureLabel, featureUnit, formatValue, offsetLabel, windowLabel } from './metrics';
 import type { StudyResultData, TestResult } from './result';
 import { describeFinding } from './significance';
@@ -36,7 +38,8 @@ export function stocksCsv(result: StudyResultData): string {
   const dateAt = at('event_date');
   const numeric = columns
     .map((c, i) => ({ c, i }))
-    .filter(({ c }) => !['symbol', 'name', 'event_date', 'market_cap'].includes(c));
+    // A measure's status and start date are words and dates, not numbers to take a median of.
+    .filter(({ c }) => !['symbol', 'name', 'event_date', 'market_cap'].includes(c) && !/^measure_\d+_(status|from)$/.test(c));
   const groups = new Map<string, Cell[][]>();
   for (const row of rows) {
     const key = String(row[symbolAt] ?? '');
@@ -86,6 +89,13 @@ export function metricsCsv(result: StudyResultData): string {
       out.push([`fwd_return_${f.window}`, f.window, `T+${windowLabel(f.window)}`, group, st.count, st.mean, st.median, st.min, st.max, st.p25, st.p75, ...testCells(f.test, group)]);
     }
   }
+  for (const m of result.measures) {
+    const spec = result.spec.measures[m.index];
+    for (const [group, st] of [['events', m.events], ['control', m.control]] as const) {
+      if (!st) continue;
+      out.push([`measure: ${m.label} (${m.stat})`, null, spec ? windowPhrase(spec.window) : '', group, st.count, st.mean, st.median, st.min, st.max, st.p25, st.p75, ...testCells(m.test, group)]);
+    }
+  }
   return toCsv(header, out);
 }
 
@@ -109,15 +119,22 @@ const pct = (share: number | null) => (share === null ? '—' : `${Math.round(sh
 /** A written report in Markdown: what was asked, what data it ran on, what was found, and its limits. */
 export function reportMarkdown(result: StudyResultData): string {
   const { spec, meta, summary } = result;
+  const found = answer(result);
   const lines: string[] = [
     `# ${spec.name}`,
     '',
+    spec.question ? `**${spec.question}**\n` : '',
     spec.description ? `${spec.description}\n` : '',
+    '## Answer',
+    '',
+    ...found.lines.map((l) => `- ${l.text}${l.coverage ? ` ${l.coverage}` : ''}`),
+    '',
     '## Study',
     '',
     `- Event: ${spec.event.conditions.map(describeCondition).join(' and ')}`,
     `- Period: ${spec.period.start} to ${spec.period.end ?? meta.data_through ?? 'latest'}`,
     `- Universe: ${spec.universe.source === 'instruments' ? `${spec.universe.exchanges.join(' + ')} equities (${spec.universe.provider})` : spec.universe.source === 'watchlist' ? `watchlist "${spec.universe.watchlist}"` : `${spec.universe.symbols.length} symbols`}`,
+    ...spec.measures.map((m) => `- Measure: ${measureLine(m)}`),
     '',
     '## Findings',
     '',
@@ -134,6 +151,11 @@ export function reportMarkdown(result: StudyResultData): string {
   }
   for (const f of result.forward) {
     lines.push(`- Return over the next ${windowLabel(f.window)}: median ${formatValue(f.events.median, 'percent')}, positive in ${pct(f.events.positive.share)}`);
+  }
+  for (const m of result.measures) {
+    const spec_ = spec.measures[m.index];
+    if (!spec_ || found.lines.some((l) => l.index === m.index)) continue; // headline measures are in the answer
+    lines.push(`- ${measureSentence(m, spec_, groupNames(result).comparison)}`);
   }
   if (result.summary.findings.length) {
     const group = result.summary.control_kind === 'outcome' ? 'events that reached the outcome' : 'events';

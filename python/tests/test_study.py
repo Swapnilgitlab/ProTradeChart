@@ -30,6 +30,23 @@ def spec(**changes):
         "forward_windows": [63, 126],
         "metrics": ["return_63", "rsi_14", "dist_high_252", "rvol_20"],
         "characteristics": [{"label": "Above 200 EMA", "left": "close", "op": ">", "right": "ema_200"}],
+        "question": "What did stocks look like on the way to doubling?",
+        # A fixed window first (the fixture's shape test types a list by its first element, so this one
+        # carries a histogram, a timeline and a comparison), then an episode with a found start.
+        "measures": [
+            {
+                "label": "Above the 50 EMA",
+                "stat": "share",
+                "headline": True,
+                "conditions": [{"left": "close", "op": ">", "right": "ema_50"}],
+                "window": {"start": {"offset": -252}, "end": {"offset": 0}},
+            },
+            {
+                "label": "The run from the 12-month low",
+                "stat": "length",
+                "window": {"start": {"find": "lowest", "feature": "close", "within": 252}, "end": {"offset": 0}},
+            },
+        ],
         "control_group": {"enabled": True, "samples_per_event": 2, "seed": 7},
     }
     base.update(changes)

@@ -26,6 +26,8 @@ export interface ActiveRun {
 
 interface Tracked extends ActiveRun {
   studyId: string;
+  /** How many measures the Study asked for, to notice an engine that doesn't know them. */
+  measures: number;
   gotResult: boolean;
   data: StudyResultData | null;
   error: string | null;
@@ -39,20 +41,22 @@ interface Options {
   /** Called whenever a run has been stored, so lists can be re-read. */
   onStored: () => void;
   onStoreError: (message: string) => void;
+  /** Something about a finished run the user should know (its result is still shown). */
+  onWarning: (message: string) => void;
 }
 
 /** Runs Studies with the Python engine, one at a time: the progress, the console tail, and a promise
  *  per run that settles when the engine exits — after its result is stored. Used by Run Study and
  *  by the research queue, which awaits one run before starting the next (the broker's pace is
  *  shared, so running two at once wouldn't be faster). Nothing starts a run but `start`. */
-export function useStudyRunner({ onStored, onStoreError }: Options) {
+export function useStudyRunner({ onStored, onStoreError, onWarning }: Options) {
   const [run, setRun] = useState<ActiveRun | null>(null);
   const [progress, setProgress] = useState<StudyProgress | null>(null);
   const [log, setLog] = useState<{ text: string; error: boolean }[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const runRef = useRef<Tracked | null>(null);
-  const callbacks = useRef({ onStored, onStoreError });
-  callbacks.current = { onStored, onStoreError };
+  const callbacks = useRef({ onStored, onStoreError, onWarning });
+  callbacks.current = { onStored, onStoreError, onWarning };
 
   useEffect(() => {
     if (!run) return;
@@ -81,6 +85,10 @@ export function useStudyRunner({ onStored, onStoreError }: Options) {
         }
         active.gotResult = true;
         active.data = data;
+        if (active.measures > 0 && data.spec.measures.length === 0) {
+          // An engine older than measures drops them without a word; the result would look complete.
+          callbacks.current.onWarning('This Study has measures, but the engine that ran it doesn’t know them: restart the app so it runs the current engine.');
+        }
         active.onResult?.(data);
         active.storing = storeStudyRun(data, active.studyId)
           .then((id) => {
@@ -119,6 +127,7 @@ export function useStudyRunner({ onStored, onStoreError }: Options) {
           startedAt: Date.now(),
           label: spec.name,
           studyId,
+          measures: spec.measures.length,
           gotResult: false,
           data: null,
           error: null,

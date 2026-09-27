@@ -47,7 +47,11 @@ const CHARACTERISTICS: Condition[] = [
 export const DEFAULT_MIN_TRADED_VALUE = 1e7;
 export const DEFAULT_BENCHMARK = 'zerodha:NSE:NIFTY_500';
 
-function base(name: string, template: string, description: string, event: StudySpec['event'], extra: Partial<StudySpec> = {}): StudySpec {
+/** What a template changes from the base. Measures are written in their short form (defaults left
+ *  out); `normalizeSpec` completes them. */
+type Extra = Omit<Partial<StudySpec>, 'measures'> & { measures?: Record<string, unknown>[] };
+
+function base(name: string, template: string, description: string, event: StudySpec['event'], extra: Extra = {}): StudySpec {
   return normalizeSpec({
     version: 1,
     name,
@@ -90,6 +94,26 @@ export const TEMPLATES: readonly StudyTemplate[] = [
       'winners_100',
       'Every date a stock’s 12-month return crossed +100%, and its price, volume and technical state before and after.',
       { label: '12M return crosses +100%', conditions: [{ left: 'return_252', op: 'crosses_above', right: 1 }], cooldown_days: 252 },
+      {
+        question: 'What did stocks look like on the way to doubling in a year, and what happened next?',
+        measures: [
+          {
+            label: 'Closed above its 50 EMA',
+            stat: 'share',
+            headline: true,
+            conditions: [{ left: 'close', op: '>', right: 'ema_50' }],
+            window: { start: { offset: -252 }, end: { offset: 0 } },
+          },
+          {
+            label: 'The run from its 12-month low',
+            stat: 'length',
+            headline: true,
+            window: { start: { find: 'lowest', feature: 'close', within: 252 }, end: { offset: 0 } },
+          },
+          { label: 'Worst fall on the way up', stat: 'max_drawdown', window: { start: { offset: -252 }, end: { offset: 0 } } },
+          { label: 'Worst fall in the 6 months after', stat: 'max_drawdown', window: { start: { offset: 0 }, end: { offset: 126 } } },
+        ],
+      },
     ),
   },
   {

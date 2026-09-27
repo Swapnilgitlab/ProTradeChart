@@ -45,4 +45,24 @@ describe('other exports', () => {
     expect(report).toContain('do not show that any characteristic caused');
     expect(report).toContain('Market cap is not available');
   });
+
+  it('opens the report with the question and the answer, and lists every measure', () => {
+    const report = reportMarkdown(result());
+    const lines = report.split('\n');
+    expect(lines.indexOf('## Answer')).toBeLessThan(lines.indexOf('## Study'));
+    expect(report).toContain('**What did stocks look like on the way to doubling?**');
+    expect(report).toContain('- For the typical stock, “Above the 50 EMA” held on');
+    expect(report).toContain('- Measure: “The run from the 12-month low” — length (days)');
+    // The measure that isn't a headline is reported under Findings.
+    expect(report).toContain('- The typical episode from its lowest close of the prior 12 months to the event lasted');
+  });
+
+  it('puts each measure in the metrics CSV and keeps words out of the stock medians', () => {
+    const r = result();
+    expect(metricsCsv(r)).toContain('measure: Above the 50 EMA (share),,in the 12 months up to and including the event,events,1,');
+    const header = stocksCsv(r).split('\r\n')[0];
+    expect(header).toContain('median_measure_0');
+    expect(header).not.toContain('measure_0_status');
+    expect(header).not.toContain('measure_1_from');
+  });
 });

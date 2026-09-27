@@ -132,10 +132,11 @@ export function CompareView({ a, b, onOpen, onClose }: Props) {
           )}
         </div>
         <Rows title="Summary" rows={c.summary} a={label(a, 'A')} b={label(b, 'B')} />
+        <Rows title="Measures (median per event)" rows={c.measures} a="A" b="B" />
         <Rows title={`Median at ${offsetLabel(offset)}`} rows={c.metrics} a="A" b="B" />
         <Rows title={`Share at ${offsetLabel(offset)}`} rows={c.characteristics} a="A" b="B" />
         <Rows title="After the event" rows={c.forward} a="A" b="B" />
-        {c.metrics.length === 0 && <p className="muted small">The two runs measured no metric in common.</p>}
+        {c.metrics.length === 0 && c.measures.length === 0 && <p className="muted small">The two runs measured nothing in common.</p>}
         <p className="muted small">Each figure is among that run’s own events. Differences between runs are historical associations too.</p>
       </section>
     </div>

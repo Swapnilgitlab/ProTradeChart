@@ -9,9 +9,11 @@
  *  reviews it and presses Run Study. `explainSummary` is what an explanation is given: a result's
  *  counts, tests and medians, never its events or prices. Pure. */
 
+import { answer } from './answer';
+import { windowPhrase, windowSide } from './measures';
 import { ALIASES, FAMILIES, MAX_WINDOW, PLAIN, type Family } from './metrics';
 import type { StudyResultData, TestResult } from './result';
-import { LIMITS, normalizeSpec, OPS, SERIES, SpecError, type StudySpec } from './spec';
+import { FINDS, LIMITS, MEASURE_STATS, normalizeSpec, OPS, SERIES, SpecError, type StudySpec } from './spec';
 
 /** What each family computes. A `Record` over every family, so a new one can't be left out. */
 const FAMILY_MEANING: Record<Family, string> = {
@@ -85,8 +87,34 @@ Returns, distances, slopes and volatilities are fractions: 0.25 is +25%, 1.0 is 
 - pre_event_filters: up to ${LIMITS.filters} conditions, each with at = bars before the event it is judged at (0: on the event bar). A filter judged before the event uses only what was known then.
 - lookback_windows: bars before the event at which metrics are observed, 1 to ${LIMITS.windows} values of at most ${MAX_WINDOW}, e.g. [252, 126, 63, 21].
 - forward_windows: bars after the event whose returns are measured, 1 to ${LIMITS.windows} values, e.g. [21, 63, 126, 252].
-- metrics: 1 to ${LIMITS.metrics} feature names measured at each observation point (and at the event). Prefer distances (dist_ema_200) over raw averages (ema_200), which can't be compared across stocks.
+- metrics: up to ${LIMITS.metrics} feature names measured at each observation point (and at the event); [] when measures alone answer the question. Prefer distances (dist_ema_200) over raw averages (ema_200), which can't be compared across stocks.
 - characteristics: up to ${LIMITS.characteristics} yes/no conditions counted at each observation point, each with a short label (e.g. {"left": "close", "op": ">", "right": "ema_200", "label": "Above 200 EMA"}).
+- question: the trader's question, in plain words (at most ${LIMITS.question} characters). It is shown above the answer.
+
+## Snapshots and measures
+metrics and characteristics are snapshots: each reads ONE bar, at an observation point (the event, or N bars before or after it). They answer "what did the stock look like on that day?" and "what share of events had X on that day?".
+measures read a WINDOW of bars and give ONE NUMBER PER EVENT: on how many days (or what share of days) something held, the longest streak, how many separate times it started, the average/lowest/highest of a feature, the return, biggest rise or worst fall, how long an episode lasted. Any question about the journey to an event, its aftermath, or a stretch between two found days needs measures: "on how many days in the 12 months before…", "how long did the run take", "how far did it fall afterwards", "how many pullbacks to the 21 EMA". Never answer such a question with snapshots or characteristics sampled at observation points: that measures something else.
+A Study needs at least one metric or one measure; metrics may be [] when measures answer the question.
+
+- measures: up to ${LIMITS.measures} objects {label, stat, conditions, feature, window, headline}.
+- label: short and specific, e.g. "Closed within 3% above its 21 EMA".
+- stat: one of ${MEASURE_STATS.map((s) => `"${s}"`).join(', ')}.
+  - With conditions (1–${LIMITS.measureConditions} conditions that must ALL hold on a day, so a band is two conditions: dist_ema_21 >= 0 and dist_ema_21 <= 0.03): share (fraction of the window's days they held), count (days they held), longest_run (longest streak of consecutive days), runs (separate stretches in which they held, e.g. pullbacks into a zone), bars_to_first (days from the window's start to the first day they held; "never" if they didn't), bars_since_last (days from the last day they held to the window's end).
+  - With feature (one feature name): mean, min, max (over the window's days), start_value, end_value, change (end minus start).
+  - Price, no inputs: return (close at the end ÷ close at the start − 1), max_gain (best close above the start's), max_drawdown (worst peak-to-trough fall of the close within the window), length (days in the window; only for a window with a found endpoint).
+  - Unused inputs are [] (conditions) and null (feature).
+- window: {start, end}. A window runs from bar A to bar B: counting stats read the days after A up to and including B; price stats read the closes at A and B. Each endpoint is either:
+  - {"offset": k}: k bars from the event bar (negative before, 0 the event, positive after), |k| ≤ ${MAX_WINDOW}.
+  - {"find", "feature", "conditions", "direction", "within", "if_not_found"}: a day found near the event, searched in the "within" bars before the event (direction "before", up to and including the event bar) or after it ("after"). find is "lowest" or "highest" (of feature; conditions []) or "first" or "last" (the first/last day conditions all held; feature null). if_not_found: "cap" (use the far edge of the search; the value is then a lower bound) or "skip" (leave that event unmeasured).
+- headline: true for the 1–${LIMITS.headlines} measures that answer the question; they are stated first in the answer.
+- Examples of windows:
+  - The 12 months up to and including the event: {"start": {"offset": -252}, "end": {"offset": 0}}
+  - The 6 months after the event: {"start": {"offset": 0}, "end": {"offset": 126}}
+  - From the stock's lowest close of the prior year to the event (the run-up): {"start": {"find": "lowest", "feature": "close", "conditions": [], "direction": "before", "within": 252, "if_not_found": "cap"}, "end": {"offset": 0}}
+  - From the event until the first close below the 50 SMA, looking a year ahead (how long the trend lasted): {"start": {"offset": 0}, "end": {"find": "first", "feature": null, "conditions": [{"left": "close", "op": "<", "right": "sma_50", "label": null}], "direction": "after", "within": 252, "if_not_found": "cap"}}
+- Example measure: {"label": "Closed within 3% above its 21 EMA", "stat": "count", "conditions": [{"left": "dist_ema_21", "op": ">=", "right": 0, "label": null}, {"left": "dist_ema_21", "op": "<=", "right": 0.03, "label": null}], "feature": null, "window": {"start": {"offset": -252}, "end": {"offset": 0}}, "headline": true}
+
+## More fields
 - benchmark: an index symbol for rs_N features, e.g. "zerodha:NSE:NIFTY_500"; null when no rs_ feature is used.
 - outcome: null, or {window, min_return}: split the events into those whose price rose at least min_return within window bars after the event, and those that didn't, and compare the two instead of using random dates.
 - control_group: {enabled, samples_per_event (1–10), seed}. Enabled with 2 samples per event and seed 42 unless asked: random non-event dates of the same stocks, filtered the same way.
@@ -115,6 +143,27 @@ const object = (properties: Record<string, object>, required = Object.keys(prope
   additionalProperties: false,
 });
 const CONDITION = object({ left: STRING, op: { type: 'string', enum: [...OPS] }, right: { anyOf: [NUMBER, STRING] }, label: nullable(STRING) });
+const ENDPOINT = {
+  anyOf: [
+    object({ offset: INTEGER }),
+    object({
+      find: { type: 'string', enum: [...FINDS] },
+      feature: nullable(STRING),
+      conditions: { type: 'array', items: CONDITION },
+      direction: { type: 'string', enum: ['before', 'after'] },
+      within: INTEGER,
+      if_not_found: { type: 'string', enum: ['skip', 'cap'] },
+    }),
+  ],
+};
+const MEASURE = object({
+  label: STRING,
+  stat: { type: 'string', enum: [...MEASURE_STATS] },
+  conditions: { type: 'array', items: CONDITION },
+  feature: nullable(STRING),
+  window: object({ start: ENDPOINT, end: ENDPOINT }),
+  headline: { type: 'boolean' },
+});
 
 /** A Study Specification as JSON Schema, sent to Claude as reference text (no numeric or length
  *  limits: `normalizeSpec` enforces those). */
@@ -122,6 +171,7 @@ export const SPEC_SCHEMA = object({
   version: { type: 'integer', enum: [1] },
   name: STRING,
   description: STRING,
+  question: STRING,
   template: nullable(STRING),
   universe: object({
     source: { type: 'string', enum: ['instruments', 'watchlist', 'symbols'] },
@@ -145,6 +195,7 @@ export const SPEC_SCHEMA = object({
   forward_windows: { type: 'array', items: INTEGER },
   metrics: { type: 'array', items: STRING },
   characteristics: { type: 'array', items: CONDITION },
+  measures: { type: 'array', items: MEASURE },
   benchmark: nullable(STRING),
   outcome: nullable(object({ window: INTEGER, min_return: NUMBER })),
   control_group: object({ enabled: { type: 'boolean' }, samples_per_event: INTEGER, seed: INTEGER }),
@@ -253,7 +304,26 @@ export function explainSummary(result: StudyResultData): Record<string, unknown>
   const m = result.meta;
   const s = result.summary;
   return {
+    question: result.spec.question || null,
+    // The app's own plain-language answer, built from the headline measures (or, with none, from
+    // forward returns and findings). An explanation starts from it.
+    answer: answer(result).lines.map((l) => (l.coverage ? `${l.text} ${l.coverage}` : l.text)),
     offsets_note: 'offset is bars relative to the event: -63 is 63 bars (about 3 months) before, 0 is the event bar',
+    measures: result.measures.map((r) => {
+      const spec = result.spec.measures[r.index];
+      return {
+        label: r.label,
+        stat: r.stat,
+        headline: spec?.headline ?? false,
+        window: spec ? windowPhrase(spec.window) : null,
+        side: spec ? windowSide(spec.window) : null,
+        events_median: round(r.events.median),
+        events_iqr: [round(r.events.p25), round(r.events.p75)],
+        events_status: r.events.status,
+        comparison_median: round(r.control?.median),
+        test: test(r.test),
+      };
+    }),
     summary: {
       events: s.events,
       unique_symbols: s.unique_symbols,

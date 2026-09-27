@@ -72,6 +72,17 @@ project uses [Semantic Versioning](https://semver.org).
   ones to run and they run one after another, then Claude writes a synthesis across the results — what they agree on, where the
   evidence is thin — and suggests follow-up questions, each needing its own approval. Every round is recorded in a Research
   Notebook. Claude's answers now stream, so long plans don't time out, and every Claude button shows its progress.
+- **Studies: measure the journey to an event, its aftermath, and episodes.** A Study could only take snapshots on single days
+  around each event, so a question such as "on how many days in the 12 months before doubling did it close just above its 21
+  EMA?" came back as "what share of stocks were above it on that one day". Studies now have **measures**: one number per event
+  over a window — days (or share of days) a set of conditions all held, the longest streak, separate stretches (pullbacks), a
+  feature's average, lowest or highest, the return, biggest rise, worst fall — over a fixed window (the 12 months before, the 6
+  months after) or an **episode** that starts or ends on a day found near the event (from its 12-month low; until its first
+  close below the 50 SMA). Nothing is estimated: an event whose window is too recent, lacks history, or whose trend hadn't broken
+  within the search says so. Each result now opens with a plain-English **answer** from the Study's headline measures, with the
+  comparison group and how many events it covers. A Study can have a **question**, shown above its answer. Claude now drafts
+  such questions as measures, and says what a Study can't express instead of approximating it. Earlier Studies and results open
+  as before.
 
 ### Fixed
 

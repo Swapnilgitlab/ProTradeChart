@@ -140,6 +140,18 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   (`listing_series` / `pick_listings`) exists in `protrade/study.py` and `store/study_universe.rs` (for the pre-run estimate):
   change both. A first run is bound by the broker's pace, so never fetch what can't be a stock, and keep the load a single
   pool rather than batches. See "Studies" in `docs/ARCHITECTURE.md`.
+- A Study looks at an event three ways: **snapshots** (`metrics`, `characteristics`: one bar at an observation point),
+  **measures** over a window (`measures`: one number per event, e.g. days a condition held in the 12 months before), and
+  **episodes** (a measure whose window starts or ends on a day found near the event: its 12-month low, the first close below
+  the 50 SMA). A question about time must be a measure, never snapshots sampled at a few points — that silently answers
+  something else. Measures live in `protrade/measures.py` (pure numpy, per symbol) and `spec.ts`/`measures.ts`; the window
+  model is fixed: bar A → bar B, counting stats read A+1…B, price stats the closes at A and B (so `{-252}→{0}` includes the
+  event bar and its return is `return_252`). A before-window never reads a bar after the event; a window with any unknown
+  bar is blank (`no_history`), never partial; a search that didn't find its day is `capped` (a lower bound, said so) or
+  `not_found`, and one the data ended on is `too_recent` — never a made-up number. Both validators are tested against the one
+  file `src/studies/fixtures/spec-cases.json`: add a rule there, not to one side. A new `protrade/*.py` module the engine uses
+  goes in `client_files.rs` `FILES` **and** `engine_build()`'s list. The answer a result opens with (`studies/answer.ts`) is
+  built from the numbers, deterministically, and drawn as text.
 - A Study's significance tests (`protrade/stats_tests.py`) are standard library + numpy/pandas — don't add scipy — and their
   known-answer tests were computed with scipy/statsmodels; keep them. A q-value below 0.05 is still an association: never word
   a finding as a cause (`studies/significance.ts`). A run in a Research Notebook is never pruned (`store/studies.rs`).
@@ -152,7 +164,8 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   (`ai/`), never the webview. What it returns is an untrusted *proposal*: `parseDraft` re-validates the spec with
   `normalizeSpec`, the user reviews it, and it never starts a run; an explanation is drawn as text only and worded as
   association. Explanations get `explainSummary` (counts, medians, tests), never event rows, symbols or prices. The system
-  prompts (`ai/prompts.rs`) forbid substituting unavailable data; `SPEC_SCHEMA` / `specReference` (`studies/assistant.ts`)
+  prompts (`ai/prompts.rs`) forbid substituting unavailable data, and forbid answering a question about time with snapshots
+  (a test checks the wording): what the spec can't express goes in `unavailable`. `SPEC_SCHEMA` / `specReference` (`studies/assistant.ts`)
   describe the spec and must change with it (a test checks the schema against every template). `SPEC_SCHEMA` is prompt *text*,
   never the request's output schema: that is compiled into a grammar, and a spec-sized one is refused ("compiled grammar is too
   large"), so a spec comes back as a JSON string. Keep output schemas small, with no `anyOf` (a test checks). See "AI Study Builder" in

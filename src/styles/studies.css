@@ -578,6 +578,21 @@
   white-space: normal;
   min-width: 200px;
 }
+/* The Study's question and the plain answer to it, from its headline measures. */
+.study-question {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.study-answer {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.study-answer li + li {
+  margin-top: 4px;
+}
 .study-notebook-name {
   flex: 1;
   max-width: 480px;

@@ -59,5 +59,8 @@ export function describeFinding(f: Finding, group: string, comparison: string): 
   if (f.kind === 'forward') {
     return `Over the next ${windowLabel(f.window)}, returns were ${higher ? 'higher' : 'lower'} among ${group} than among ${comparison} (${size} effect, ${q}).`;
   }
+  if (f.kind === 'measure') {
+    return `“${f.label}” was ${higher ? 'higher' : 'lower'} among ${group} than among ${comparison} (${size} effect, ${q}).`;
+  }
   return `At ${offsetLabel(f.offset)}, ${featureLabel(f.metric)} was ${higher ? 'higher' : 'lower'} among ${group} than among ${comparison} (${size} effect, ${q}).`;
 }

@@ -1,0 +1,244 @@
+{
+  "_about": "Study Specification cases both validators are tested against: src/studies/spec.test.ts (normalizeSpec) and python/tests/test_measures.py (normalize_spec). Each case replaces top-level keys of `base`. A refused case must fail with a message containing `word`; an accepted case must normalise its measures to exactly `measures` (when given) in both languages.",
+  "base": {
+    "version": 1,
+    "name": "Doublers near the 21 EMA",
+    "period": { "start": "2018-01-01", "end": null },
+    "event": { "conditions": [{ "left": "return_252", "op": "crosses_above", "right": 1 }], "cooldown_days": 252 },
+    "metrics": [],
+    "measures": [
+      {
+        "label": "Closed within 3% above its 21 EMA",
+        "stat": "share",
+        "headline": true,
+        "feature": null,
+        "conditions": [
+          { "left": "dist_ema_21", "op": ">=", "right": 0 },
+          { "left": "dist_ema_21", "op": "<=", "right": 0.03 }
+        ],
+        "window": { "start": { "offset": -252 }, "end": { "offset": 0 } }
+      }
+    ]
+  },
+  "refused": [
+    { "patch": { "metrics": [], "measures": [] }, "word": "at least one metric or one measure" },
+    { "patch": { "metrics": "rsi_14" }, "word": "metrics must be a list" },
+    { "patch": { "question": 7 }, "word": "question must be text" },
+    { "patch": { "question": "QUESTION_TOO_LONG" }, "word": "question can be at most 500" },
+    { "patch": { "measures": "share" }, "word": "measures must be a list" },
+    { "patch": { "measures": ["share"] }, "word": "measures[0] must be an object" },
+    {
+      "patch": { "measures": [{ "stat": "median", "window": { "start": { "offset": -10 }, "end": { "offset": 0 } } }] },
+      "word": "measures[0].stat"
+    },
+    {
+      "patch": { "measures": [{ "stat": "share", "conditions": [], "window": { "start": { "offset": -10 }, "end": { "offset": 0 } } }] },
+      "word": "measures[0].conditions"
+    },
+    {
+      "patch": { "measures": [{ "stat": "count", "conditions": [{ "left": "nonsense_3", "op": ">", "right": 0 }], "window": { "start": { "offset": -10 }, "end": { "offset": 0 } } }] },
+      "word": "measures[0].conditions[0]"
+    },
+    {
+      "patch": { "measures": [{ "stat": "mean", "feature": null, "window": { "start": { "offset": -10 }, "end": { "offset": 0 } } }] },
+      "word": "measures[0].feature"
+    },
+    {
+      "patch": { "measures": [{ "stat": "max", "feature": "nonsense_3", "window": { "start": { "offset": -10 }, "end": { "offset": 0 } } }] },
+      "word": "measures[0].feature"
+    },
+    {
+      "patch": { "measures": [{ "stat": "return", "window": { "start": { "offset": -10 } } }] },
+      "word": "measures[0].window needs a start and an end"
+    },
+    {
+      "patch": { "measures": [{ "stat": "return", "window": { "start": { "bars": -10 }, "end": { "offset": 0 } } }] },
+      "word": "measures[0].window.start must be"
+    },
+    {
+      "patch": { "measures": [{ "stat": "return", "window": { "start": { "offset": -1001 }, "end": { "offset": 0 } } }] },
+      "word": "measures[0].window.start.offset"
+    },
+    {
+      "patch": { "measures": [{ "stat": "return", "window": { "start": { "offset": -2.5 }, "end": { "offset": 0 } } }] },
+      "word": "measures[0].window.start.offset"
+    },
+    {
+      "patch": { "measures": [{ "stat": "return", "window": { "start": { "find": "bottom", "within": 20 }, "end": { "offset": 0 } } }] },
+      "word": "measures[0].window.start.find"
+    },
+    {
+      "patch": { "measures": [{ "stat": "return", "window": { "start": { "find": "lowest", "feature": "close", "direction": "sideways", "within": 20 }, "end": { "offset": 0 } } }] },
+      "word": "measures[0].window.start.direction"
+    },
+    {
+      "patch": { "measures": [{ "stat": "return", "window": { "start": { "find": "lowest", "feature": "close", "within": 0 }, "end": { "offset": 0 } } }] },
+      "word": "measures[0].window.start.within"
+    },
+    {
+      "patch": { "measures": [{ "stat": "return", "window": { "start": { "find": "lowest", "feature": "close" }, "end": { "offset": 0 } } }] },
+      "word": "measures[0].window.start.within"
+    },
+    {
+      "patch": { "measures": [{ "stat": "return", "window": { "start": { "offset": 0 }, "end": { "find": "first", "conditions": [{ "left": "close", "op": "<", "right": "sma_50" }], "direction": "after", "within": 252, "if_not_found": "guess" } } }] },
+      "word": "measures[0].window.end.if_not_found"
+    },
+    {
+      "patch": { "measures": [{ "stat": "return", "window": { "start": { "find": "lowest", "within": 252 }, "end": { "offset": 0 } } }] },
+      "word": "measures[0].window.start.feature"
+    },
+    {
+      "patch": { "measures": [{ "stat": "return", "window": { "start": { "offset": 0 }, "end": { "find": "first", "conditions": [], "direction": "after", "within": 252 } } }] },
+      "word": "measures[0].window.end.conditions"
+    },
+    {
+      "patch": { "measures": [{ "stat": "return", "window": { "start": { "offset": 0 }, "end": { "offset": 0 } } }] },
+      "word": "measures[0].window can never contain a bar"
+    },
+    {
+      "patch": { "measures": [{ "stat": "return", "window": { "start": { "offset": 5 }, "end": { "find": "lowest", "feature": "close", "direction": "before", "within": 20 } } }] },
+      "word": "measures[0].window can never contain a bar"
+    },
+    {
+      "patch": { "measures": [{ "stat": "length", "window": { "start": { "offset": -252 }, "end": { "offset": 0 } } }] },
+      "word": "length needs a window with a found start or end"
+    },
+    {
+      "patch": { "measures": [{ "stat": "return", "label": "LABEL_TOO_LONG", "window": { "start": { "offset": -10 }, "end": { "offset": 0 } } }] },
+      "word": "measures[0].label can be at most 120"
+    },
+    {
+      "patch": { "measures": "THIRTEEN_MEASURES" },
+      "word": "measures can hold at most 12"
+    },
+    {
+      "patch": { "measures": "FOUR_HEADLINES" },
+      "word": "At most 3 measures can be headline"
+    },
+    {
+      "patch": { "measures": [{ "stat": "mean", "feature": "rs_126", "window": { "start": { "offset": -63 }, "end": { "offset": 0 } } }] },
+      "word": "benchmark"
+    }
+  ],
+  "accepted": [
+    {
+      "name": "the user's question: days within 3% above the 21 EMA, over a fixed window and from the 12-month low",
+      "patch": {
+        "measures": [
+          {
+            "label": "Closed within 3% above its 21 EMA",
+            "stat": "count",
+            "headline": true,
+            "conditions": [
+              { "left": "dist_ema_21", "op": ">=", "right": 0, "label": null },
+              { "left": "DIST_EMA_21", "op": "<=", "right": 0.03 }
+            ],
+            "window": { "start": { "offset": -252 }, "end": { "offset": 0 } }
+          },
+          {
+            "stat": "share",
+            "conditions": [{ "left": "dist_ema_21", "op": ">=", "right": 0 }],
+            "window": { "start": { "find": "lowest", "feature": "close", "within": 252 }, "end": { "offset": 0 } }
+          }
+        ]
+      },
+      "measures": [
+        {
+          "label": "Closed within 3% above its 21 EMA",
+          "stat": "count",
+          "conditions": [
+            { "left": "dist_ema_21", "op": ">=", "right": 0 },
+            { "left": "dist_ema_21", "op": "<=", "right": 0.03 }
+          ],
+          "feature": null,
+          "window": { "start": { "offset": -252 }, "end": { "offset": 0 } },
+          "headline": true
+        },
+        {
+          "label": "dist_ema_21 >= 0",
+          "stat": "share",
+          "conditions": [{ "left": "dist_ema_21", "op": ">=", "right": 0 }],
+          "feature": null,
+          "window": {
+            "start": { "find": "lowest", "feature": "close", "conditions": [], "direction": "before", "within": 252, "if_not_found": "cap" },
+            "end": { "offset": 0 }
+          },
+          "headline": false
+        }
+      ]
+    },
+    {
+      "name": "the aftermath: days until the first close below the 50 SMA, and the trend's length",
+      "patch": {
+        "measures": [
+          {
+            "stat": "bars_to_first",
+            "conditions": [{ "left": "close", "op": "<", "right": "sma_50" }],
+            "window": { "start": { "offset": 0 }, "end": { "offset": 252 } }
+          },
+          {
+            "label": "Trend length",
+            "stat": "length",
+            "feature": "rsi_14",
+            "conditions": [{ "left": "close", "op": ">", "right": 0 }],
+            "window": {
+              "start": { "offset": 0 },
+              "end": { "find": "first", "conditions": [{ "left": "close", "op": "crosses_below", "right": "sma_50" }], "direction": "after", "within": 252, "if_not_found": "skip" }
+            }
+          },
+          { "stat": "mean", "feature": "rvol_20", "window": { "start": { "offset": 0 }, "end": { "offset": 21 } } },
+          { "stat": "max_drawdown", "window": { "start": { "offset": 0 }, "end": { "offset": 126 } } }
+        ]
+      },
+      "measures": [
+        {
+          "label": "close < sma_50",
+          "stat": "bars_to_first",
+          "conditions": [{ "left": "close", "op": "<", "right": "sma_50" }],
+          "feature": null,
+          "window": { "start": { "offset": 0 }, "end": { "offset": 252 } },
+          "headline": false
+        },
+        {
+          "label": "Trend length",
+          "stat": "length",
+          "conditions": [],
+          "feature": null,
+          "window": {
+            "start": { "offset": 0 },
+            "end": { "find": "first", "feature": null, "conditions": [{ "left": "close", "op": "crosses_below", "right": "sma_50" }], "direction": "after", "within": 252, "if_not_found": "skip" }
+          },
+          "headline": false
+        },
+        {
+          "label": "mean of rvol_20",
+          "stat": "mean",
+          "conditions": [],
+          "feature": "rvol_20",
+          "window": { "start": { "offset": 0 }, "end": { "offset": 21 } },
+          "headline": false
+        },
+        {
+          "label": "max_drawdown",
+          "stat": "max_drawdown",
+          "conditions": [],
+          "feature": null,
+          "window": { "start": { "offset": 0 }, "end": { "offset": 126 } },
+          "headline": false
+        }
+      ]
+    },
+    {
+      "name": "an old spec with no question or measures, but metrics",
+      "patch": { "metrics": ["rsi_14"], "measures": null, "question": null },
+      "measures": []
+    },
+    {
+      "name": "a measures-only Study with the benchmark set for an rs_ measure",
+      "patch": {
+        "benchmark": "zerodha:NSE:NIFTY_500",
+        "measures": [{ "stat": "mean", "feature": "rs_126", "window": { "start": { "offset": -63 }, "end": { "offset": 0 } } }]
+      }
+    }
+  ]
+}

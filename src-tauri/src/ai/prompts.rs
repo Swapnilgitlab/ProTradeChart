@@ -64,9 +64,21 @@ pub struct ExplainRequest {
 
 /// What every request that writes a spec is told about Studies and the data behind them.
 const STUDY_RULES: &str = "\
-A Study finds historical events (the first bar on which a set of conditions holds) across Indian stocks, measures \
-features at fixed points before and after each event, and compares them with a comparison group: random non-event \
-dates of the same stocks, or the events that didn't reach an outcome. It is not a scanner and not a backtest.
+A Study finds historical events (the first bar on which a set of conditions holds) across Indian stocks and compares \
+them with a comparison group: random non-event dates of the same stocks, or the events that didn't reach an outcome. \
+It is not a scanner and not a backtest. It looks at each event through three lenses:
+- snapshots (`metrics`, `characteristics`): a feature, or a yes/no condition, read on one bar at fixed points before, \
+at and after the event;
+- measures over a window (`measures`): one number per event summing up a stretch of bars before or after it, such as \
+on how many days (or what share of days) conditions held, the longest streak, the return, the worst fall;
+- episodes (`measures` whose window starts or ends at a day found near the event): from the stock's 12-month low to \
+the event, or from the event until its trend broke.
+
+A question about what happened over time (on how many days, how often, for how long, how far it fell afterwards, the \
+journey to the event or its aftermath) must be answered with measures. Don't substitute snapshots or \
+characteristics sampled at observation points for it: they measure something else. If the spec can't express the \
+question's shape, don't approximate it with something that can: say so in `unavailable`, and in `reply`. Put the \
+question in `question`, in the trader's words, and mark the one to three measures that answer it as `headline`.
 
 The data it has is daily open, high, low, close and volume for NSE and BSE stocks and indices, from the user's broker \
 (Zerodha or Dhan), and every feature is computed from those bars. It does not have market capitalisation, sector or \
@@ -115,11 +127,14 @@ You write the synthesis of a research round for a trader: several ProTradeChart 
 question, and you are given each Study's purpose, specification and result summary.
 
 A Study found historical events (the first bar on which the event's conditions held) across Indian stocks and measured \
-features before and after each event, against a comparison group (random non-event dates of the same stocks, or the \
-events that didn't reach an outcome). Significance tests are Mann-Whitney U for measurements and a two-proportion \
-z-test for yes/no characteristics, with Benjamini-Hochberg q-values within each Study.
+them before and after each event, against a comparison group (random non-event dates of the same stocks, or the \
+events that didn't reach an outcome): snapshots of features on single bars, and measures that sum up a window of bars \
+per event (days a condition held, streaks, returns, falls, episode lengths). Each summary carries `question` and \
+`answer`, the Study's own plain answer from its headline measures. Significance tests are Mann-Whitney U for \
+measurements and measures and a two-proportion z-test for yes/no characteristics, with Benjamini-Hochberg q-values \
+within each Study.
 
-`synthesis` answers the question as far as the results allow, in a few short paragraphs of plain text separated by \
+`synthesis` answers the question as far as the results allow, starting from each Study's answer, in a few short paragraphs of plain text separated by \
 blank lines, with no Markdown, HTML or tables: what the Studies agree on, where they differ or contradict each other, \
 and where the evidence is thin (few events, weak effects, q-values that don't clear 0.05). Use the numbers you are \
 given; don't invent any. `notes` gives one or two sentences per Study (by its index) on what it contributed. `caveats` \
@@ -134,11 +149,15 @@ const EXPLAIN_POLICY: &str = "\
 You explain the result of a ProTradeChart Study to the trader who ran it, in plain language.
 
 A Study found historical events (the first bar on which the event's conditions held) across Indian stocks and measured \
-features before and after each event, against a comparison group (random non-event dates of the same stocks, or the \
-events that didn't reach an outcome). Significance tests are Mann-Whitney U for measurements and a two-proportion \
-z-test for yes/no characteristics, with Benjamini-Hochberg q-values across every test in the result.
+them before and after each event, against a comparison group (random non-event dates of the same stocks, or the \
+events that didn't reach an outcome): snapshots of features on single bars, and measures that sum up a window of bars \
+per event (days a condition held, streaks, returns, falls, episode lengths). The summary carries the Study's \
+`question` and `answer`, its own plain answer from the headline measures, and each measure's status counts (events \
+too recent for the window, without enough history, capped at the limit of a search, or that never saw the \
+condition). Significance tests are Mann-Whitney U for measurements and measures and a two-proportion z-test for yes/no \
+characteristics, with Benjamini-Hochberg q-values across every test in the result.
 
-Explain what the numbers show: how many events there were, what typically came before them, what stood out against \
+Start with the answer to the question, then explain what the numbers show: how many events there were, what typically came before them, what stood out against \
 the comparison group and how strongly, and what happened afterwards. Use the numbers you are given; don't invent any. \
 Say plainly when there are too few events to conclude much. These are historical associations: never say or imply \
 that a feature causes an outcome, or that a pattern will repeat, and don't give trading advice. Name the limits that \
@@ -481,6 +500,30 @@ mod tests {
         let messages = body["messages"].as_array().unwrap();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0]["content"], "What did stocks look like before they doubled?");
+    }
+
+    /// A question about time (how many days, how long) was once drafted as snapshots sampled at a
+    /// few points, which answered something else without saying so. Drafts and plans are told to use
+    /// measures, and to say what the spec can't express instead of approximating it.
+    #[test]
+    fn specs_are_told_to_use_measures_and_not_to_approximate() {
+        let plan = plan_body(&PlanRequest {
+            question: "How long did winners' trends last?".into(),
+            reference: "fields: …".into(),
+            today: "2026-09-26".into(),
+            context: None,
+        })
+        .unwrap();
+        for body in [
+            draft_body(&draft("On how many days did doublers sit near the 21 EMA?")).unwrap(),
+            plan,
+        ] {
+            let system = body["system"].as_str().unwrap();
+            assert!(system.contains("must be answered with measures"));
+            assert!(system.contains("Don't substitute snapshots or characteristics"));
+            assert!(system.contains("don't approximate it with something that can: say so in `unavailable`"));
+            assert!(system.contains("`headline`"));
+        }
     }
 
     #[test]

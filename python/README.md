@@ -62,10 +62,28 @@ study = ResearchStudy({
 universe = study.universe()
 data = study.load(universe)                                  # {symbol: Features}
 events = study.detect_events(data)                           # one row per event: symbol, event_date, price…
-results = study.measure(events, data)                        # metrics at every observation point, forward returns
+results = study.measure(events, data)                        # metrics at every observation point, measures, forward returns
 control = study.measure(study.control_group(data, events), data)
 study.analyze(results, control, data)                        # shows the Study in the app (prints outside it)
 ```
+
+`metrics` are snapshots, read on one bar at each observation point. To ask about a stretch of time — on how many days
+something held before the event, how long a run took, how far a stock fell afterwards — add `measures`: one number per event
+over a window. The window runs from bar A to bar B; day counts read the bars after A up to and including B:
+
+```python
+"measures": [
+    {"label": "Closed within 3% above its 21 EMA", "stat": "count", "headline": True,
+     "conditions": ["dist_ema_21 >= 0", "dist_ema_21 <= 0.03"],          # all must hold on a day
+     "window": {"start": {"offset": -252}, "end": {"offset": 0}}},       # the 12 months up to the event
+    {"label": "The run from its 12-month low", "stat": "length",
+     "window": {"start": {"find": "lowest", "feature": "close", "within": 252}, "end": {"offset": 0}}},
+],
+```
+
+`results` then has `measure_0`, `measure_0_status` (`ok`, `capped`, `never`, `too_recent`, `no_history`, `not_found`, `empty`)
+and, for a window that starts or ends on a found day, `measure_1_from` and `measure_1_bars`. The stats and endpoints are listed
+in `protrade/measures.py`.
 
 Each step takes overrides (`study.detect_events(data, conditions=["close crosses_above prior_high_252"])`). The spec's rules are
 in `normalize_spec`; features are named `family_window` (`return_63`, `ema_200`, `dist_high_252`, `rvol_20`, `rs_126`…, see
