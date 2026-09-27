@@ -48,6 +48,20 @@ describe('reading a plan', () => {
     expect(names[1]).toBe(`${names[0]} (2)`);
   });
 
+  it('reads specs sent as JSON text, and an empty one as none', () => {
+    const plan = parsePlan({
+      summary: '',
+      studies: [
+        { purpose: 'a', spec: JSON.stringify(spec()) },
+        { purpose: 'b', spec: '' },
+      ],
+      unavailable: [],
+    });
+    expect(plan.studies[0].spec?.name).toBe(TEMPLATES[0].spec.name);
+    expect(plan.studies[1].spec).toBeNull();
+    expect(plan.studies[1].problem).toMatch(/no specification/);
+  });
+
   it('survives junk', () => {
     expect(parsePlan('nope').studies).toEqual([]);
     expect(parsePlan({ studies: 'x' }).studies).toEqual([]);

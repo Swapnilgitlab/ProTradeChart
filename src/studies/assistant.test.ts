@@ -90,6 +90,7 @@ describe('the spec reference', () => {
     for (const f of FAMILIES) expect(text).toContain(`- ${f}_N: `);
     for (const p of PLAIN) expect(text).toContain(`- ${p}: `);
     for (const a of Object.keys(ALIASES)) expect(text).toContain(a);
+    expect(text).toContain(JSON.stringify(SPEC_SCHEMA));
   });
 });
 
@@ -110,6 +111,17 @@ describe('reading a draft', () => {
     const d = parseDraft({ reply: 'x', spec: bad, assumptions: [], unavailable: [] });
     expect(d.spec).toBeNull();
     expect(d.problem).toMatch(/unknown feature/);
+  });
+
+  it('reads a spec sent as JSON text, as the API returns it', () => {
+    const d = parseDraft({ reply: 'ok', spec: JSON.stringify(spec()), assumptions: [], unavailable: [] });
+    expect(d.problem).toBeNull();
+    expect(d.spec?.name).toBe(TEMPLATES[0].spec.name);
+    expect(parseDraft({ reply: 'none', spec: '  ', assumptions: [], unavailable: [] })).toMatchObject({ spec: null, problem: null });
+    expect(parseDraft({ reply: 'x', spec: '{"version":1,', assumptions: [], unavailable: [] }).problem).toMatch(/valid JSON/);
+    const bad = spec();
+    bad.period = { start: 'soon' };
+    expect(parseDraft({ reply: 'x', spec: JSON.stringify(bad), assumptions: [], unavailable: [] }).problem).toMatch(/period.start/);
   });
 
   it('keeps no spec when the question cannot be studied', () => {

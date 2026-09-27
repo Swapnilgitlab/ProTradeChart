@@ -2,8 +2,9 @@
  *  Rust, `src-tauri/src/ai/`, with the user's own key).
  *
  *  What is sent: `specReference()` (the Study Specification's fields and the feature grammar, built
- *  from `metrics.ts` so it can't drift from what `normalizeSpec` accepts) and `SPEC_SCHEMA`, the
- *  shape Claude must answer in. What comes back is untrusted: `parseDraft` re-validates the spec
+ *  from `metrics.ts` so it can't drift from what `normalizeSpec` accepts), which includes `SPEC_SCHEMA`
+ *  as text: the shape Claude writes a spec in. (It is not the request's output schema — that one is
+ *  compiled into a grammar, and a spec-sized schema is refused — so a spec comes back as JSON text.) What comes back is untrusted: `parseDraft` re-validates the spec
  *  with `normalizeSpec` and caps every string, and nothing here or downstream runs it — the user
  *  reviews it and presses Run Study. `explainSummary` is what an explanation is given: a result's
  *  counts, tests and medians, never its events or prices. Pure. */
@@ -96,7 +97,11 @@ A feature is a family with a window in bars, family_N (N from 1 to ${MAX_WINDOW}
 ${families}
 Plain names:
 ${plain}
-Aliases (accepted, rewritten to the name on the right): ${aliases}.`;
+Aliases (accepted, rewritten to the name on the right): ${aliases}.
+
+## JSON schema
+A Study Specification, as JSON Schema:
+${JSON.stringify(SPEC_SCHEMA)}`;
 }
 
 const STRING = { type: 'string' } as const;
@@ -111,8 +116,8 @@ const object = (properties: Record<string, object>, required = Object.keys(prope
 });
 const CONDITION = object({ left: STRING, op: { type: 'string', enum: [...OPS] }, right: { anyOf: [NUMBER, STRING] }, label: nullable(STRING) });
 
-/** A Study Specification, in the subset of JSON Schema structured outputs accept (no numeric or
- *  length limits: `normalizeSpec` enforces those). */
+/** A Study Specification as JSON Schema, sent to Claude as reference text (no numeric or length
+ *  limits: `normalizeSpec` enforces those). */
 export const SPEC_SCHEMA = object({
   version: { type: 'integer', enum: [1] },
   name: STRING,
@@ -189,10 +194,21 @@ export function parseDraft(answer: unknown): Draft {
     assumptions: notes(answer.assumptions),
     unavailable: notes(answer.unavailable),
   };
-  if (answer.spec !== null && answer.spec !== undefined) {
+  // The spec arrives as JSON text (see "output schemas" in `ai/prompts.rs`); an object is read too.
+  let raw: unknown = answer.spec;
+  if (typeof raw === 'string') {
+    if (!raw.trim()) return draft;
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      draft.problem = "Claude's spec wasn't valid JSON.";
+      return draft;
+    }
+  }
+  if (raw !== null && raw !== undefined) {
     try {
       // The template is the app's to set; a proposal never claims to be one.
-      draft.spec = { ...normalizeSpec(answer.spec), template: null };
+      draft.spec = { ...normalizeSpec(raw), template: null };
     } catch (e) {
       draft.problem = e instanceof SpecError ? e.message : "Claude's spec couldn't be read.";
     }

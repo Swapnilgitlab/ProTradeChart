@@ -23,7 +23,6 @@ const MAX_SYNTHESIS_BYTES: usize = 1024 * 1024;
 
 const MAX_QUESTION_CHARS: usize = 4_000;
 const MAX_REFERENCE_BYTES: usize = 64 * 1024;
-const MAX_SCHEMA_BYTES: usize = 64 * 1024;
 const MAX_SPEC_BYTES: usize = 64 * 1024;
 const MAX_SUMMARY_BYTES: usize = 256 * 1024;
 const MAX_TURNS: usize = 20;
@@ -43,10 +42,8 @@ pub struct Turn {
 #[serde(rename_all = "camelCase")]
 pub struct DraftRequest {
     pub question: String,
-    /// The Study Specification's fields and the feature grammar, as text.
+    /// The Study Specification's fields, its JSON schema and the feature grammar, as text.
     pub reference: String,
-    /// The JSON schema of a Study Specification.
-    pub spec_schema: Value,
     /// The spec being revised, when there is one.
     pub current_spec: Option<Value>,
     #[serde(default)]
@@ -92,7 +89,10 @@ You help a trader turn a market-research question into a Study Specification for
 
 When revising a spec, change only what the user asked for and keep everything else exactly as it was. `reply` is one \
 or two plain sentences to the user about what you did. If the question can't be turned into a Study at all, set \
-`spec` to null and explain in `reply` and `unavailable`.";
+`spec` to an empty string and explain in `reply` and `unavailable`.
+
+`spec` is the complete Study Specification as JSON text: one JSON object, serialised into the string, that \
+follows the JSON schema in the reference below exactly.";
 
 const PLAN_TASK: &str = "\
 You plan market research for a trader: a small set of Studies for ProTradeChart's Study engine that together answer \
@@ -105,7 +105,10 @@ ones: every Study fetches its stocks' history at the broker's pace, so keep each
 `purpose` says in one sentence what that Study adds. `summary` is two or three sentences on how the plan answers the \
 question. Put what the question asks for that no Study can address in the top-level `unavailable`.
 
-When the findings of an earlier round are given, build on them: test what they suggest, don't repeat what was run.";
+When the findings of an earlier round are given, build on them: test what they suggest, don't repeat what was run.
+
+Each study's `spec` is the complete Study Specification as JSON text: one JSON object, serialised into the string, that \
+follows the JSON schema in the reference below exactly.";
 
 const SYNTHESIS_POLICY: &str = "\
 You write the synthesis of a research round for a trader: several ProTradeChart Studies were run to answer one \
@@ -167,14 +170,20 @@ fn check_today(today: &str) -> Result<(), String> {
         .ok_or_else(|| "today must be a date written YYYY-MM-DD.".into())
 }
 
-/// The shape a draft must come back in. `spec` is the frontend's schema, or null when the question
-/// can't be studied.
-fn draft_schema(spec_schema: &Value) -> Value {
+// The output schemas are compiled into a grammar that constrains Claude's answer, and a large one is
+// refused ("The compiled grammar is too large"): a full Study Specification, with its nullable fields
+// and number-or-feature conditions, was. So a spec travels as JSON *text* in a string field — its
+// shape is described in the system prompt instead, and `normalizeSpec` checks what comes back — and
+// these schemas stay small, with no `anyOf` (a test checks).
+
+/// The shape a draft must come back in. `spec` is the Study Specification as JSON text, or "" when
+/// the question can't be studied.
+fn draft_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
             "reply": {"type": "string"},
-            "spec": {"anyOf": [spec_schema, {"type": "null"}]},
+            "spec": {"type": "string"},
             "assumptions": {"type": "array", "items": {"type": "string"}},
             "unavailable": {"type": "array", "items": {"type": "string"}}
         },
@@ -221,10 +230,6 @@ pub fn draft_body(req: &DraftRequest) -> Result<Value, String> {
         return Err("The spec reference is too large to send.".into());
     }
     check_today(&req.today)?;
-    if !req.spec_schema.is_object() {
-        return Err("The spec schema must be a JSON object.".into());
-    }
-    too_big(&req.spec_schema, MAX_SCHEMA_BYTES, "spec schema")?;
     if req.history.len() > MAX_TURNS {
         return Err(format!(
             "This conversation is too long ({MAX_TURNS} turns at most). Start a new one."
@@ -262,7 +267,7 @@ pub fn draft_body(req: &DraftRequest) -> Result<Value, String> {
         "{DRAFT_TASK}\n\n{STUDY_RULES}\n\nToday is {}.\n\n# The Study Specification\n\n{}",
         req.today, req.reference
     );
-    Ok(body(system, messages, draft_schema(&req.spec_schema)))
+    Ok(body(system, messages, draft_schema()))
 }
 
 /// A stored result's summary → a plain-language explanation.
@@ -298,7 +303,6 @@ pub fn explain_body(req: &ExplainRequest) -> Result<Value, String> {
 pub struct PlanRequest {
     pub question: String,
     pub reference: String,
-    pub spec_schema: Value,
     pub today: String,
     /// The previous round's synthesis, when this plans a follow-up.
     pub context: Option<String>,
@@ -344,7 +348,7 @@ fn bullet_list(items: &[String]) -> String {
     }
 }
 
-fn plan_schema(spec_schema: &Value) -> Value {
+fn plan_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
@@ -353,7 +357,7 @@ fn plan_schema(spec_schema: &Value) -> Value {
                 "type": "object",
                 "properties": {
                     "purpose": {"type": "string"},
-                    "spec": spec_schema,
+                    "spec": {"type": "string"},
                     "assumptions": {"type": "array", "items": {"type": "string"}},
                     "unavailable": {"type": "array", "items": {"type": "string"}}
                 },
@@ -393,10 +397,6 @@ pub fn plan_body(req: &PlanRequest) -> Result<Value, String> {
         return Err("The spec reference is too large to send.".into());
     }
     check_today(&req.today)?;
-    if !req.spec_schema.is_object() {
-        return Err("The spec schema must be a JSON object.".into());
-    }
-    too_big(&req.spec_schema, MAX_SCHEMA_BYTES, "spec schema")?;
     let mut content = String::new();
     if let Some(context) = req.context.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
         if context.chars().count() > MAX_CONTEXT_CHARS {
@@ -412,7 +412,7 @@ pub fn plan_body(req: &PlanRequest) -> Result<Value, String> {
     Ok(body(
         system,
         vec![json!({"role": "user", "content": content})],
-        plan_schema(&req.spec_schema),
+        plan_schema(),
     ))
 }
 
@@ -457,7 +457,6 @@ mod tests {
         DraftRequest {
             question: question.into(),
             reference: "fields: …".into(),
-            spec_schema: json!({"type": "object", "properties": {"name": {"type": "string"}}, "additionalProperties": false}),
             current_spec: None,
             history: vec![],
             today: "2026-09-26".into(),
@@ -465,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn a_draft_asks_for_a_spec_in_the_frontends_schema() {
+    fn a_draft_asks_for_the_spec_as_json_text() {
         let body = draft_body(&draft("  What did stocks look like before they doubled?  ")).unwrap();
         assert_eq!(body["model"], MODEL);
         assert_eq!(body["fallbacks"], "default");
@@ -473,10 +472,7 @@ mod tests {
         assert!(body.get("temperature").is_none());
         let schema = &body["output_config"]["format"];
         assert_eq!(schema["type"], "json_schema");
-        assert_eq!(
-            schema["schema"]["properties"]["spec"]["anyOf"][0]["properties"]["name"]["type"],
-            "string"
-        );
+        assert_eq!(schema["schema"]["properties"]["spec"]["type"], "string");
         assert_eq!(schema["schema"]["additionalProperties"], false);
         let system = body["system"].as_str().unwrap();
         assert!(system.contains("Today is 2026-09-26."));
@@ -518,9 +514,6 @@ mod tests {
         assert!(draft_body(&draft(&"x".repeat(MAX_QUESTION_CHARS + 1))).is_err());
         let mut req = draft("q");
         req.today = "26/09/2026".into();
-        assert!(draft_body(&req).is_err());
-        let mut req = draft("q");
-        req.spec_schema = json!([1]);
         assert!(draft_body(&req).is_err());
         let mut req = draft("q");
         req.current_spec = Some(json!("not an object"));
@@ -579,7 +572,6 @@ mod tests {
         PlanRequest {
             question: question.into(),
             reference: "fields: …".into(),
-            spec_schema: json!({"type": "object", "properties": {}, "additionalProperties": false}),
             today: "2026-09-26".into(),
             context: None,
         }
@@ -593,7 +585,7 @@ mod tests {
         let schema = &body["output_config"]["format"]["schema"];
         assert_eq!(
             schema["properties"]["studies"]["items"]["properties"]["spec"]["type"],
-            "object"
+            "string"
         );
         let system = body["system"].as_str().unwrap();
         assert!(system.contains("between one and four Studies"));
@@ -658,5 +650,45 @@ mod tests {
             studies: vec![bad]
         })
         .is_err());
+    }
+
+    /// Every keyword and object in a schema, at any depth.
+    fn walk<'a>(schema: &'a Value, keys: &mut Vec<&'a str>, objects: &mut Vec<&'a Value>) {
+        match schema {
+            Value::Object(map) => {
+                if map.get("type") == Some(&json!("object")) {
+                    objects.push(schema);
+                }
+                for (k, v) in map {
+                    keys.push(k);
+                    walk(v, keys, objects);
+                }
+            }
+            Value::Array(items) => items.iter().for_each(|v| walk(v, keys, objects)),
+            _ => {}
+        }
+    }
+
+    /// Anthropic compiles an output schema into a grammar and refuses a large one ("The compiled
+    /// grammar is too large"), which a full Study Specification's schema was.
+    #[test]
+    fn output_schemas_stay_small() {
+        for (name, schema) in [
+            ("draft", draft_schema()),
+            ("plan", plan_schema()),
+            ("explain", explain_schema()),
+            ("synthesis", synthesis_schema()),
+        ] {
+            let (mut keys, mut objects) = (Vec::new(), Vec::new());
+            walk(&schema, &mut keys, &mut objects);
+            for banned in ["anyOf", "oneOf", "allOf", "$ref", "$defs", "enum", "format"] {
+                assert!(!keys.contains(&banned), "{name} uses {banned}");
+            }
+            for object in objects {
+                assert_eq!(object["additionalProperties"], false, "{name} has an open object");
+            }
+            let size = schema.to_string().len();
+            assert!(size < 1536, "{name} schema is {size} bytes");
+        }
     }
 }

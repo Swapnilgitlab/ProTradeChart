@@ -3,7 +3,7 @@ import { AlertTriangle, KeyRound, Loader2, MessageSquarePlus, Send, Sparkles, X 
 import { Dialog } from '../../components/Dialog';
 import { confirmDelete } from '../../lib/dialogs';
 import { aiDeleteKey, aiDraftStudy, aiExplainResult, aiKeyStatus, aiSetKey, errorMessage, type AiKeyStatus } from '../../lib/ipc';
-import { explainSummary, parseDraft, parseExplanation, progressText, SPEC_SCHEMA, specReference, type Draft, type Explanation, type Turn } from '../../studies/assistant';
+import { explainSummary, parseDraft, parseExplanation, progressText, specReference, type Draft, type Explanation, type Turn } from '../../studies/assistant';
 import { specChanges } from '../../studies/compare';
 import type { StudyResultData } from '../../studies/result';
 import { interpret, type StudySpec } from '../../studies/spec';
@@ -239,7 +239,7 @@ export function AssistantPanel({ current, onUseNew, onUseRevision, say }: Props)
     setQuestion('');
     try {
       const reply = await ai.call((id) =>
-        aiDraftStudy({ question: q, reference: specReference(), specSchema: SPEC_SCHEMA, currentSpec: base, history, today: today() }, id),
+        aiDraftStudy({ question: q, reference: specReference(), currentSpec: base, history, today: today() }, id),
       );
       setConversation((c) => [...c, { question: q, base, draft: parseDraft(reply.answer), raw: JSON.stringify(reply.answer), error: null, model: reply.model }]);
     } catch (err) {

@@ -13,7 +13,7 @@ import {
   type AiSynthesisRequest,
   type NotebookItemKind,
 } from '../../lib/ipc';
-import { explainSummary, progressText, SPEC_SCHEMA, specReference } from '../../studies/assistant';
+import { explainSummary, progressText, specReference } from '../../studies/assistant';
 import { formatDuration, loadFrom, type Readiness, type UniverseEstimate } from '../../studies/readiness';
 import {
   appendNotes,
@@ -147,7 +147,7 @@ export function ResearchView(props: Props) {
     setError(null);
     try {
       const reply = await ai.call((id) =>
-        aiPlanResearch({ question: text, reference: specReference(), specSchema: SPEC_SCHEMA, today: today(), context }, id),
+        aiPlanResearch({ question: text, reference: specReference(), today: today(), context }, id),
       );
       const parsed = parsePlan(reply.answer);
       if (!parsed.studies.length && !parsed.unavailable.length) throw new Error('Claude proposed no Studies. Try rephrasing the question.');

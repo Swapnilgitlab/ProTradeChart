@@ -153,7 +153,9 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   `normalizeSpec`, the user reviews it, and it never starts a run; an explanation is drawn as text only and worded as
   association. Explanations get `explainSummary` (counts, medians, tests), never event rows, symbols or prices. The system
   prompts (`ai/prompts.rs`) forbid substituting unavailable data; `SPEC_SCHEMA` / `specReference` (`studies/assistant.ts`)
-  describe the spec and must change with it (a test checks the schema against every template). See "AI Study Builder" in
+  describe the spec and must change with it (a test checks the schema against every template). `SPEC_SCHEMA` is prompt *text*,
+  never the request's output schema: that is compiled into a grammar, and a spec-sized one is refused ("compiled grammar is too
+  large"), so a spec comes back as a JSON string. Keep output schemas small, with no `anyOf` (a test checks). See "AI Study Builder" in
   `docs/ARCHITECTURE.md`.
 - The research agent (`ResearchView.tsx`, `studies/research.ts`) never runs a Study the user didn't approve: only the **Run N
   approved Studies** press queues them, exactly the ticked ones, one at a time through `useStudyRunner` (shared with Run Study;

@@ -75,6 +75,8 @@ project uses [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
+- **Asking Claude to draft or change a Study no longer fails** with "The compiled grammar is too large": the answer's schema is
+  now small, and the Study Specification comes back as JSON text that the app validates as before.
 - **Cached daily bars no longer vanish.** The offline cache trimmed old intraday data by comparing against interval names the
   brokers never use, so every broker daily bar older than 45 days was deleted each time the app started. Charts fell back to
   much less data than they should have when a request failed.

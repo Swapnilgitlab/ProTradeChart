@@ -655,7 +655,6 @@ export interface AiAnswer {
 export interface AiDraftRequest {
   question: string;
   reference: string;
-  specSchema: object;
   currentSpec: object | null;
   history: { role: 'user' | 'assistant'; text: string }[];
   today: string;
@@ -687,7 +686,6 @@ export interface AiProgressEvent {
 export interface AiPlanRequest {
   question: string;
   reference: string;
-  specSchema: object;
   today: string;
   /** The previous round's synthesis, when planning a follow-up. */
   context: string | null;

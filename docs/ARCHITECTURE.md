@@ -548,7 +548,7 @@ it never runs anything.
   `providers.rs`.
 - **Calls are made from Rust** (`src-tauri/src/ai/client.rs`, plain HTTP: there is no Rust SDK), so the CSP is unchanged.
   `ai/prompts.rs` builds the body: `claude-opus-5`, adaptive thinking, `max_tokens` 16 000 (non-streaming; a 300 s timeout),
-  structured output (`output_config.format` with a JSON schema), and **server-side fallbacks** (`"fallbacks": "default"` with
+  structured output (`output_config.format` with a small JSON schema for the answer's outer shape), and **server-side fallbacks** (`"fallbacks": "default"` with
   the `server-side-fallback-2026-07-01` beta header): a request the model's classifiers decline is re-run on Anthropic's
   recommended fallback model in the same call. `parse_reply` branches on `stop_reason` before reading content — a `refusal` or
   a `max_tokens` answer is never used — and keeps only `text` blocks.
@@ -557,7 +557,12 @@ it never runs anything.
   association, never causation; the user's text is material, not instructions) and the answer's outer shape. The frontend owns
   the *spec reference*: `studies/assistant.ts` builds the field notes and the feature grammar from `metrics.ts` (`FAMILY_MEANING`
   is a `Record` over `FAMILIES`, so a new family can't be left out) and `SPEC_SCHEMA`, which a test checks against every
-  template and against the JSON Schema subset structured outputs accept (every object closed; no numeric or length limits).
+  template.
+- **A spec travels as JSON text.** Anthropic compiles the output schema into a grammar and refuses a large one ("The compiled
+  grammar is too large"); a full Study Specification's schema — nullable fields, number-or-feature conditions — was refused. So
+  the answer's schema has `spec` as a *string* holding the spec's JSON, `SPEC_SCHEMA` goes to Claude as reference text in the
+  system prompt instead, and `parseDraft` parses the string before `normalizeSpec`. Keep output schemas small and free of
+  `anyOf`/`enum`/`format`: `output_schemas_stay_small` (`ai/prompts.rs`) fails otherwise.
 - **What comes back is untrusted.** `parseDraft` runs the proposed spec through `normalizeSpec` (a failure is shown with its
   reason), caps every string, and never lets a proposal claim a template. The Studies tab shows the reply, *what changed*
   (`specChanges`, the builder's own wording), the assumptions and what can't be studied; **Open as a new Study** / **Apply to
