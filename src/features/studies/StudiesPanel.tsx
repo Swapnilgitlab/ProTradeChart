@@ -744,7 +744,7 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
           ) : view === 'results' && result ? (
             <>
               <ResultExplainer key={result.id ?? 'unsaved'} result={result.data} say={toast} />
-              <StudyResults result={result.data} onOpenEvent={onOpenEvent} onAddToWatchlist={setAdding} />
+              <StudyResults result={result.data} onOpenEvent={onOpenEvent} onAddToWatchlist={setAdding} onEditStudy={() => setView('build')} />
             </>
           ) : (
             <>

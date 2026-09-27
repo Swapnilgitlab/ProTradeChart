@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import engineResult from './fixtures/engine-result.json';
 import { parseStudyResult } from './result';
-import { beforeAfterWindows, eventColumns, eventGrid, headline, liquidityBuckets, median, medianGap } from './views';
+import type { Cell } from '../python/results';
+import { beforeAfterWindows, eventColumns, eventGrid, headline, liquidityBuckets, measureColumns, median, medianGap, sortRows } from './views';
 
 const result = () => parseStudyResult(structuredClone(engineResult))!;
 
@@ -35,5 +36,29 @@ describe('result views', () => {
     expect(medianGap({ median: 3 } as never, { median: 1 } as never)).toBe(2);
     expect(medianGap(null, { median: 1 } as never)).toBeNull();
     expect(headline(r)).toBe('1 event · 1 unique stock · 2019');
+  });
+});
+
+describe('measure columns and sorting', () => {
+  it('give each measure its value column, with where its status is, and an episode its start date', () => {
+    const r = result();
+    const cols = measureColumns(r);
+    expect(cols.map((c) => c.key)).toEqual(['measure_0', 'measure_1', 'measure_1_from']);
+    expect(cols[0]).toMatchObject({ unit: 'share', measure: { index: 0, statusIndex: r.events.columns.indexOf('measure_0_status') } });
+    expect(cols[1].unit).toBe('bars');
+    expect(cols[2].unit).toBe('date');
+    expect(eventColumns(r, 0).map((c) => c.key)).toContain('measure_1_from');
+  });
+
+  it('sort rows by a column either way, blanks always last, and keep the engine’s order without a sort', () => {
+    const r = result();
+    const col = r.events.columns.length;
+    const rows: Cell[][] = [3, null, 1, 2].map((v, i) => [...r.events.rows[0].slice(0, col - 1), i === 1 ? null : v]);
+    const data = { ...r, events: { ...r.events, columns: [...r.events.columns.slice(0, col - 1), 'x'], rows } };
+    const values = (dir: 1 | -1) => sortRows(data, { key: 'x', dir }).map(({ row }) => row[col - 1]);
+    expect(values(1)).toEqual([1, 2, 3, null]);
+    expect(values(-1)).toEqual([3, 2, 1, null]);
+    expect(sortRows(data, null).map(({ i }) => i)).toEqual([0, 1, 2, 3]);
+    expect(sortRows(data, { key: 'nope', dir: 1 }).map(({ i }) => i)).toEqual([0, 1, 2, 3]);
   });
 });

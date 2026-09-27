@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { formatValue, offsetLabel, type Unit } from '../../studies/metrics';
-import type { PathBand } from '../../studies/result';
+import { formatMeasure, type MeasureUnit } from '../../studies/measures';
+import { offsetLabel } from '../../studies/metrics';
+import type { MeasureResult, PathBand } from '../../studies/result';
 
 /** Small SVG charts for the Study Results page. They take the theme's colours through CSS
  *  (studies.css) and draw only numbers the engine produced; labels are text nodes, never markup. */
@@ -11,14 +12,19 @@ interface HistogramProps {
   edges: number[];
   events: number[];
   control: number[];
-  unit: Unit;
+  unit: MeasureUnit;
   /** Shown beside the control bars' key; null hides them. */
   controlLabel: string | null;
+  /** What the event bars are called: "Events", or "Reached the outcome". */
+  eventLabel?: string;
+  /** Events with no number to bin (a condition that never held), said beside the chart. */
+  never?: number;
 }
 
 /** Events and the comparison group on shared bins, each as a share of its own group so groups of
  *  different sizes compare. */
-export function Histogram({ edges, events, control, unit, controlLabel }: HistogramProps) {
+export function Histogram({ edges, events, control, unit, controlLabel, eventLabel = 'Events', never = 0 }: HistogramProps) {
+  const formatValue = formatMeasure;
   const [hover, setHover] = useState<number | null>(null);
   const H = 180;
   const PAD = { l: 8, r: 8, t: 10, b: 26 };
@@ -65,16 +71,99 @@ export function Histogram({ edges, events, control, unit, controlLabel }: Histog
         ))}
       </svg>
       <div className="study-chart-key small muted">
-        <span className="study-key events" /> Events
+        <span className="study-key events" /> {eventLabel}
         {showControl && (
           <>
             <span className="study-key control" /> {controlLabel}
           </>
         )}
+        {never > 0 && <span> · {never} never (not shown)</span>}
         {hover !== null && (
           <span className="study-chart-hover">
             {formatValue(edges[hover], unit)} to {formatValue(edges[hover + 1], unit)}: {events[hover]} event{events[hover] === 1 ? '' : 's'}
             {showControl && `, ${control[hover]} ${controlLabel?.toLowerCase()}`}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface TimelineProps {
+  timeline: NonNullable<MeasureResult['timeline']>;
+  eventLabel: string;
+  controlLabel: string | null;
+}
+
+/** Day by day across a condition measure's window: the share of events on which its conditions held
+ *  (and of the comparison group, dashed). How the share of doublers sitting just above their 21 EMA
+ *  rose into the event, say. */
+export function TimelineChart({ timeline, eventLabel, controlLabel }: TimelineProps) {
+  const [hover, setHover] = useState<number | null>(null);
+  const H = 200;
+  const PAD = { l: 40, r: 10, t: 10, b: 24 };
+  const { offsets } = timeline;
+  const first = offsets[0];
+  const last = offsets[offsets.length - 1];
+  const x = (o: number) => PAD.l + ((o - first) / Math.max(last - first, 1)) * (W - PAD.l - PAD.r);
+  const y = (v: number) => PAD.t + (H - PAD.t - PAD.b) * (1 - v);
+  const line = (series: (number | null)[]) =>
+    offsets
+      .map((o, i) => (series[i] === null ? null : `${x(o).toFixed(1)},${y(series[i] as number).toFixed(1)}`))
+      .filter(Boolean)
+      .join(' ');
+  if (timeline.events.filter((v) => v !== null).length < 2) {
+    return <div className="study-empty small muted">Not enough history around the events to draw this day by day.</div>;
+  }
+  const control = controlLabel ? timeline.control : null;
+  const i = hover;
+  const pct = (v: number | null | undefined) => (v === null || v === undefined ? '—' : `${Math.round(v * 100)}%`);
+  return (
+    <div className="study-chart">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        role="img"
+        aria-label="Share of events on which the conditions held, day by day"
+        onMouseMove={(e) => {
+          const box = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
+          const o = first + ((((e.clientX - box.left) / box.width) * W - PAD.l) / (W - PAD.l - PAD.r)) * (last - first);
+          let best = 0;
+          offsets.forEach((p, k) => {
+            if (Math.abs(p - o) < Math.abs(offsets[best] - o)) best = k;
+          });
+          setHover(best);
+        }}
+        onMouseLeave={() => setHover(null)}
+      >
+        {[0, 0.5, 1].map((v) => (
+          <g key={v}>
+            <line className="study-grid-line" x1={PAD.l} x2={W - PAD.r} y1={y(v)} y2={y(v)} />
+            <text className="study-tick" x={PAD.l - 4} y={y(v) + 3} textAnchor="end">
+              {Math.round(v * 100)}%
+            </text>
+          </g>
+        ))}
+        {control && <polyline className="study-line control" points={line(control)} />}
+        <polyline className="study-line" points={line(timeline.events)} />
+        {first <= 0 && last >= 0 && <line className="study-event-line" x1={x(0)} x2={x(0)} y1={PAD.t} y2={H - PAD.b} />}
+        {[...new Set([first, ...(first <= 0 && last >= 0 ? [0] : []), last])].map((o) => (
+          <text key={o} className="study-tick" x={x(o)} y={H - 6} textAnchor={o === first ? 'start' : o === last ? 'end' : 'middle'}>
+            {offsetLabel(o)}
+          </text>
+        ))}
+        {i !== null && <line className="study-hover-line" x1={x(offsets[i])} x2={x(offsets[i])} y1={PAD.t} y2={H - PAD.b} />}
+      </svg>
+      <div className="study-chart-key small muted">
+        <span className="study-key events" /> {eventLabel}
+        {control && (
+          <>
+            <span className="study-key control" /> {controlLabel}
+          </>
+        )}
+        {i !== null && (
+          <span className="study-chart-hover">
+            {offsetLabel(offsets[i])} ({offsets[i]} bars): {pct(timeline.events[i])} of {timeline.count[i]} events
+            {control && `; ${pct(control[i])} of ${controlLabel?.toLowerCase()}`}
           </span>
         )}
       </div>

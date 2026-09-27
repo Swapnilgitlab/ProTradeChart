@@ -13,7 +13,7 @@ const OP_LABELS: Record<Op, string> = {
 };
 
 /** Features offered in the pickers: the suggested ones and the price itself. */
-const FEATURE_CHOICES = [...new Set(['close', ...SUGGESTED_METRICS, 'prior_high_252', 'prior_high_63', 'range_63', 'gain_from_low_252'])];
+export const FEATURE_CHOICES = [...new Set(['close', ...SUGGESTED_METRICS, 'dist_ema_21', 'dist_sma_50', 'prior_high_252', 'prior_high_63', 'range_63', 'gain_from_low_252'])];
 
 interface Props<T extends Condition> {
   items: T[];

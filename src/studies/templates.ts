@@ -42,6 +42,14 @@ const CHARACTERISTICS: Condition[] = [
   { label: 'Relative volume > 2', left: 'rvol_20', op: '>', right: 2 },
 ];
 
+const BEFORE_12M = { start: { offset: -252 }, end: { offset: 0 } };
+const FROM_LOW = { start: { find: 'lowest', feature: 'close', within: 252 }, end: { offset: 0 } };
+const UNTIL_BELOW_50 = {
+  start: { offset: 0 },
+  end: { find: 'first', conditions: [{ left: 'close', op: '<', right: 'sma_50' }], direction: 'after', within: 252, if_not_found: 'cap' },
+};
+const AFTER_6M = { start: { offset: 0 }, end: { offset: 126 } };
+
 /** ₹1 Cr a day of average traded value: the liquidity floor the templates use in place of a
  *  market-cap floor, which no data source can supply. */
 export const DEFAULT_MIN_TRADED_VALUE = 1e7;
@@ -125,6 +133,14 @@ export const TEMPLATES: readonly StudyTemplate[] = [
       'winners_200',
       'Every date a stock’s 12-month return crossed +200%.',
       { label: '12M return crosses +200%', conditions: [{ left: 'return_252', op: 'crosses_above', right: 2 }], cooldown_days: 252 },
+      {
+        question: 'How did stocks that tripled in a year get there?',
+        measures: [
+          { label: 'Closed above its 50 EMA', stat: 'share', headline: true, conditions: [{ left: 'close', op: '>', right: 'ema_50' }], window: BEFORE_12M },
+          { label: 'The run from its 12-month low', stat: 'length', headline: true, window: FROM_LOW },
+          { label: 'Worst fall on the way up', stat: 'max_drawdown', window: BEFORE_12M },
+        ],
+      },
     ),
   },
   {
@@ -136,7 +152,14 @@ export const TEMPLATES: readonly StudyTemplate[] = [
       'breakout_winners',
       'Closes above the previous 52-week high. Breakouts that rose 30% or more within six months are compared with those that did not.',
       { label: 'Close breaks the prior 52W high', conditions: [{ left: 'close', op: 'crosses_above', right: 'prior_high_252' }], cooldown_days: 63 },
-      { outcome: { window: 126, min_return: 0.3 } },
+      {
+        outcome: { window: 126, min_return: 0.3 },
+        question: 'What set apart the 52-week-high breakouts that went on to gain 30%?',
+        measures: [
+          { label: 'Within 10% of its 52-week high', stat: 'share', headline: true, conditions: [{ left: 'dist_high_252', op: '>=', right: -0.1 }], window: { start: { offset: -126 }, end: { offset: 0 } } },
+          { label: 'Tightness of the 3 months before (average range)', stat: 'mean', feature: 'atr_pct_14', window: { start: { offset: -63 }, end: { offset: 0 } } },
+        ],
+      },
     ),
   },
   {
@@ -212,6 +235,62 @@ export const TEMPLATES: readonly StudyTemplate[] = [
           { left: 'max_drawdown_252', op: '<=', right: -0.3 },
         ],
         cooldown_days: 252,
+      },
+    ),
+  },
+  {
+    id: 'how_winners_got_there',
+    name: 'How Winners Got There',
+    summary: 'The journey of stocks that doubled in a year: how long the run from their low took, how often they held their averages, how deep the pullbacks went.',
+    spec: base(
+      'How Winners Got There',
+      'how_winners_got_there',
+      'For every stock whose 12-month return crossed +100%, the run from its 12-month low to that day, measured day by day.',
+      { label: '12M return crosses +100%', conditions: [{ left: 'return_252', op: 'crosses_above', right: 1 }], cooldown_days: 252 },
+      {
+        question: 'On the way to doubling, how did winners behave: how long did the run take, and how often did they sit near their 21 EMA?',
+        metrics: [],
+        characteristics: [],
+        measures: [
+          { label: 'The run from its 12-month low', stat: 'length', headline: true, window: FROM_LOW },
+          {
+            label: 'Closed within 3% above its 21 EMA',
+            stat: 'share',
+            headline: true,
+            conditions: [
+              { left: 'dist_ema_21', op: '>=', right: 0 },
+              { left: 'dist_ema_21', op: '<=', right: 0.03 },
+            ],
+            window: FROM_LOW,
+          },
+          { label: 'Pullbacks to within 3% of its 21 EMA', stat: 'runs', conditions: [{ left: 'dist_ema_21', op: '<=', right: 0.03 }], window: FROM_LOW },
+          { label: 'Longest streak above its 50 SMA', stat: 'longest_run', conditions: [{ left: 'close', op: '>', right: 'sma_50' }], window: FROM_LOW },
+          { label: 'Worst fall on the way up', stat: 'max_drawdown', window: FROM_LOW },
+          { label: 'Return from the low', stat: 'return', window: FROM_LOW },
+        ],
+      },
+    ),
+  },
+  {
+    id: 'after_the_breakout',
+    name: 'After the Breakout',
+    summary: 'What happened after a new 52-week high: how long the trend held above the 50 SMA, and how far it fell.',
+    spec: base(
+      'After the Breakout',
+      'after_the_breakout',
+      'Every close above the previous 52-week high, and the six months that followed.',
+      { label: 'Close breaks the prior 52W high', conditions: [{ left: 'close', op: 'crosses_above', right: 'prior_high_252' }], cooldown_days: 63 },
+      {
+        question: 'After breaking out to a new 52-week high, how long did stocks hold their trend, and how deep did they fall?',
+        metrics: [],
+        characteristics: [],
+        measures: [
+          { label: 'The trend until its first close below the 50 SMA', stat: 'length', headline: true, window: UNTIL_BELOW_50 },
+          { label: 'Worst fall in the 6 months after', stat: 'max_drawdown', headline: true, window: AFTER_6M },
+          { label: 'Closed above its 21 EMA', stat: 'share', conditions: [{ left: 'close', op: '>', right: 'ema_21' }], window: AFTER_6M },
+          { label: 'Biggest rise in the 6 months after', stat: 'max_gain', window: AFTER_6M },
+          { label: 'Return over the 6 months after', stat: 'return', window: AFTER_6M },
+        ],
       },
     ),
   },

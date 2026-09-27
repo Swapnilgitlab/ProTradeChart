@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeSpec } from './spec';
+import { presetOf, windowSide } from './measures';
 import { fromTemplate, TEMPLATES } from './templates';
 
 describe('templates', () => {
@@ -26,4 +27,16 @@ describe('templates', () => {
     expect(TEMPLATES[0].spec.name).toBe('100% Winners');
     expect(TEMPLATES[0].spec.metrics).not.toContain('adx_14');
   });
+
+  it('include a journey and an aftermath Study that measure over time and take no snapshots', () => {
+    const journey = fromTemplate('how_winners_got_there');
+    expect(journey.metrics).toEqual([]);
+    expect(journey.question).not.toBe('');
+    expect(journey.measures.filter((m) => m.headline).map((m) => m.stat)).toEqual(['length', 'share']);
+    expect(windowSide(journey.measures[0].window)).toBe('before');
+    const after = fromTemplate('after_the_breakout');
+    expect(after.measures.every((m) => windowSide(m.window) === 'after')).toBe(true);
+    expect(presetOf(after.measures[0].window)).toBe('until_below_sma50');
+  });
 });
+

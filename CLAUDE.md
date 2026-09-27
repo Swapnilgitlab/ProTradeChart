@@ -151,7 +151,9 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   `not_found`, and one the data ended on is `too_recent` — never a made-up number. Both validators are tested against the one
   file `src/studies/fixtures/spec-cases.json`: add a rule there, not to one side. A new `protrade/*.py` module the engine uses
   goes in `client_files.rs` `FILES` **and** `engine_build()`'s list. The answer a result opens with (`studies/answer.ts`) is
-  built from the numbers, deterministically, and drawn as text.
+  built from the numbers, deterministically, and drawn as text. The results page is answer first (`StudyResults.tsx`: answer,
+  one chart, stock by stock) with every older table kept under Details (`StudyDetails.tsx`) — add new detail tables there, not
+  above the answer. Every event table sorts through `views.ts` `sortRows`.
 - A Study's significance tests (`protrade/stats_tests.py`) are standard library + numpy/pandas — don't add scipy — and their
   known-answer tests were computed with scipy/statsmodels; keep them. A q-value below 0.05 is still an association: never word
   a finding as a cause (`studies/significance.ts`). A run in a Research Notebook is never pruned (`store/studies.rs`).

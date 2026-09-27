@@ -83,6 +83,14 @@ project uses [Semantic Versioning](https://semver.org).
   comparison group and how many events it covers. A Study can have a **question**, shown above its answer. Claude now drafts
   such questions as measures, and says what a Study can't express instead of approximating it. Earlier Studies and results open
   as before.
+- **Studies: an answer-first results page and a builder for measures.** A result now opens with its question and plain
+  answer, one chart (how a measure spreads across the stocks, or day by day how many stocks were, say, sitting just above
+  their 21 EMA), and the stocks one by one with each measure's value — click a row to open its chart at the event. Every
+  table the page had before is still there, folded under **Details**. The builder has a **Question** box and a **What to
+  measure** section: pick a stat, its conditions or feature, and a window — the 12 months up to the event, the 6 months after,
+  from the stock's 12-month low, until its first close below the 50 SMA, or a custom start and end. The single-day snapshot
+  settings are folded under **Event-day snapshot**. Two new templates, **How Winners Got There** and **After the Breakout**,
+  and measures on 100% Winners, 200% Winners and Breakout Winners.
 
 ### Fixed
 

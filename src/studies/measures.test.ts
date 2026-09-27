@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { formatMeasure, headlineMeasures, measureUnit, span, windowPhrase, windowSide } from './measures';
+import { formatMeasure, headlineMeasures, measureUnit, presetOf, span, windowPhrase, windowSide, WINDOW_PRESETS } from './measures';
+import { normalizeSpec } from './spec';
 import type { Measure } from './spec';
 
 const fixed = (start: number, end: number): Measure['window'] => ({ start: { offset: start }, end: { offset: end } });
@@ -87,3 +88,23 @@ describe('headline measures', () => {
     expect(headlineMeasures([])).toEqual([]);
   });
 });
+
+describe('window presets', () => {
+  it('are recognised in a window, whatever the unused fields say, and anything else is custom', () => {
+    for (const p of WINDOW_PRESETS) expect(presetOf(structuredClone(p.window))).toBe(p.id);
+    expect(presetOf(fixed(-100, 0))).toBe('custom');
+    const labelled: Measure['window'] = {
+      start: { offset: 0 },
+      end: { find: 'first', feature: 'rsi_14', conditions: [{ left: 'close', op: '<', right: 'sma_50', label: 'Below 50' }], direction: 'after', within: 252, if_not_found: 'cap' },
+    };
+    expect(presetOf(labelled)).toBe('until_below_sma50');
+  });
+
+  it('are all windows the engine accepts', () => {
+    for (const p of WINDOW_PRESETS) {
+      const spec = normalizeSpec({ name: 'x', period: { start: '2020-01-01' }, event: { conditions: ['return_252 crosses_above 1'] }, measures: [{ stat: 'return', window: p.window }] });
+      expect(spec.measures[0].window, p.id).toBeTruthy();
+    }
+  });
+});
+

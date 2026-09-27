@@ -72,6 +72,23 @@ export function eventColumns(result: StudyResultData, offset: number): TableColu
   return out;
 }
 
+/** The event rows with their index, sorted by one column (blanks last, whichever way), or in the
+ *  engine's order when `sort` is null. Shared by every event table. */
+export function sortRows(result: StudyResultData, sort: { key: string; dir: 1 | -1 } | null): { row: Cell[]; i: number }[] {
+  const indexed = result.events.rows.map((row, i) => ({ row, i }));
+  if (!sort) return indexed;
+  const at = result.events.columns.indexOf(sort.key);
+  if (at < 0) return indexed;
+  return indexed.sort((a, b) => {
+    const x = a.row[at];
+    const y = b.row[at];
+    if (x === null && y === null) return 0;
+    if (x === null) return 1;
+    if (y === null) return -1;
+    return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))) * sort.dir;
+  });
+}
+
 /** Observation points with a matching one on the other side (T-3M and T+3M), for before/after. */
 export function beforeAfterWindows(result: StudyResultData): number[] {
   const offsets = new Set(result.offsets);

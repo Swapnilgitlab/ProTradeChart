@@ -4,6 +4,7 @@ import { canonicalFeature, featureLabel, SUGGESTED_METRICS, windowLabel } from '
 import type { Readiness, ReadinessFix } from '../../studies/readiness';
 import { interpret, normalizeSpec, type Condition, type PreEventFilter, type Series, type StudySpec } from '../../studies/spec';
 import { ConditionList } from './ConditionList';
+import { MeasureList } from './MeasureList';
 
 interface Props {
   draft: StudySpec;
@@ -87,6 +88,8 @@ export function StudyBuilder({ draft, onChange, problem, readiness, onApplyFix, 
   const [jsonOpen, setJsonOpen] = useState(false);
   const [jsonText, setJsonText] = useState('');
   const [jsonError, setJsonError] = useState<string | null>(null);
+  // The snapshot sections start open only for a Study that measures nothing over time.
+  const [snapshotOpen, setSnapshotOpen] = useState(() => draft.measures.length === 0);
   const set = (patch: Partial<StudySpec>) => onChange({ ...draft, ...patch });
   const u = draft.universe;
   const setUniverse = (patch: Partial<StudySpec['universe']>) => set({ universe: { ...u, ...patch } });
@@ -110,6 +113,17 @@ export function StudyBuilder({ draft, onChange, problem, readiness, onApplyFix, 
           <label className="study-field">
             <span>Name</span>
             <input className="python-input" value={draft.name} onChange={(e) => set({ name: e.currentTarget.value })} />
+          </label>
+          <label className="study-field">
+            <span>Question</span>
+            <textarea
+              className="python-input study-textarea"
+              rows={2}
+              maxLength={500}
+              placeholder="What do you want to know? It is shown above the answer."
+              value={draft.question}
+              onChange={(e) => set({ question: e.currentTarget.value })}
+            />
           </label>
           <label className="study-field">
             <span>Description</span>
@@ -253,6 +267,18 @@ export function StudyBuilder({ draft, onChange, problem, readiness, onApplyFix, 
           />
         </Section>
 
+        <Section
+          title="What to measure"
+          hint="One number per event over a stretch of days: the journey to the event, what came after, or an episode such as the run from its 12-month low. The answer leads with the headline measures."
+        >
+          <MeasureList items={draft.measures} onChange={(measures) => set({ measures })} />
+        </Section>
+
+        <details className="study-snapshot" open={snapshotOpen} onToggle={(e) => setSnapshotOpen(e.currentTarget.open)}>
+          <summary>
+            Event-day snapshot <span className="muted small">— what each stock looked like on single days around the event</span>
+          </summary>
+
         <Section title="Observation and forward windows" hint="In trading days: 21 ≈ 1 month, 63 ≈ 3, 126 ≈ 6, 252 ≈ 12.">
           <label className="study-field">
             <span>Observe before the event at</span>
@@ -309,6 +335,7 @@ export function StudyBuilder({ draft, onChange, problem, readiness, onApplyFix, 
             addLabel="Add a characteristic"
           />
         </Section>
+        </details>
 
         <Section title="Comparison">
           <label className="study-field">

@@ -181,6 +181,67 @@ export function measureLine(m: Measure): string {
   return `“${m.label}” — ${STAT_LABEL[m.stat].toLowerCase()}, ${windowPhrase(m.window)}${what}${m.headline ? ' (headline)' : ''}`;
 }
 
+const fixedWindow = (start: number, end: number): Measure['window'] => ({ start: { offset: start }, end: { offset: end } });
+
+/** The windows the builder offers by name. Anything else is a custom window. */
+export const WINDOW_PRESETS: readonly { id: string; label: string; window: Measure['window'] }[] = [
+  { id: 'before_12m', label: 'The 12 months up to the event', window: fixedWindow(-252, 0) },
+  { id: 'before_6m', label: 'The 6 months up to the event', window: fixedWindow(-126, 0) },
+  { id: 'before_3m', label: 'The 3 months up to the event', window: fixedWindow(-63, 0) },
+  { id: 'before_1m', label: 'The month up to the event', window: fixedWindow(-21, 0) },
+  { id: 'after_1m', label: 'The month after the event', window: fixedWindow(0, 21) },
+  { id: 'after_3m', label: 'The 3 months after the event', window: fixedWindow(0, 63) },
+  { id: 'after_6m', label: 'The 6 months after the event', window: fixedWindow(0, 126) },
+  { id: 'after_12m', label: 'The 12 months after the event', window: fixedWindow(0, 252) },
+  {
+    id: 'from_low_12m',
+    label: 'From its 12-month low to the event (the run-up)',
+    window: {
+      start: { find: 'lowest', feature: 'close', conditions: [], direction: 'before', within: 252, if_not_found: 'cap' },
+      end: { offset: 0 },
+    },
+  },
+  {
+    id: 'until_below_sma50',
+    label: 'From the event until its first close below the 50 SMA (up to a year)',
+    window: {
+      start: { offset: 0 },
+      end: { find: 'first', feature: null, conditions: [{ left: 'close', op: '<', right: 'sma_50' }], direction: 'after', within: 252, if_not_found: 'cap' },
+    },
+  },
+  {
+    id: 'since_below_ema200',
+    label: 'Since it last closed below the 200 EMA (up to 2 years back)',
+    window: {
+      start: { find: 'last', feature: null, conditions: [{ left: 'close', op: '<', right: 'ema_200' }], direction: 'before', within: 504, if_not_found: 'cap' },
+      end: { offset: 0 },
+    },
+  },
+];
+
+/** Two windows as the engine reads them, ignoring what an endpoint doesn't use (labels, an anchor's
+ *  unused feature or conditions). */
+function windowKey(w: Measure['window']): string {
+  const point = (e: Endpoint) =>
+    isAnchor(e)
+      ? {
+          find: e.find,
+          feature: e.find === 'lowest' || e.find === 'highest' ? e.feature : null,
+          conditions: e.find === 'first' || e.find === 'last' ? e.conditions.map((c) => [c.left, c.op, c.right]) : [],
+          direction: e.direction,
+          within: e.within,
+          if_not_found: e.if_not_found,
+        }
+      : { offset: e.offset };
+  return JSON.stringify([point(w.start), point(w.end)]);
+}
+
+/** Which preset a window is, or `custom`. */
+export function presetOf(w: Measure['window']): string {
+  const key = windowKey(w);
+  return WINDOW_PRESETS.find((p) => windowKey(p.window) === key)?.id ?? 'custom';
+}
+
 /** The measures the answer leads with: those flagged as headline, or else the first one. */
 export function headlineMeasures<T extends { headline: boolean }>(measures: readonly T[]): T[] {
   const flagged = measures.filter((m) => m.headline);
