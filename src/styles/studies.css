@@ -437,6 +437,12 @@
 .study-t0 {
   font-weight: 600;
 }
+/* Numbers in the Studies tables read from the left, under their column headings (which are left-aligned).
+   `.python-table td.numeric` right-aligns them, and the Python tab's result tables keep that; this only
+   changes the Studies page. */
+.studies-panel .python-table td.numeric {
+  text-align: left;
+}
 .study-explorer-head {
   display: flex;
   align-items: flex-start;
