@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import type { AiAnswer, AiProgressEvent } from '../../lib/ipc';
+import type { AiProgressEvent } from '../../lib/ipc';
 
-/** One Claude request at a time, with its streamed progress: `call` hands the request a fresh id
- *  and follows the `ai-progress` events carrying it. */
+/** One AI request at a time, with its streamed progress: `call` hands the request a fresh id and
+ *  follows the `ai-progress` events carrying it. Generic over the answer shape — Study Builder
+ *  calls return `AiAnswer`, Ask AI's return `AskAiAnswer`; this only cares that there is one. */
 export function useAiRequest() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<AiProgressEvent | null>(null);
@@ -24,7 +25,7 @@ export function useAiRequest() {
     };
   }, []);
 
-  const call = useCallback(async (send: (requestId: string) => Promise<AiAnswer>): Promise<AiAnswer> => {
+  const call = useCallback(async <T>(send: (requestId: string) => Promise<T>): Promise<T> => {
     const id = crypto.randomUUID();
     current.current = id;
     setBusy(true);

@@ -34,7 +34,7 @@ import {
 } from '../../studies/research';
 import { parseStudyResult } from '../../studies/result';
 import { interpret, type StudySpec } from '../../studies/spec';
-import { ApiKeyDialog, PRIVACY, useKeyStatus } from './AssistantPanel';
+import { AiProvidersDialog, privacyNote, providerNameFromModel, useAiProviders } from '../ai/AiProvidersDialog';
 import { estimateUniverse } from './estimate';
 import { useAiRequest } from './useAiRequest';
 import type { RunOutcome } from './useStudyRunner';
@@ -48,6 +48,9 @@ interface Round {
   /** Per planned Study: its readiness and seconds of fetching, once the universe's cost is known. */
   readiness: ({ readiness: Readiness; seconds: number } | null)[];
   synthesis: Synthesis | null;
+  /** Which provider wrote `synthesis`, in words ("Claude", "GPT") — from the model name the reply
+   *  carried, not the currently-active provider, which may have changed since. */
+  synthesisedBy: string;
   /** The Studies the synthesis covers, by index into the plan. */
   synthesised: number[];
 }
@@ -95,12 +98,12 @@ async function appendToNotebook(notebookId: string, block: string) {
   if (nb) await saveNotebook(nb.id, nb.name, appendNotes(nb.notes, block).slice(0, 100_000));
 }
 
-/** The research agent: a question → Claude's plan of Studies → the ones you approve, run one after
- *  another → Claude's synthesis → follow-up questions, each needing its own plan and approval.
+/** The research agent: a question → the AI's plan of Studies → the ones you approve, run one after
+ *  another → the AI's synthesis → follow-up questions, each needing its own plan and approval.
  *  Everything is recorded in a Research Notebook as it happens. */
 export function ResearchView(props: Props) {
   const { startRun, stopRun, busyRunning, readinessOf, watchlistRows, say } = props;
-  const [status, reloadStatus] = useKeyStatus();
+  const [status, reloadStatus] = useAiProviders();
   const [keyDialog, setKeyDialog] = useState(false);
   const [question, setQuestion] = useState('');
   const [rounds, setRounds] = useState<Round[]>([]);
@@ -117,7 +120,7 @@ export function ResearchView(props: Props) {
 
   const latest = rounds[rounds.length - 1] ?? null;
   const running = rounds.some((r) => isRunning(r.items));
-  const configured = status?.configured ?? false;
+  const configured = !!status?.active;
 
   // Each planned Study's readiness, with what its universe will cost to load.
   const readinessKey = rounds.map((r) => r.plan.studies.length).join(',');
@@ -150,10 +153,18 @@ export function ResearchView(props: Props) {
         aiPlanResearch({ question: text, reference: specReference(), today: today(), context }, id),
       );
       const parsed = parsePlan(reply.answer);
-      if (!parsed.studies.length && !parsed.unavailable.length) throw new Error('Claude proposed no Studies. Try rephrasing the question.');
+      if (!parsed.studies.length && !parsed.unavailable.length) throw new Error('The AI proposed no Studies. Try rephrasing the question.');
       setRounds((rs) => [
         ...rs,
-        { question: text, plan: parsed, items: newQueue(parsed), readiness: parsed.studies.map(() => null), synthesis: null, synthesised: [] },
+        {
+          question: text,
+          plan: parsed,
+          items: newQueue(parsed),
+          readiness: parsed.studies.map(() => null),
+          synthesis: null,
+          synthesisedBy: 'the AI',
+          synthesised: [],
+        },
       ]);
       setQuestion('');
     } catch (err) {
@@ -231,8 +242,8 @@ export function ResearchView(props: Props) {
       }
       const reply = await ai.call((id) => aiSynthesizeResearch({ question: round.question, studies }, id));
       const synthesis = parseSynthesis(reply.answer, done.length);
-      if (!synthesis) throw new Error('Claude’s synthesis was empty.');
-      update(ri, () => ({ synthesis, synthesised: done }));
+      if (!synthesis) throw new Error('The AI’s synthesis was empty.');
+      update(ri, () => ({ synthesis, synthesisedBy: providerNameFromModel(reply.model), synthesised: done }));
       if (notebookId) {
         await appendToNotebook(notebookId, synthesisNotes(ri + 1, synthesis));
         for (const [k, i] of done.entries()) {
@@ -257,7 +268,7 @@ export function ResearchView(props: Props) {
       <div className="study-research-head">
         <h2>
           <Sparkles size={16} />
-          Research with Claude
+          Research with AI
         </h2>
         <div className="pine-toolbar-spacer" />
         {notebookId && (
@@ -271,14 +282,14 @@ export function ResearchView(props: Props) {
             New research
           </button>
         )}
-        <button type="button" className="icon-button" aria-label="Claude API key" title="Claude API key" onClick={() => setKeyDialog(true)}>
+        <button type="button" className="icon-button" aria-label="AI provider" title="AI provider: which one, and its API key" onClick={() => setKeyDialog(true)}>
           <KeyRound size={14} />
         </button>
       </div>
       <p className="muted small">
-        Ask a research question. Claude proposes a few Studies that together answer it; you choose which to run, and they run one after
-        another. Then Claude can write a synthesis across the results and suggest what to study next. Everything is kept in a Research
-        Notebook. {PRIVACY}
+        Ask a research question. The AI proposes a few Studies that together answer it; you choose which to run, and they run one after
+        another. Then it can write a synthesis across the results and suggest what to study next. Everything is kept in a Research
+        Notebook. {privacyNote(status)}
       </p>
 
       {rounds.map((round, ri) => (
@@ -332,7 +343,7 @@ export function ResearchView(props: Props) {
         </div>
       )}
 
-      {keyDialog && <ApiKeyDialog status={status} onClose={() => setKeyDialog(false)} onChanged={reloadStatus} say={say} />}
+      {keyDialog && <AiProvidersDialog providers={status} onClose={() => setKeyDialog(false)} onChanged={reloadStatus} say={say} />}
     </div>
   );
 }
@@ -496,7 +507,7 @@ function RoundView({ index, round, canRun, aiBusy, aiProgress, isLatest, ...on }
               </ul>
             </div>
           )}
-          <p className="muted small">Written by Claude from the results’ summaries: historical association, not causation, and not advice.</p>
+          <p className="muted small">Written by {round.synthesisedBy} from the results’ summaries: historical association, not causation, and not advice.</p>
           {isLatest && round.synthesis.followUps.length > 0 && (
             <div className="study-ai-list">
               <h4>What to study next</h4>

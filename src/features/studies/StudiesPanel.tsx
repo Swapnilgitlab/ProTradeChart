@@ -438,9 +438,9 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
         </div>
         <div className="python-side-list studies-side-list">
           <div className={`python-script${view === 'research' ? ' active' : ''}`}>
-            <button type="button" className="python-script-name studies-research-entry" onClick={showResearch} title="Plan and run several Studies with Claude">
+            <button type="button" className="python-script-name studies-research-entry" onClick={showResearch} title="Plan and run several Studies with AI">
               <Sparkles size={13} />
-              Research with Claude
+              Research with AI
             </button>
           </div>
           {studies.length === 0 && <div className="python-side-empty small muted">No saved Studies yet. Start from a template below.</div>}

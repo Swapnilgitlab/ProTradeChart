@@ -37,6 +37,10 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   write a credential only through `Secrets::set` / `delete` (which update it), never to `keyring` directly. See "Adding a
   broker" in `docs/ARCHITECTURE.md`.
 - Every theme must define every token in `ThemeTokens` (`src/theme/themes.ts`); a test enforces it.
+- AI providers (Anthropic, OpenAI) are two plain structs with the same `check_key`/`message` pair, not a trait — `ai/claude.rs`,
+  `ai/openai.rs`, both built from the provider-neutral `AiRequest`/`Reply` in `ai/mod.rs`. Add a third the same way, then add it
+  to `PROVIDERS` and the `match` in `ai_commands.rs`'s `send`. Their keys are secrets like a broker's (`("anthropic"|"openai",
+  "apiKey")`); the "AI providers" dialog (`features/ai/AiProvidersDialog.tsx`) is the one place both are managed.
 - Comments explain why, not what. Match the surrounding style.
 
 ## Gotchas
@@ -113,6 +117,11 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   only when the user presses Run — never on startup, on importing a file, or on opening a layout. Python isn't sandboxed; don't
   imply it is. And since the Python commands let the webview save and run a script, anything that lets outside content reach the
   DOM (HTML from a broker, a file or a script's output) is now a code-execution risk: keep the CSP strict and render text only.
+- Ask AI never acts on its own: a tool call is data (`ProposedAction`) until `features/ai/actions.ts::prepareAction` turns it into
+  a confirmation card, and only pressing Approve calls the real function. Adding an allowlisted action means adding it in *two*
+  places that must agree — a `ToolSpec` in `ai/prompts.rs::ask_ai_tools` and a matching case in `prepareAction` — and a tool
+  without a case there is dropped silently, never run. Keep the allowlist to what's already reversible and non-financial; don't
+  add anything that deletes a watchlist or layout, touches a secret, or reaches Python or Studies.
 - The Python API serves from its own store (`store/research_bars.rs`), not `bars_cache`, and records what a broker call *really*
   covered: the brokers' clients silently answer an over-long range with only its newest part, so `Fetcher::fetch` reports where it
   began. Daily bars sit on IST midnight. A new broker fetch path must keep both. A daily series' freshness follows the exchange's

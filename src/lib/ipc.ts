@@ -636,16 +636,28 @@ export const setNotebookItemNote = (itemId: number, note: string) => invoke<void
 /** Puts a notebook's entries in this order. */
 export const setNotebookOrder = (notebookId: string, itemIds: number[]) => invoke<void>('set_notebook_order', { notebookId, itemIds });
 
-// ---- AI Study Builder (Claude, with the user's own Anthropic API key) ----------------------------
+// ---- AI (Claude and OpenAI, with the user's own API keys) -----------------------------------------
 
-/** Whether an Anthropic API key is saved (mirrors `AiKeyStatus`). The key itself never leaves Rust. */
-export interface AiKeyStatus {
+/** A provider ProTradeChart can send AI requests to. */
+export type AiProviderId = 'anthropic' | 'openai';
+
+/** One provider's key status (mirrors `AiProviderStatus`). The key itself never leaves Rust. */
+export interface AiProviderStatus {
+  id: AiProviderId;
+  label: string;
   configured: boolean;
   /** `keychain`, or `database` when there is no OS credential store (unencrypted). */
   storage: 'keychain' | 'database' | null;
 }
 
-/** Claude's structured answer, unvalidated (`studies/assistant.ts` reads it), and the model that gave it. */
+/** Every provider's status, and which one an AI feature will actually use right now (mirrors
+ *  `AiProviders`). `active` is `null` until at least one provider has a key. */
+export interface AiProviders {
+  providers: AiProviderStatus[];
+  active: AiProviderId | null;
+}
+
+/** The AI's structured answer, unvalidated (`studies/assistant.ts` reads it), and the model that gave it. */
 export interface AiAnswer {
   answer: unknown;
   model: string;
@@ -667,12 +679,12 @@ export interface AiExplainRequest {
   warnings: string[];
 }
 
-export const aiKeyStatus = () => invoke<AiKeyStatus>('ai_key_status');
+export const listAiProviders = () => invoke<AiProviders>('list_ai_providers');
 
-/** Checks the key with Anthropic, then saves it in the OS keychain. */
-export const aiSetKey = (key: string) => invoke<AiKeyStatus>('ai_set_key', { key });
+/** Checks the key with the provider, then saves it in the OS keychain. */
+export const aiSetKey = (provider: AiProviderId, key: string) => invoke<AiProviderStatus>('ai_set_key', { provider, key });
 
-export const aiDeleteKey = () => invoke<void>('ai_delete_key');
+export const aiDeleteKey = (provider: AiProviderId) => invoke<void>('ai_delete_key', { provider });
 
 /** How a streamed answer is going (the `ai-progress` event), for the request with `requestId`. */
 export interface AiProgressEvent {
@@ -712,3 +724,38 @@ export const aiPlanResearch = (request: AiPlanRequest, requestId: string) => inv
 /** Asks Claude to synthesise a finished round's results. */
 export const aiSynthesizeResearch = (request: AiSynthesisRequest, requestId: string) =>
   invoke<AiAnswer>('ai_synthesize_research', { request, requestId });
+
+// ---- Ask AI (the rail assistant: suggests actions, never runs them) -------------------------------
+
+/** What Ask AI is told about the app right now (mirrors `AskAiContext`) — never secrets, broker
+ *  tokens or a watchlist's contents, only what's already on screen. */
+export interface AskAiContext {
+  activeSymbol: string | null;
+  activeTimeframe: string | null;
+  openTabs: string[];
+  watchlistNames: string[];
+}
+
+/** Mirrors `AskAiRequest` in `ai/prompts.rs`. */
+export interface AskAiRequest {
+  question: string;
+  context: AskAiContext;
+  history: { role: 'user' | 'assistant'; text: string }[];
+}
+
+/** One action the assistant proposed (mirrors `ProposedAction`). `actions.ts` validates
+ *  `arguments` before ever showing it, and only the frontend's own code ever calls the real
+ *  function it names — never this call itself. */
+export interface ProposedAction {
+  tool: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface AskAiAnswer {
+  reply: string;
+  actions: ProposedAction[];
+  model: string;
+}
+
+/** A question (or a follow-up) → words, proposed actions, or both. Runs nothing by itself. */
+export const askAi = (request: AskAiRequest, requestId: string) => invoke<AskAiAnswer>('ai_ask_ai', { request, requestId });

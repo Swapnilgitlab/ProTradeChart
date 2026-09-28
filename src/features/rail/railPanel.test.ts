@@ -35,6 +35,7 @@ describe('what is remembered', () => {
   it('round-trips every panel and the closed state', () => {
     expect(restoreRailPanel(railPreferenceValue('alerts'), null)).toBe('alerts');
     expect(restoreRailPanel(railPreferenceValue('watchlist'), null)).toBe('watchlist');
+    expect(restoreRailPanel(railPreferenceValue('assistant'), null)).toBe('assistant');
     expect(restoreRailPanel(railPreferenceValue(null), null)).toBeNull();
   });
 });

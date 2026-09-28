@@ -524,7 +524,8 @@ a {
 
 /* A panel docked beside the chart: the right rail shows one at a time. */
 .watchlist-panel,
-.alerts-panel {
+.alerts-panel,
+.ai-panel {
   display: flex;
   flex-direction: column;
   width: 300px;
@@ -533,9 +534,80 @@ a {
   border-left: 1px solid var(--border);
   background: var(--surface-1);
 }
-/* Not showing, but still mounted: its list, sort and scroll position wait for it to come back. */
-.watchlist-panel.is-hidden {
+/* Not showing, but still mounted: its list, sort and scroll position (or its conversation) wait
+ * for it to come back. */
+.watchlist-panel.is-hidden,
+.ai-panel.is-hidden {
   display: none;
+}
+
+/* ---- Ask AI panel and the AI providers dialog --------------------------- */
+
+.ai-panel-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.ai-panel-conversation {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ai-panel-body .study-ai-setup {
+  padding: 12px;
+  border-top: none;
+}
+.ai-panel-body .study-ai-ask {
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--border-soft);
+}
+/* A column, not a row: the summary sentence and the buttons (or the result, once run) each get
+ * their own full-width line, so a long sentence never has to fight a sibling for space and can't
+ * be squeezed down to a sliver (it did, when both shared one wrapping flex row). */
+.ai-action-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.ai-action-card.rejected {
+  opacity: 0.6;
+}
+.ai-action-summary {
+  font-size: 12px;
+}
+.ai-action-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.ai-provider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.ai-provider-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-key-row {
+  display: flex;
+  gap: 8px;
+}
+.ai-key-row input {
+  flex: 1;
+  min-width: 0;
 }
 
 .panel-title {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AppWindow, Bell, Code, Database, FlaskConical, Info, List, Plug, Plus, SquareTerminal, X } from 'lucide-react';
+import { AppWindow, Bell, Code, Database, FlaskConical, Info, KeyRound, List, Plug, Plus, Sparkles, SquareTerminal, X } from 'lucide-react';
 import type { VelaWorkspace, WorkspaceState } from '@luxalgo/vela/workspace';
 import { startAlertEngine } from '../../alerts/engine';
 import { onOpenAlerts, openAlerts } from '../../alerts/ui';
@@ -41,6 +41,8 @@ import {
   restoreRailPanel,
   type RailPanelId,
 } from '../rail/railPanel';
+import { AiProvidersDialog, useAiProviders } from '../ai/AiProvidersDialog';
+import { AskAiPanel } from '../ai/AskAiPanel';
 import { DataProvidersDialog } from '../providers/DataProvidersDialog';
 import { parseLayout, serializeLayout, withoutUnsupportedSymbols, type LayoutDocument } from '../layouts/layoutDocument';
 import { SymbolSearchBox } from '../search/SymbolSearchBox';
@@ -94,6 +96,8 @@ export function Workspace() {
   const [importOpen, setImportOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [providersOpen, setProvidersOpen] = useState(false);
+  const [aiProvidersOpen, setAiProvidersOpen] = useState(false);
+  const [aiProviders, reloadAiProviders] = useAiProviders();
   /** The new-alert / edit-alert form, when it is open. The list of alerts is the rail's Alerts panel. */
   const [alertForm, setAlertForm] = useState<AlertFormSeed | null>(null);
   /** Whether the Script Editor dock is open, for the rail's button. (The dock owns this; it only says so.) */
@@ -294,6 +298,18 @@ export function Workspace() {
 
   const stepTab = useCallback((delta: number) => showTab(tabAfterStep(tabs, activeTabId, delta)), [tabs, activeTabId, showTab]);
 
+  // Ask AI's actions on the active chart — the same handle `goToSymbol` already uses.
+  const getActiveTimeframe = useCallback(() => (chartTab ? (chartRefs.current.get(chartTab.id)?.getMarket()?.timeframe ?? null) : null), [chartTab]);
+  const setActiveTimeframe = useCallback((timeframe: string) => chartTab && chartRefs.current.get(chartTab.id)?.setTimeframe(timeframe), [chartTab]);
+  const addActiveIndicator = useCallback(
+    (name: string) => chartRefs.current.get(chartTab?.id ?? '')?.addIndicator(name) ?? Promise.resolve({ ok: false, message: 'No chart is open.' }),
+    [chartTab],
+  );
+  const removeActiveIndicator = useCallback(
+    (name: string) => chartRefs.current.get(chartTab?.id ?? '')?.removeIndicator(name) ?? Promise.resolve({ ok: false, message: 'No chart is open.' }),
+    [chartTab],
+  );
+
   // The right rail: remembered between launches, and shared by every window.
   useEffect(() => {
     Promise.all([getPreference(PREF_RAIL_PANEL), getPreference(PREF_LEGACY_WATCHLIST_COLLAPSED)])
@@ -415,6 +431,7 @@ export function Workspace() {
   const railPanels: RailPanelButton[] = [
     { id: 'watchlist', label: 'Watchlist', shortcut: 'Alt+W', icon: List },
     { id: 'alerts', label: unseenAlerts > 0 ? `Price alerts — ${unseenAlerts} fired` : 'Price alerts', icon: Bell, badge: unseenAlerts },
+    { id: 'assistant', label: 'Ask AI', shortcut: 'Alt+A', icon: Sparkles },
   ];
   // The dock and the Python tab each belong to the tab showing: the dock is a chart's, so it isn't showing
   // while the Python tab is.
@@ -446,6 +463,7 @@ export function Workspace() {
   ];
   const railFooter: RailAction[] = [
     { id: 'data-providers', label: 'Data providers', title: 'Data providers: where prices come from', icon: Plug, onClick: () => setProvidersOpen(true) },
+    { id: 'ai-providers', label: 'AI providers', title: 'AI providers: API keys for Claude, GPT and which one to use', icon: KeyRound, onClick: () => setAiProvidersOpen(true) },
   ];
 
   async function handleDeleteLayout(id: string) {
@@ -457,6 +475,9 @@ export function Workspace() {
       toast(errorMessage(err), 'error');
     }
   }
+
+  // What Ask AI is told is open — the same labels the tab bar itself shows.
+  const openTabLabels = tabs.map((tab) => (isChartTab(tab) ? displayTicker(tab.symbol) : tab.kind === 'studies' ? 'Studies' : 'Python'));
 
   return (
     <div className="app">
@@ -579,12 +600,25 @@ export function Workspace() {
             onEdit={(alert) => setAlertForm({ alert, symbol: alert.symbol, price: alert.price })}
           />
         )}
+        {/* Stays mounted too, so the conversation is still there when you come back. */}
+        <AskAiPanel
+          visible={railPanel === 'assistant'}
+          activeSymbol={chartSymbol}
+          openTabs={openTabLabels}
+          getTimeframe={getActiveTimeframe}
+          onOpenSymbol={goToSymbol}
+          onSetTimeframe={setActiveTimeframe}
+          onAddIndicator={addActiveIndicator}
+          onRemoveIndicator={removeActiveIndicator}
+          say={toast}
+        />
         <RightRail panels={railPanels} activePanel={railPanel} onTogglePanel={toggleRailPanel} tools={railTools} footer={railFooter} />
       </div>
 
       {importOpen && <ImportDataDialog onClose={() => setImportOpen(false)} onOpenSymbol={goToSymbol} />}
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
       {providersOpen && <DataProvidersDialog onClose={() => setProvidersOpen(false)} />}
+      {aiProvidersOpen && <AiProvidersDialog providers={aiProviders} onClose={() => setAiProvidersOpen(false)} onChanged={reloadAiProviders} say={toast} />}
       {alertForm && <AlertFormDialog seed={alertForm} onClose={() => setAlertForm(null)} />}
     </div>
   );

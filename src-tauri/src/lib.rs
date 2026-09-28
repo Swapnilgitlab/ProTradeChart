@@ -85,12 +85,12 @@ pub fn run() {
                 .build()?;
             app.manage(DhanClient::new(broker_http.clone()));
             app.manage(ZerodhaClient::new(broker_http));
-            // The AI Study Builder's own client: its requests set their own, longer, timeouts.
-            app.manage(ai::client::ClaudeClient::new(
-                reqwest::Client::builder()
-                    .user_agent(concat!("protradechart/", env!("CARGO_PKG_VERSION")))
-                    .build()?,
-            ));
+            // AI's own clients: their requests set their own, longer, timeouts.
+            let ai_http = reqwest::Client::builder()
+                .user_agent(concat!("protradechart/", env!("CARGO_PKG_VERSION")))
+                .build()?;
+            app.manage(ai::claude::ClaudeClient::new(ai_http.clone()));
+            app.manage(ai::openai::OpenAiClient::new(ai_http));
 
             // One live-feed connection for the whole app; ticks and status go
             // to every window as events. Credentials are read at each connect.
@@ -228,13 +228,14 @@ pub fn run() {
             study_commands::set_notebook_item_note,
             study_commands::set_notebook_order,
             study_commands::export_study_file,
-            ai_commands::ai_key_status,
+            ai_commands::list_ai_providers,
             ai_commands::ai_set_key,
             ai_commands::ai_delete_key,
             ai_commands::ai_draft_study,
             ai_commands::ai_explain_result,
             ai_commands::ai_plan_research,
             ai_commands::ai_synthesize_research,
+            ai_commands::ai_ask_ai,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the application");

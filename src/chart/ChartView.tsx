@@ -62,6 +62,12 @@ function watchAllCells(ws: VelaWorkspace, watched: Map<object, () => void>) {
 /** The machine's IANA timezone, e.g. `Asia/Kolkata`. */
 const LOCAL_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+/** What an Ask AI action reports back, for its confirmation card. */
+export interface ActionResult {
+  ok: boolean;
+  message: string;
+}
+
 export interface ChartViewHandle {
   /** Points the tab's active chart at a new `provider:TICKER` symbol. */
   setSymbol: (symbol: string) => void;
@@ -71,6 +77,16 @@ export interface ChartViewHandle {
   /** Every chart in the tab's grid — layout, timeframes, indicators, drawings,
    *  renderer config — for saving as part of a layout. Not just the symbol. */
   getState: () => WorkspaceState | null;
+  /** The active chart's current symbol and timeframe, for Ask AI's "what's on screen" context. */
+  getMarket: () => { symbol: string; timeframe: string } | null;
+  /** Changes the active chart's timeframe in place (e.g. "D", "60", "5"). Ask AI only — the
+   *  timeframe picker in Vela's own toolbar doesn't go through this. */
+  setTimeframe: (timeframe: string) => void;
+  /** Adds a built-in indicator to the active chart by its display name (matched case-insensitively
+   *  against Vela's native-indicator catalog). Ask AI only. */
+  addIndicator: (name: string) => Promise<ActionResult>;
+  /** Removes an indicator already on the active chart by its display name. Ask AI only. */
+  removeIndicator: (name: string) => Promise<ActionResult>;
 }
 
 interface Props {
@@ -144,6 +160,33 @@ export const ChartView = forwardRef<ChartViewHandle, Props>(function ChartView(
         }
       },
       getState: () => wsRef.current?.getState() ?? null,
+      getMarket: () => {
+        const m = wsRef.current?.chart.market;
+        return m ? { symbol: m.symbol ?? '', timeframe: m.timeframe ?? '' } : null;
+      },
+      setTimeframe: (timeframe) => {
+        if (wsRef.current) void wsRef.current.chart.setMarket({ timeframe });
+      },
+      addIndicator: async (name) => {
+        const chart = wsRef.current?.chart;
+        if (!chart) return { ok: false, message: 'No chart is open.' };
+        const wanted = name.trim().toLowerCase();
+        const catalog = await chart.availableNativeIndicators();
+        const match = catalog.find((c) => c.title.toLowerCase() === wanted || c.type.toLowerCase() === wanted);
+        if (!match) return { ok: false, message: `“${name}” isn’t a built-in indicator.` };
+        if (!match.supported) return { ok: false, message: `${match.title} doesn’t support this chart’s symbol.` };
+        chart.addNativeIndicator(match.type);
+        return { ok: true, message: `Added ${match.title}.` };
+      },
+      removeIndicator: async (name) => {
+        const chart = wsRef.current?.chart;
+        if (!chart) return { ok: false, message: 'No chart is open.' };
+        const wanted = name.trim().toLowerCase();
+        const handle = chart.indicators().find((h) => h.title.toLowerCase() === wanted || h.nativeType?.toLowerCase() === wanted);
+        if (!handle) return { ok: false, message: `“${name}” isn’t on this chart.` };
+        handle.remove();
+        return { ok: true, message: `Removed ${handle.title}.` };
+      },
     }),
     [],
   );

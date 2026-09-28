@@ -8,7 +8,7 @@ interface Props {
 }
 
 /** The answer a result opens with: one plain sentence per headline measure, and which events it
- *  covers. Sentences are text nodes: a label is the user's (or Claude's) words, never markup. */
+ *  covers. Sentences are text nodes: a label is the user's (or the AI's) words, never markup. */
 export function StudyAnswer({ answer, onAddMeasure }: Props) {
   return (
     <section className={`study-answer-card${answer.fallback ? ' fallback' : ''}`} aria-label="Answer">

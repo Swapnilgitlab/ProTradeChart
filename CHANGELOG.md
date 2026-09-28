@@ -7,6 +7,15 @@ project uses [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- **OpenAI as a second AI provider, and one place to manage both keys.** A new **AI providers** icon on the right rail opens a
+  dialog for either provider's API key — Claude (Anthropic) or GPT (OpenAI) — with a choice of which one to use once both are
+  configured. The Study Builder's drafts, revisions, explanations, research plans and syntheses, and the new Ask AI below, all
+  work with either.
+- **Ask AI: an assistant on the rail that can act in the app.** A new rail panel (`Alt+A`) answers questions and can propose
+  adding or removing a watchlist symbol, creating a watchlist, opening a symbol or changing the chart's timeframe, adding or
+  removing an indicator, and creating a price alert — each shown as its own card that does nothing until you press **Approve**;
+  **Reject**, or leaving it alone, does nothing. It never sees your watchlists' contents, only their names, and never anything
+  from Python or Studies.
 - **A right-hand icon rail with switchable panels.** A strip of icons down the right edge shows the **Watchlist** or the
   **Alerts** panel beside the chart, and folds it away when you press the icon again (`Alt+W` for the watchlist). The
   choice is remembered. Alerts now have a panel of their own — pause, resume, re-arm, edit and delete from it, click one

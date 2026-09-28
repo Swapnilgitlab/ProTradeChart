@@ -1,13 +1,12 @@
-//! A small client for Anthropic's Messages API, used by the AI Study Builder. Plain HTTP: there is
-//! no official Rust SDK. The user's API key is passed in for each call (it is read from
-//! [`crate::secrets::Secrets`] by the command and never kept here), and nothing about the key or
-//! the bodies is logged.
+//! A small client for Anthropic's Messages API. Plain HTTP: there is no official Rust SDK. The
+//! user's API key is passed in for each call (it is read from [`crate::secrets::Secrets`] by the
+//! command and never kept here), and nothing about the key or the bodies is logged.
 
-use std::fmt;
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
+
+use super::{network_error, timed_out, AiError, AiErrorKind, AiRequest, Progress, Reply, Stage, ToolCall};
 
 pub const BASE_URL: &str = "https://api.anthropic.com";
 const API_VERSION: &str = "2023-06-01";
@@ -15,6 +14,9 @@ const API_VERSION: &str = "2023-06-01";
 /// model's safety classifiers decline a request, Anthropic re-runs it on its recommended fallback
 /// model within the same call instead of returning the refusal.
 pub const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
+pub const MODEL: &str = "claude-opus-5";
+/// Room for adaptive thinking plus a full answer. Answers are streamed, so a long one can't time out.
+const MAX_TOKENS: u32 = 32_000;
 /// How long a streamed answer may go quiet before it is given up on. Anthropic sends a `ping` every
 /// few seconds while the model thinks, so this is generous; there is no limit on the whole answer.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
@@ -23,50 +25,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 /// Progress is reported at most this often.
 const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AiErrorKind {
-    /// Anthropic didn't accept the key.
-    BadKey,
-    /// Rate limited or overloaded: worth trying again later.
-    Busy,
-    /// The model (and its fallback) declined the request.
-    Refused,
-    /// The answer hit `max_tokens` before it was complete.
-    CutOff,
-    Network,
-    /// Anything else the API said, in its own words.
-    Api,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AiError {
-    pub kind: AiErrorKind,
-    pub message: String,
-}
-
-impl AiError {
-    fn new(kind: AiErrorKind, message: impl Into<String>) -> Self {
-        AiError {
-            kind,
-            message: message.into(),
-        }
-    }
-}
-
-impl fmt::Display for AiError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-/// A finished answer: the text of its `text` blocks, and the model that actually produced it
-/// (a fallback model when the requested one declined).
-#[derive(Debug, Clone, PartialEq)]
-pub struct Reply {
-    pub text: String,
-    pub model: String,
-}
+const PROVIDER: &str = "Anthropic";
 
 pub struct ClaudeClient {
     http: reqwest::Client,
@@ -105,7 +64,7 @@ impl ClaudeClient {
             .timeout(CHECK_TIMEOUT)
             .send()
             .await
-            .map_err(network)?;
+            .map_err(|e| network_error(&e, PROVIDER))?;
         let status = resp.status().as_u16();
         if (200..300).contains(&status) {
             return Ok(());
@@ -114,18 +73,50 @@ impl ClaudeClient {
         Err(http_error(status, &body))
     }
 
+    /// Builds the Messages API body for a request: `output_config.format.json_schema` when it
+    /// asks for structured JSON text, or `tools` when it offers tool calls instead.
+    fn body(&self, req: &AiRequest) -> Value {
+        let messages: Vec<Value> = req
+            .messages
+            .iter()
+            .map(|m| json!({"role": m.role, "content": m.content}))
+            .collect();
+        let mut body = json!({
+            "model": MODEL,
+            "max_tokens": MAX_TOKENS,
+            "fallbacks": "default",
+            "thinking": {"type": "adaptive"},
+            "system": req.system,
+            "messages": messages,
+        });
+        let map = body.as_object_mut().unwrap();
+        if let Some(schema) = &req.schema {
+            map.insert(
+                "output_config".into(),
+                json!({"format": {"type": "json_schema", "schema": schema}}),
+            );
+        }
+        if !req.tools.is_empty() {
+            let tools: Vec<Value> = req
+                .tools
+                .iter()
+                .map(|t| json!({"name": t.name, "description": t.description, "input_schema": t.schema}))
+                .collect();
+            map.insert("tools".into(), Value::Array(tools));
+        }
+        body
+    }
+
     /// Sends one Messages API request (built by [`super::prompts`]) as a stream and returns the
     /// finished answer, reporting progress as it arrives.
     pub async fn message(
         &self,
         key: &str,
-        body: &Value,
+        req: &AiRequest,
         on_progress: &mut (dyn FnMut(Progress) + Send),
     ) -> Result<Reply, AiError> {
-        let mut body = body.clone();
-        if let Some(map) = body.as_object_mut() {
-            map.insert("stream".into(), Value::Bool(true));
-        }
+        let mut body = self.body(req);
+        body.as_object_mut().unwrap().insert("stream".into(), Value::Bool(true));
         let mut resp = tokio::time::timeout(
             CONNECT_TIMEOUT,
             self.request(self.http.post(format!("{}/v1/messages", self.base)), key)
@@ -134,8 +125,8 @@ impl ClaudeClient {
                 .send(),
         )
         .await
-        .map_err(|_| timed_out())?
-        .map_err(network)?;
+        .map_err(|_| timed_out(PROVIDER))?
+        .map_err(|e| network_error(&e, PROVIDER))?;
         let status = resp.status().as_u16();
         let streamed = resp
             .headers()
@@ -144,7 +135,7 @@ impl ClaudeClient {
             .is_some_and(|v| v.starts_with("text/event-stream"));
         if !(200..300).contains(&status) || !streamed {
             // An error, or a server that answered in one piece: read it whole.
-            let text = resp.text().await.map_err(network)?;
+            let text = resp.text().await.map_err(|e| network_error(&e, PROVIDER))?;
             log::info!("Claude request finished with HTTP {status}");
             return parse_reply(status, &text);
         }
@@ -154,8 +145,8 @@ impl ClaudeClient {
         loop {
             let chunk = tokio::time::timeout(self.idle, resp.chunk())
                 .await
-                .map_err(|_| timed_out())?
-                .map_err(network)?;
+                .map_err(|_| timed_out(PROVIDER))?
+                .map_err(|e| network_error(&e, PROVIDER))?;
             let Some(chunk) = chunk else { break };
             stream.feed(&chunk);
             let progress = stream.progress();
@@ -180,19 +171,17 @@ impl ClaudeClient {
     }
 }
 
-/// Where a streamed answer has got to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Stage {
-    Thinking,
-    Writing,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct Progress {
-    pub stage: Stage,
-    /// Characters of the answer so far.
-    pub chars: usize,
+/// One content block as it streams: gathered by its `index`, in order, so a fallback can discard
+/// everything gathered before it and multiple tool calls stay distinct.
+#[derive(Debug)]
+enum Block {
+    Text(String),
+    ToolUse {
+        name: String,
+        json: String,
+    },
+    /// thinking, redacted_thinking: carry nothing the app shows.
+    Other,
 }
 
 /// Reads a Messages API event stream (server-sent events). Pure: fed bytes as they arrive, in
@@ -201,7 +190,7 @@ pub struct Progress {
 pub struct SseAccumulator {
     pending: Vec<u8>,
     data: String,
-    text: String,
+    blocks: Vec<Block>,
     model: String,
     stop_reason: Option<String>,
     error: Option<AiError>,
@@ -232,10 +221,18 @@ impl SseAccumulator {
         }
     }
 
+    fn block_mut(&mut self, index: usize) -> &mut Block {
+        while self.blocks.len() <= index {
+            self.blocks.push(Block::Other);
+        }
+        &mut self.blocks[index]
+    }
+
     fn event(&mut self, data: &str) {
         let Ok(v) = serde_json::from_str::<Value>(data) else {
             return;
         };
+        let index = v.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
         match v.get("type").and_then(Value::as_str) {
             Some("message_start") => {
                 if let Some(model) = v.pointer("/message/model").and_then(Value::as_str) {
@@ -246,7 +243,7 @@ impl SseAccumulator {
                 match v.pointer("/content_block/type").and_then(Value::as_str) {
                     // Another model takes over: what the declining one wrote is not the answer.
                     Some("fallback") => {
-                        self.text.clear();
+                        self.blocks.clear();
                         self.writing = false;
                         if let Some(model) = v.pointer("/content_block/to/model").and_then(Value::as_str) {
                             self.model = model.to_string();
@@ -254,21 +251,45 @@ impl SseAccumulator {
                     }
                     Some("text") => {
                         self.writing = true;
-                        if let Some(t) = v.pointer("/content_block/text").and_then(Value::as_str) {
-                            self.text.push_str(t);
-                        }
+                        let text = v
+                            .pointer("/content_block/text")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string();
+                        *self.block_mut(index) = Block::Text(text);
+                    }
+                    Some("tool_use") => {
+                        let name = v
+                            .pointer("/content_block/name")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string();
+                        *self.block_mut(index) = Block::ToolUse {
+                            name,
+                            json: String::new(),
+                        };
                     }
                     _ => {}
                 }
             }
-            Some("content_block_delta") => {
-                if v.pointer("/delta/type").and_then(Value::as_str) == Some("text_delta") {
+            Some("content_block_delta") => match v.pointer("/delta/type").and_then(Value::as_str) {
+                Some("text_delta") => {
                     if let Some(t) = v.pointer("/delta/text").and_then(Value::as_str) {
                         self.writing = true;
-                        self.text.push_str(t);
+                        if let Block::Text(text) = self.block_mut(index) {
+                            text.push_str(t);
+                        }
                     }
                 }
-            }
+                Some("input_json_delta") => {
+                    if let Some(t) = v.pointer("/delta/partial_json").and_then(Value::as_str) {
+                        if let Block::ToolUse { json, .. } = self.block_mut(index) {
+                            json.push_str(t);
+                        }
+                    }
+                }
+                _ => {}
+            },
             Some("message_delta") => {
                 if let Some(reason) = v.pointer("/delta/stop_reason").and_then(Value::as_str) {
                     self.stop_reason = Some(reason.to_string());
@@ -292,9 +313,14 @@ impl SseAccumulator {
     }
 
     pub fn progress(&self) -> Progress {
+        let chars = self
+            .blocks
+            .iter()
+            .map(|b| if let Block::Text(t) = b { t.chars().count() } else { 0 })
+            .sum();
         Progress {
             stage: if self.writing { Stage::Writing } else { Stage::Thinking },
-            chars: self.text.chars().count(),
+            chars,
         }
     }
 
@@ -312,6 +338,22 @@ impl SseAccumulator {
         if let Some(e) = self.error {
             return Err(e);
         }
+        let text: String = self
+            .blocks
+            .iter()
+            .filter_map(|b| if let Block::Text(t) = b { Some(t.as_str()) } else { None })
+            .collect();
+        let tool_calls: Vec<ToolCall> = self
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::ToolUse { name, json } => Some(ToolCall {
+                    name: name.clone(),
+                    arguments: serde_json::from_str(json).unwrap_or(Value::Object(Default::default())),
+                }),
+                _ => None,
+            })
+            .collect();
         match self.stop_reason.as_deref() {
             Some("refusal") => Err(refused()),
             Some("max_tokens") => Err(cut_off()),
@@ -319,20 +361,14 @@ impl SseAccumulator {
                 AiErrorKind::Network,
                 "Anthropic's answer stopped before it was complete. Try again.",
             )),
-            Some(_) if self.text.trim().is_empty() => Err(empty()),
+            Some(_) if text.trim().is_empty() && tool_calls.is_empty() => Err(empty()),
             Some(_) => Ok(Reply {
-                text: self.text,
+                text,
+                tool_calls,
                 model: self.model,
             }),
         }
     }
-}
-
-fn timed_out() -> AiError {
-    AiError::new(
-        AiErrorKind::Network,
-        "Anthropic stopped answering. Try again, or ask a narrower question.",
-    )
 }
 
 fn refused() -> AiError {
@@ -353,16 +389,6 @@ fn empty() -> AiError {
     AiError::new(AiErrorKind::Api, "Claude returned an empty answer.")
 }
 
-fn network(e: reqwest::Error) -> AiError {
-    let what = if e.is_timeout() {
-        "Anthropic took too long to answer. Try again, or ask a narrower question."
-    } else {
-        "Couldn't reach Anthropic. Check the internet connection and try again."
-    };
-    log::warn!("Claude request failed: {e}");
-    AiError::new(AiErrorKind::Network, what)
-}
-
 /// The API's own error message, from `{"type":"error","error":{"type":…,"message":…}}`.
 fn api_message(body: &str) -> Option<String> {
     let v: Value = serde_json::from_str(body).ok()?;
@@ -375,7 +401,7 @@ fn http_error(status: u16, body: &str) -> AiError {
     match status {
         401 => AiError::new(
             AiErrorKind::BadKey,
-            "Anthropic didn't accept the API key. Check it in the Claude API key settings.",
+            "Anthropic didn't accept the API key. Check it in the AI providers settings.",
         ),
         403 => AiError::new(
             AiErrorKind::Api,
@@ -422,8 +448,8 @@ pub fn parse_reply(status: u16, body: &str) -> Result<Reply, AiError> {
         Some("max_tokens") => return Err(cut_off()),
         _ => {}
     }
-    // Thinking, redacted thinking and fallback blocks carry nothing the app shows, and text before
-    // the last fallback block was written by a model that then declined: it isn't the answer.
+    // Thinking, redacted thinking and fallback blocks carry nothing the app shows, and everything
+    // before the last fallback block was written by a model that then declined: it isn't the answer.
     let blocks = v.get("content").and_then(Value::as_array).cloned().unwrap_or_default();
     let from = blocks
         .iter()
@@ -434,11 +460,20 @@ pub fn parse_reply(status: u16, body: &str) -> Result<Reply, AiError> {
         .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
         .filter_map(|b| b.get("text").and_then(Value::as_str))
         .collect();
-    if text.trim().is_empty() {
+    let tool_calls: Vec<ToolCall> = blocks[from..]
+        .iter()
+        .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
+        .map(|b| ToolCall {
+            name: b.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
+            arguments: b.get("input").cloned().unwrap_or(Value::Object(Default::default())),
+        })
+        .collect();
+    if text.trim().is_empty() && tool_calls.is_empty() {
         return Err(empty());
     }
     Ok(Reply {
         text,
+        tool_calls,
         model: v.get("model").and_then(Value::as_str).unwrap_or_default().to_string(),
     })
 }
@@ -446,10 +481,22 @@ pub fn parse_reply(status: u16, body: &str) -> Result<Reply, AiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ai::{Msg, ToolSpec};
     use serde_json::json;
     use std::sync::{Arc, Mutex};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    fn req(schema: Value) -> AiRequest {
+        AiRequest::structured(
+            "system".into(),
+            vec![Msg {
+                role: "user".into(),
+                content: "hi".into(),
+            }],
+            schema,
+        )
+    }
 
     #[test]
     fn a_finished_answer_is_its_text_blocks() {
@@ -465,6 +512,28 @@ mod tests {
         let reply = parse_reply(200, &body.to_string()).unwrap();
         assert_eq!(reply.text, "{\"a\":1}");
         assert_eq!(reply.model, "claude-opus-5");
+        assert!(reply.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn a_tool_call_is_read_from_a_whole_response() {
+        let body = json!({
+            "model": "claude-opus-5",
+            "stop_reason": "tool_use",
+            "content": [
+                {"type": "text", "text": "Sure, adding it."},
+                {"type": "tool_use", "id": "t1", "name": "add_watchlist_item", "input": {"symbol": "binance:BTCUSDT"}}
+            ]
+        });
+        let reply = parse_reply(200, &body.to_string()).unwrap();
+        assert_eq!(reply.text, "Sure, adding it.");
+        assert_eq!(
+            reply.tool_calls,
+            vec![ToolCall {
+                name: "add_watchlist_item".into(),
+                arguments: json!({"symbol": "binance:BTCUSDT"}),
+            }]
+        );
     }
 
     #[test]
@@ -572,10 +641,13 @@ mod tests {
                     tokio::time::sleep(Duration::from_secs(3600)).await;
                 }
                 None => {
-                    // In small pieces, so events and characters arrive split.
+                    // In small pieces, so events and characters arrive split — a real gap between
+                    // writes, not just a `flush()` (which doesn't pace a raw socket and let a fast
+                    // loopback coalesce every piece into one read on the client side).
                     for piece in payload.as_bytes().chunks(7) {
                         sock.write_all(piece).await.unwrap();
                         sock.flush().await.ok();
+                        tokio::time::sleep(Duration::from_millis(2)).await;
                     }
                 }
             }
@@ -593,7 +665,7 @@ mod tests {
         .await;
         let client = ClaudeClient::with_base(reqwest::Client::new(), &base);
         let reply = client
-            .message("sk-ant-test", &json!({"model": "claude-opus-5"}), &mut |_| {})
+            .message("sk-ant-test", &req(json!({"type": "object"})), &mut |_| {})
             .await
             .unwrap();
         assert_eq!(reply.text, "hi");
@@ -604,8 +676,37 @@ mod tests {
         assert!(head.contains("anthropic-version: 2023-06-01"));
         assert!(head.contains(&format!("anthropic-beta: {FALLBACK_BETA}")));
         let sent: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(sent["model"], "claude-opus-5");
+        assert_eq!(sent["model"], MODEL);
         assert_eq!(sent["stream"], true);
+        assert_eq!(sent["output_config"]["format"]["schema"]["type"], "object");
+    }
+
+    #[tokio::test]
+    async fn a_request_with_tools_sends_them_and_no_schema() {
+        let (base, seen) = serve_once(
+            200,
+            json!({"model": "claude-opus-5", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t1", "name": "f", "input": {}}]}),
+        )
+        .await;
+        let client = ClaudeClient::with_base(reqwest::Client::new(), &base);
+        let req = AiRequest::with_tools(
+            "system".into(),
+            vec![Msg {
+                role: "user".into(),
+                content: "hi".into(),
+            }],
+            vec![ToolSpec {
+                name: "f".into(),
+                description: "does f".into(),
+                schema: json!({"type": "object", "properties": {}, "required": [], "additionalProperties": false}),
+            }],
+        );
+        client.message("sk-ant-test", &req, &mut |_| {}).await.unwrap();
+        let (_, body) = seen.lock().unwrap().clone().unwrap();
+        let sent: Value = serde_json::from_str(&body).unwrap();
+        assert!(sent.get("output_config").is_none());
+        assert_eq!(sent["tools"][0]["name"], "f");
+        assert_eq!(sent["tools"][0]["input_schema"]["type"], "object");
     }
 
     #[tokio::test]
@@ -673,6 +774,43 @@ mod tests {
         }
         let crlf = stream.replace('\n', "\r\n");
         assert_eq!(accumulate(&crlf, 4).unwrap().text, "{\"a\": \"₹1 Cr\"}");
+    }
+
+    #[test]
+    fn a_streamed_tool_call_reassembles_its_json_from_partial_deltas() {
+        let events = vec![
+            json!({"type": "message_start", "message": {"model": "claude-opus-5"}}),
+            json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Adding it."}}),
+            json!({"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "t1", "name": "add_watchlist_item", "input": {}}}),
+            json!({"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "{\"symbol\": \""}}),
+            json!({"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "binance:BTCUSDT\"}"}}),
+            json!({"type": "message_delta", "delta": {"stop_reason": "tool_use"}}),
+            json!({"type": "message_stop"}),
+        ];
+        let reply = accumulate(&sse(&events), 9).unwrap();
+        assert_eq!(reply.text, "Adding it.");
+        assert_eq!(
+            reply.tool_calls,
+            vec![ToolCall {
+                name: "add_watchlist_item".into(),
+                arguments: json!({"symbol": "binance:BTCUSDT"}),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_tool_only_answer_with_no_text_is_not_an_empty_answer() {
+        let events = vec![
+            json!({"type": "message_start", "message": {"model": "claude-opus-5"}}),
+            json!({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "t1", "name": "f", "input": {}}}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}}),
+            json!({"type": "message_delta", "delta": {"stop_reason": "tool_use"}}),
+            json!({"type": "message_stop"}),
+        ];
+        let reply = accumulate(&sse(&events), 100).unwrap();
+        assert_eq!(reply.text, "");
+        assert_eq!(reply.tool_calls[0].name, "f");
     }
 
     #[test]
@@ -747,7 +885,7 @@ mod tests {
         let client = ClaudeClient::with_base(reqwest::Client::new(), &base);
         let mut seen = Vec::new();
         let reply = client
-            .message("sk-ant-test", &json!({}), &mut |p| seen.push(p))
+            .message("sk-ant-test", &req(json!({"type": "object"})), &mut |p| seen.push(p))
             .await
             .unwrap();
         assert_eq!(reply.text, "{\"ok\": true}");
@@ -761,7 +899,7 @@ mod tests {
         let (base, _) = serve_raw(200, "text/event-stream", stream, Some(40)).await;
         let client = ClaudeClient::with_base(reqwest::Client::new(), &base).with_idle(Duration::from_millis(300));
         let err = client
-            .message("sk-ant-test", &json!({}), &mut |_| {})
+            .message("sk-ant-test", &req(json!({"type": "object"})), &mut |_| {})
             .await
             .unwrap_err();
         assert_eq!(err.kind, AiErrorKind::Network);

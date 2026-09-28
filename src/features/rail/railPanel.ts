@@ -1,7 +1,7 @@
 /** Which panel the right rail is showing, and how that is remembered between launches. Pure, so the
  *  migration from the old "watchlist collapsed" setting is tested without a component. */
 
-export const RAIL_PANELS = ['watchlist', 'alerts'] as const;
+export const RAIL_PANELS = ['watchlist', 'alerts', 'assistant'] as const;
 export type RailPanelId = (typeof RAIL_PANELS)[number];
 
 /** The preference that remembers the panel. `none` means the rail is showing no panel. */

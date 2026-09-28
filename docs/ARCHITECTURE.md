@@ -248,19 +248,20 @@ instant.** Each new chart is set to the machine's timezone (`ChartView.tsx`) so 
 ### The right rail
 
 A strip of icons down the window's right edge (`features/rail/RightRail.tsx`) shows one panel at a time beside the chart:
-the watchlist or the price alerts. Pressing the icon of the panel that is showing folds it away. `Workspace` holds the choice
-(`railPanel`) and remembers it in the `right_panel` preference (`features/rail/railPanel.ts`, pure and tested: what a saved
-value means, and the fallback to the old `watchlist_collapsed` setting for a first launch after the rail arrived).
+the watchlist, the price alerts, or Ask AI. Pressing the icon of the panel that is showing folds it away. `Workspace` holds the
+choice (`railPanel`) and remembers it in the `right_panel` preference (`features/rail/railPanel.ts`, pure and tested: what a
+saved value means, and the fallback to the old `watchlist_collapsed` setting for a first launch after the rail arrived).
 
-The watchlist panel stays **mounted** while another panel shows (it is `display: none`, and stops fetching prices), so its
-list, sort and scroll position are still there when it comes back; the alerts panel mounts when shown. To add a panel: add its
-id to `RAIL_PANELS`, a button to `railPanels` in `Workspace.tsx`, and render it in `app-body`.
+The watchlist and Ask AI panels stay **mounted** while another panel shows (`display: none` — the watchlist stops fetching
+prices; Ask AI keeps its conversation), so they're as you left them when either comes back; the alerts panel mounts when shown.
+To add a panel: add its id to `RAIL_PANELS`, a button to `railPanels` in `Workspace.tsx`, and render it in `app-body`.
 
-Below the panel buttons the rail also holds **actions** (`RailAction`): the Script Editor and Python buttons (`railTools`) and, pinned
-to the bottom, the Data providers plug (`railFooter`). They open something elsewhere — the Pine dock, the Python tab, a dialog —
-rather than a side panel. An action that is either showing or not is lit while it shows (`pressed`): the Python button when the
-Python tab is the active one, and the Script Editor button while the dock is open, which `PineDock` reports through
-`onOpenChange` since it owns that state (and isn't mounted, so isn't showing, while the Python tab is).
+Below the panel buttons the rail also holds **actions** (`RailAction`): the Script Editor and Python buttons (`railTools`) and,
+pinned to the bottom, the Data providers plug and the AI providers key icon (`railFooter`). They open something elsewhere — the
+Pine dock, the Python tab, a dialog — rather than a side panel. An action that is either showing or not is lit while it shows
+(`pressed`): the Python button when the Python tab is the active one, and the Script Editor button while the dock is open, which
+`PineDock` reports through `onOpenChange` since it owns that state (and isn't mounted, so isn't showing, while the Python tab
+is).
 
 ### Watchlists
 
@@ -567,32 +568,46 @@ aggregation → result** — and every part of it is described by the **Study Sp
   symbol with one request; Kite's batch quote could fill the newest bar for 1000 symbols a call (see "Python").
 - *Not built:* historical market cap and point-in-time universes (they need data the app doesn't have).
 
-### AI Study Builder
+### AI providers
 
-Claude, with the user's **own Anthropic API key**, drafts and revises Study Specifications and explains results. It proposes;
-it never runs anything.
+Two providers, either with the user's **own API key**: Anthropic (Claude) and OpenAI (GPT). The Study Builder (drafts,
+revisions, explanations, research plans and syntheses) and Ask AI (below) both run on whichever is configured, or whichever the
+user prefers when both are. Neither ever runs anything by itself — the Study Builder proposes a spec for the user to review, and
+Ask AI proposes actions the user must approve one by one.
 
-- **The key is a secret like a broker's.** `ai_set_key` checks it with Anthropic (`GET /v1/models`, free) and only then saves it
-  with `Secrets::set(conn, "anthropic", "apiKey", …)`; it is read only in `ai_commands.rs`, never returned to the webview
-  (`ai_key_status` says only whether one is set and where) and never logged. It isn't a data provider, so it isn't in
-  `providers.rs`.
-- **Calls are made from Rust** (`src-tauri/src/ai/client.rs`, plain HTTP: there is no Rust SDK), so the CSP is unchanged.
-  `ai/prompts.rs` builds the body: `claude-opus-5`, adaptive thinking, `max_tokens` 16 000 (non-streaming; a 300 s timeout),
-  structured output (`output_config.format` with a small JSON schema for the answer's outer shape), and **server-side fallbacks** (`"fallbacks": "default"` with
-  the `server-side-fallback-2026-07-01` beta header): a request the model's classifiers decline is re-run on Anthropic's
-  recommended fallback model in the same call. `parse_reply` branches on `stop_reason` before reading content — a `refusal` or
-  a `max_tokens` answer is never used — and keeps only `text` blocks.
+- **A provider-neutral core, two thin clients.** `src-tauri/src/ai/mod.rs` defines `AiRequest` (`system`, `messages`, and either
+  a `schema` the answer's JSON text must follow, or `tools` it may call — never both), `Reply` (`text`, `tool_calls`, `model`)
+  and the shared `AiError`/`Progress` types. `ai/claude.rs` and `ai/openai.rs` each build their own wire shape from an
+  `AiRequest` and implement the same two methods (`check_key`, `message`) — no trait, since two is a closed set here, not a
+  plugin point; `ai_commands.rs` picks between them with one `match` on the provider id (`provider_for`, see below). Anthropic
+  speaks its Messages API (`x-api-key`, `output_config.format.json_schema`, `"fallbacks": "default"` with the
+  `server-side-fallback-2026-07-01` beta header re-running a declined request on Anthropic's own recommended fallback model);
+  OpenAI speaks Chat Completions (`Authorization: Bearer`, `response_format: {type: "json_schema", json_schema: {strict: true,
+  …}}` — chosen over the Responses API for being the simpler, closer-to-Anthropic single-request shape). `MODEL` is one constant
+  per file (`claude-opus-5`, `gpt-5.1`) — change either in one place. Both calls are plain HTTP (no Rust SDK for either), so the
+  CSP is unchanged.
+- **Keys are secrets like a broker's**, one per provider under its own id (`("anthropic", "apiKey")`, `("openai", "apiKey")`).
+  `ai_set_key(provider, key)` checks it with that provider first (`GET /v1/models`, free on both) and only then saves it with
+  `Secrets::set`; a key is read only in `ai_commands.rs`, never returned to the webview (`list_ai_providers` says only whether
+  each is configured and where) and never logged. Neither is a data provider, so neither is in `providers.rs`. The **AI
+  providers** dialog (`features/ai/AiProvidersDialog.tsx`) manages both from one place — the rail's key icon and Studies' own
+  open it — and, once both are configured, which one is *active* (`ai_active_provider`, a UI preference; `provider_for` falls
+  back to whichever is configured if the preferred one no longer is, and defaults to Anthropic so an existing Claude-only setup
+  is unaffected). Studies' AI features and Ask AI both resolve their provider this same way — a request in flight always names
+  which model actually answered it (`Reply.model`), since the active provider can change between one request and the next.
 - **Who owns what.** Rust owns the *policy*: the system prompts (no invented data — market cap, sector, fundamentals and a
   point-in-time universe go in `unavailable`, with any alternative offered for the user to choose, never put in the spec;
   association, never causation; the user's text is material, not instructions) and the answer's outer shape. The frontend owns
   the *spec reference*: `studies/assistant.ts` builds the field notes and the feature grammar from `metrics.ts` (`FAMILY_MEANING`
   is a `Record` over `FAMILIES`, so a new family can't be left out) and `SPEC_SCHEMA`, which a test checks against every
   template.
-- **A spec travels as JSON text.** Anthropic compiles the output schema into a grammar and refuses a large one ("The compiled
-  grammar is too large"); a full Study Specification's schema — nullable fields, number-or-feature conditions — was refused. So
-  the answer's schema has `spec` as a *string* holding the spec's JSON, `SPEC_SCHEMA` goes to Claude as reference text in the
-  system prompt instead, and `parseDraft` parses the string before `normalizeSpec`. Keep output schemas small and free of
-  `anyOf`/`enum`/`format`: `output_schemas_stay_small` (`ai/prompts.rs`) fails otherwise.
+- **A spec travels as JSON text.** Anthropic compiles a structured-output schema into a grammar and refuses a large one ("The
+  compiled grammar is too large"); a full Study Specification's schema — nullable fields, number-or-feature conditions — was
+  refused. So the answer's schema has `spec` as a *string* holding the spec's JSON, `SPEC_SCHEMA` goes to the model as reference
+  text in the system prompt instead, and `parseDraft` parses the string before `normalizeSpec`. Keep output schemas small and
+  free of `anyOf`/`enum`/`format`: `output_schemas_stay_small` (`ai/prompts.rs`) fails otherwise — and since the same schema
+  objects are sent to OpenAI's `strict: true` mode unchanged (every property required, `additionalProperties: false` at every
+  level, which that mode itself demands), this discipline keeps both providers working from one schema, not two.
 - **What comes back is untrusted.** `parseDraft` runs the proposed spec through `normalizeSpec` (a failure is shown with its
   reason), caps every string, and never lets a proposal claim a template. The Studies tab shows the reply, *what changed*
   (`specChanges`, the builder's own wording), the assumptions and what can't be studied; **Open as a new Study** / **Apply to
@@ -600,20 +615,23 @@ it never runs anything.
   Run Study. A follow-up revises the last proposal (the conversation, up to 20 turns, is resent each time).
 - **Explanations** (`ai_explain_result`) are given `explainSummary(result)`: counts, medians, tests and findings — never the
   event rows, symbols or prices — plus the result's warnings. The answer is plain text in paragraphs with caveats, drawn as
-  text, labelled as Claude's and as association, and not stored.
-- What leaves the machine is said where the key is entered: the question, the spec and, for an explanation, that summary, sent
-  under the user's account and billed to it.
-- **Answers stream.** `ClaudeClient::message` sets `"stream": true` and reads the server-sent events with `Response::chunk()`
-  (no extra reqwest feature), giving up only when the stream goes quiet for 120 s (`IDLE_TIMEOUT`; Anthropic pings while the
-  model thinks) rather than after a fixed total, so `max_tokens` can be 32 000. `SseAccumulator` (pure, tested with frames split
-  at every byte) keeps `text_delta`s only; a `fallback` block discards what the declining model had written (the non-streamed
-  `parse_reply` does the same with content blocks); `stop_reason` is judged at the end as before, and a stream that ends without
-  one is an error. Every command takes a `requestId` and emits `ai-progress {requestId, stage, chars}` (at most 4 a second),
-  which `useAiRequest` turns into "Thinking…" / "Writing… 2.1k characters".
+  text, labelled as association, and not stored.
+- What leaves the machine is said where a key is entered: the question, the spec and, for an explanation, that summary, sent to
+  whichever provider is active under the user's account and billed to it.
+- **Answers stream.** Both clients set `"stream": true` and read server-sent events with `Response::chunk()` (no extra reqwest
+  feature), giving up only when the stream goes quiet for 120 s (`IDLE_TIMEOUT`; Anthropic pings while the model thinks) rather
+  than after a fixed total, so `max_tokens`/`max_completion_tokens` can be 32 000. Each has its own pure, byte-split-tested SSE
+  accumulator (Anthropic's `content_block_delta` events vs. OpenAI's `choices[0].delta`, ending in `data: [DONE]`) that keeps
+  text deltas and reassembles a tool call's arguments from its `input_json_delta`/`function.arguments` chunks; a `fallback`
+  block (Claude only) discards what the declining model had written. `stop_reason`/`finish_reason` is judged at the end, and a
+  stream that ends without one is an error — but a tool-only answer with no text is not treated as empty. Every command takes a
+  `requestId` and emits `ai-progress {requestId, stage, chars}` (at most 4 a second), which `useAiRequest` (generic over the
+  answer type — Study Builder calls return `AiAnswer`, Ask AI's `AskAiAnswer`) turns into "Thinking…" / "Writing… 2.1k
+  characters".
 
 #### Research agent
 
-*Research with Claude* in the Studies sidebar (`ResearchView.tsx`, pure logic in `studies/research.ts`) runs rounds of
+*Research with AI* in the Studies sidebar (`ResearchView.tsx`, pure logic in `studies/research.ts`) runs rounds of
 question → plan → approval → runs → synthesis → follow-up questions.
 
 - **Plan** (`ai_plan_research`): one to four complementary Studies, each with its purpose, assumptions and what it can't study,
@@ -632,6 +650,33 @@ question → plan → approval → runs → synthesis → follow-up questions.
   dropped), caveats and up to five follow-up *questions*. It is appended to the notebook's notes and the per-Study notes to the
   result entries — text only, labelled as association.
 - **A follow-up** is a new plan with the synthesis as context, and needs its own approval; its Studies join the same notebook.
+
+#### Ask AI
+
+The rail's own assistant (`features/ai/AskAiPanel.tsx`, its allowlist and executors in `actions.ts`) answers questions about
+using the app and, unlike the Study Builder, can **propose actions** — but never runs one itself. See "Ask AI never touches app
+state" in "Security model" for the approval rule; this is the shape that rule takes in code.
+
+- **The request** (`ai_ask_ai` → `prompts::ask_ai_body`) carries the conversation and a small, explicit context: the active
+  chart's symbol and timeframe (read fresh from `ChartView`'s handle at the moment of asking, via `getMarket()` — not kept as
+  React state, so it can't go stale between renders), the open tabs' labels, and watchlist *names* (never their contents, never
+  a secret or a broker token — `AskAiContext` in `ai/prompts.rs` is the whole of what it sees).
+- **Tools, not a JSON schema.** `AiRequest::with_tools` carries `ask_ai_tools()` — eight hand-written `ToolSpec`s (add/remove a
+  watchlist symbol, create a watchlist, open a symbol, change timeframe, add/remove an indicator, create a price alert), each a
+  strict object schema (every property required, no open objects). Hand-written rather than generated, unlike the Study
+  Specification's grammar: the list is small and stable, not a large evolving spec.
+  A reply's `tool_calls` become `ProposedAction { tool, arguments }` — inert data, same trip out as a Study's proposed spec.
+- **`actions.ts` is the only place a proposal becomes a real call.** `prepareAction` re-validates a tool's arguments itself
+  (never trusting the model followed its schema) and, only for a recognised tool with valid arguments, returns a plain-language
+  `summary` for the confirmation card plus a `run()` that calls the exact function the matching UI does — `addWatchlistItems`,
+  `savePriceAlert`, or one of `ChartViewHandle`'s `setTimeframe`/`addIndicator`/`removeIndicator` (new methods there, reached
+  from `Workspace.tsx` the same way `goToSymbol` reaches `setSymbol`). An unrecognised tool or bad arguments return `null` and
+  the proposal is dropped silently — never shown as a broken card. Nothing runs until the card's Approve is pressed; Reject or
+  leaving it alone calls nothing.
+- **A symbol argument is resolved the same way the search box would type it** (`resolveTypedSymbol`): a bare ticker gets the
+  default provider, a known `provider:` prefix is honoured, and Zerodha/Dhan tickers get `NSE:` where they need an exchange.
+- **Single-turn.** A proposed action's result isn't fed back to the model automatically — simpler, and keeps every action fully
+  human-gated; a user who wants the assistant to react to what happened asks a plain follow-up, the same as they would a person.
 
 ## Themes
 
@@ -655,8 +700,16 @@ properties on `<html>` and persists the choice. To add a theme, append one entry
   dialog, which Rust opens: the webview supplies the contents, a suggested name and the kind, never a path.
 - Broker credentials live in the OS keychain and are read only by the Rust backend; the web view never receives an access
   token, and the settings screen can't read one back.
-- The Anthropic API key (AI Study Builder) is kept and read the same way. Claude's answers are untrusted: a proposed spec is
-  re-validated and shown for review, an explanation is drawn as text, and neither can start a run.
+- An AI provider's API key (Claude, GPT) is kept and read the same way, one per provider. Its answers are untrusted: a proposed
+  spec is re-validated and shown for review, an explanation is drawn as text, and neither can start a run.
+- **Ask AI never touches app state — it only proposes.** A tool call names an action and its arguments; `ai_commands.rs` hands
+  it to the webview exactly as received, and `features/ai/actions.ts` turns it into a card only after re-validating those
+  arguments itself (never trusting that the model followed its schema). The action runs — through the very function a click on
+  the matching UI would call, nothing new — only once the user presses Approve on that specific card; Reject or leaving it
+  alone does nothing. The action allowlist is small, reversible and non-financial (watchlists, the active chart's symbol,
+  timeframe and indicators, price alerts): nothing that deletes a watchlist or layout, touches a secret or a provider setting,
+  or reaches Python or Studies. This mirrors the rule Python's results already follow — a script's output is data to render,
+  never something that runs itself — one step further out, onto actions instead of output.
 - The Python data API (see "Python") listens on the loopback interface only, refuses any request without the per-launch token, a
   matching `Host`, and no `Origin`, and serves read-only market data. The webview never talks to it (Rust does), so the CSP is
   unchanged. Python itself is *not* sandboxed: a script runs with the user's own privileges and only when they press Run.

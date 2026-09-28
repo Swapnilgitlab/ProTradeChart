@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { AlertTriangle, KeyRound, Loader2, MessageSquarePlus, Send, Sparkles, X } from 'lucide-react';
-import { Dialog } from '../../components/Dialog';
-import { confirmDelete } from '../../lib/dialogs';
-import { aiDeleteKey, aiDraftStudy, aiExplainResult, aiKeyStatus, aiSetKey, errorMessage, type AiKeyStatus } from '../../lib/ipc';
+import { aiDraftStudy, aiExplainResult, errorMessage } from '../../lib/ipc';
 import { explainSummary, parseDraft, parseExplanation, progressText, specReference, type Draft, type Explanation, type Turn } from '../../studies/assistant';
 import { specChanges } from '../../studies/compare';
 import type { StudyResultData } from '../../studies/result';
 import { interpret, type StudySpec } from '../../studies/spec';
+import { AiProvidersDialog, privacyNote, providerNameFromModel, useAiProviders } from '../ai/AiProvidersDialog';
 import { useAiRequest } from './useAiRequest';
 
 type Say = (text: string, kind: 'success' | 'error' | 'info') => void;
@@ -16,104 +15,12 @@ const today = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-/** The key's status, re-read when the dialog changes it. */
-export function useKeyStatus(): [AiKeyStatus | null, () => void] {
-  const [status, setStatus] = useState<AiKeyStatus | null>(null);
-  const reload = useCallback(() => {
-    aiKeyStatus()
-      .then(setStatus)
-      .catch(() => setStatus({ configured: false, storage: null }));
-  }, []);
-  useEffect(reload, [reload]);
-  return [status, reload];
-}
-
-export const PRIVACY =
-  'Your question, the Study Specification and, when you ask for an explanation, a summary of the result (counts, medians and tests — not the ' +
-  'events or prices) are sent to Anthropic under your account, and each request is billed to it.';
-
-/** Paste, replace or remove the Anthropic API key. The key goes to Rust, which checks it with Anthropic
- *  and keeps it in the OS keychain; it never comes back here. */
-export function ApiKeyDialog({ status, onClose, onChanged, say }: { status: AiKeyStatus | null; onClose: () => void; onChanged: () => void; say: Say }) {
-  const [key, setKey] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const save = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const next = await aiSetKey(key);
-      setKey('');
-      onChanged();
-      say(next.storage === 'database' ? 'Key saved in the app’s database: no OS keychain was available.' : 'Anthropic API key saved.', 'success');
-      onClose();
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const remove = async () => {
-    if (!(await confirmDelete('Remove the Anthropic API key from this computer?'))) return;
-    try {
-      await aiDeleteKey();
-      onChanged();
-      say('Anthropic API key removed.', 'info');
-      onClose();
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  };
-
-  return (
-    <Dialog
-      title="Claude API key"
-      onClose={onClose}
-      footer={
-        <>
-          {status?.configured && (
-            <button type="button" className="btn" disabled={busy} onClick={() => void remove()}>
-              Remove key
-            </button>
-          )}
-          <button type="button" className="btn btn-primary" disabled={busy || !key.trim()} onClick={() => void save()}>
-            {busy ? 'Checking…' : 'Save key'}
-          </button>
-        </>
-      }
-    >
-      <p className="small">
-        The AI Study Builder uses Claude with your own Anthropic API key. Create one at console.anthropic.com (API keys). It is checked with
-        Anthropic, then kept in your operating system’s keychain; the app never shows it again.
-      </p>
-      <p className="small muted">{PRIVACY}</p>
-      <div className="field">
-        <label htmlFor="ai-key">API key</label>
-        <input
-          id="ai-key"
-          type="password"
-          value={key}
-          placeholder={status?.configured ? '•••••••• saved — paste to replace' : 'sk-ant-…'}
-          autoComplete="off"
-          spellCheck={false}
-          onChange={(e) => setKey(e.currentTarget.value)}
-          onKeyDown={(e) => e.key === 'Enter' && key.trim() && !busy && void save()}
-        />
-        {status?.storage === 'database' && <span className="field-hint">Saved unencrypted in the app’s database: no OS keychain is available.</span>}
-      </div>
-      {error && <p className="study-problem small">{error}</p>}
-    </Dialog>
-  );
-}
-
 interface Exchange {
   question: string;
   /** What the proposal is compared against: the spec it revised, if any. */
   base: StudySpec | null;
   draft: Draft | null;
-  /** The answer as Claude sent it, for the conversation's history. */
+  /** The answer as the AI sent it, for the conversation's history. */
   raw: string | null;
   error: string | null;
   model: string | null;
@@ -202,11 +109,11 @@ interface Props {
   say: Say;
 }
 
-/** "Ask Claude": a research question → a proposed Study Specification, or an instruction → a change
+/** "Ask AI": a research question → a proposed Study Specification, or an instruction → a change
  *  to the current one. Every proposal is validated, shown with what it changes and what it assumes,
  *  and only loaded into the builder when the user says so. */
 export function AssistantPanel({ current, onUseNew, onUseRevision, say }: Props) {
-  const [status, reloadStatus] = useKeyStatus();
+  const [status, reloadStatus] = useAiProviders();
   const [open, setOpen] = useState(false);
   const [keyDialog, setKeyDialog] = useState(false);
   const [mode, setMode] = useState<'new' | 'change'>('new');
@@ -227,7 +134,7 @@ export function AssistantPanel({ current, onUseNew, onUseRevision, say }: Props)
     const lastSpec = [...conversation].reverse().find((e) => e.draft?.spec)?.draft?.spec ?? null;
     const base = mode === 'change' ? (lastSpec ?? current) : lastSpec;
     if (mode === 'change' && !base) {
-      say('Fix the Study’s problems first, so Claude has a valid spec to change.', 'info');
+      say('Fix the Study’s problems first, so the AI has a valid spec to change.', 'info');
       return;
     }
     const history: Turn[] = conversation
@@ -247,14 +154,14 @@ export function AssistantPanel({ current, onUseNew, onUseRevision, say }: Props)
     }
   };
 
-  const configured = status?.configured ?? false;
+  const configured = !!status?.active;
 
   return (
-    <section className={`study-ai${open ? ' open' : ''}`} aria-label="Ask Claude">
+    <section className={`study-ai${open ? ' open' : ''}`} aria-label="Ask AI">
       <div className="study-ai-head">
         <button type="button" className="study-ai-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
           <Sparkles size={14} />
-          Ask Claude to draft or change this Study
+          Ask AI to draft or change this Study
         </button>
         <div className="pine-toolbar-spacer" />
         {open && conversation.length > 0 && (
@@ -263,7 +170,7 @@ export function AssistantPanel({ current, onUseNew, onUseRevision, say }: Props)
             New conversation
           </button>
         )}
-        <button type="button" className="icon-button" aria-label="Claude API key" title="Claude API key" onClick={() => setKeyDialog(true)}>
+        <button type="button" className="icon-button" aria-label="AI provider" title="AI provider: which one, and its API key" onClick={() => setKeyDialog(true)}>
           <KeyRound size={14} />
         </button>
       </div>
@@ -271,10 +178,10 @@ export function AssistantPanel({ current, onUseNew, onUseRevision, say }: Props)
       {open && !configured && status && (
         <div className="study-ai-setup">
           <p className="small">
-            Describe what you want to research — “What did stocks look like before they doubled in a year?” — and Claude drafts a Study
-            Specification for you to review. It needs your own Anthropic API key.
+            Describe what you want to research — “What did stocks look like before they doubled in a year?” — and the AI drafts a Study
+            Specification for you to review. It needs your own API key for an AI provider (Claude or GPT).
           </p>
-          <p className="small muted">{PRIVACY}</p>
+          <p className="small muted">{privacyNote(status)}</p>
           <button type="button" className="btn btn-primary btn-tiny" onClick={() => setKeyDialog(true)}>
             <KeyRound size={13} />
             Add an API key
@@ -328,28 +235,29 @@ export function AssistantPanel({ current, onUseNew, onUseRevision, say }: Props)
             </button>
           </div>
           <p className="muted small">
-            Claude proposes; you decide. Proposals are checked like any spec and flagged where data doesn’t exist. Findings are historical
+            The AI proposes; you decide. Proposals are checked like any spec and flagged where data doesn’t exist. Findings are historical
             associations, not causes.
           </p>
         </div>
       )}
 
-      {keyDialog && <ApiKeyDialog status={status} onClose={() => setKeyDialog(false)} onChanged={reloadStatus} say={say} />}
+      {keyDialog && <AiProvidersDialog providers={status} onClose={() => setKeyDialog(false)} onChanged={reloadStatus} say={say} />}
     </section>
   );
 }
 
-/** "Explain with Claude" above a result: the result's summary, explained in plain words. Not stored. */
+/** "Explain with AI" above a result: the result's summary, explained in plain words. Not stored. */
 export function ResultExplainer({ result, say }: { result: StudyResultData; say: Say }) {
-  const [status, reloadStatus] = useKeyStatus();
+  const [status, reloadStatus] = useAiProviders();
   const [keyDialog, setKeyDialog] = useState(false);
   const ai = useAiRequest();
   const busy = ai.busy;
   const [explanation, setExplanation] = useState<Explanation | null>(null);
+  const [explainedBy, setExplainedBy] = useState('the AI');
   const [error, setError] = useState<string | null>(null);
 
   const explain = async () => {
-    if (!status?.configured) {
+    if (!status?.active) {
       setKeyDialog(true);
       return;
     }
@@ -359,8 +267,9 @@ export function ResultExplainer({ result, say }: { result: StudyResultData; say:
         aiExplainResult({ spec: result.spec, summary: explainSummary(result), warnings: result.warnings.map((w) => w.message) }, id),
       );
       const parsed = parseExplanation(reply.answer);
-      if (!parsed) throw new Error('Claude’s explanation was empty.');
+      if (!parsed) throw new Error('The AI’s explanation was empty.');
       setExplanation(parsed);
+      setExplainedBy(providerNameFromModel(reply.model));
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -370,9 +279,9 @@ export function ResultExplainer({ result, say }: { result: StudyResultData; say:
     <div className="study-ai-explain">
       {!explanation ? (
         <div className="study-ai-actions">
-          <button type="button" className="btn pine-btn" disabled={busy} onClick={() => void explain()} title="Send this result’s summary to Claude for a plain-language explanation">
+          <button type="button" className="btn pine-btn" disabled={busy} onClick={() => void explain()} title="Send this result’s summary to the AI for a plain-language explanation">
             {busy ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
-            {busy ? progressText(ai.progress) : 'Explain with Claude'}
+            {busy ? progressText(ai.progress) : 'Explain with AI'}
           </button>
           {error && <span className="study-problem small">{error}</span>}
         </div>
@@ -380,7 +289,7 @@ export function ResultExplainer({ result, say }: { result: StudyResultData; say:
         <div className="study-card">
           <h3>
             <Sparkles size={14} />
-            Claude’s explanation
+            {explainedBy}’s explanation
             <div className="pine-toolbar-spacer" />
             <button type="button" className="icon-button" aria-label="Close the explanation" onClick={() => setExplanation(null)}>
               <X size={13} />
@@ -400,12 +309,12 @@ export function ResultExplainer({ result, say }: { result: StudyResultData; say:
             </div>
           )}
           <p className="muted small">
-            Written by Claude from this result’s summary. It describes historical associations, not causes, and isn’t advice. Check it against
-            the numbers below.
+            Written by {explainedBy} from this result’s summary. It describes historical associations, not causes, and isn’t advice. Check it
+            against the numbers below.
           </p>
         </div>
       )}
-      {keyDialog && <ApiKeyDialog status={status} onClose={() => setKeyDialog(false)} onChanged={reloadStatus} say={say} />}
+      {keyDialog && <AiProvidersDialog providers={status} onClose={() => setKeyDialog(false)} onChanged={reloadStatus} say={say} />}
     </div>
   );
 }
