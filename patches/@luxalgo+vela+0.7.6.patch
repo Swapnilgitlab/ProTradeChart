@@ -1,0 +1,75 @@
+diff --git a/node_modules/@luxalgo/vela/dist/chunk-JSVCWYBF.js b/node_modules/@luxalgo/vela/dist/chunk-JSVCWYBF.js
+index 9cf23dc..f7ec646 100644
+--- a/node_modules/@luxalgo/vela/dist/chunk-JSVCWYBF.js
++++ b/node_modules/@luxalgo/vela/dist/chunk-JSVCWYBF.js
+@@ -16877,8 +16877,8 @@ function createProjector(coords, paneOf, paneIdAtY, barsInRange, seriesInRange)
+ }
+ 
+ // src/renderers/native/core/autoscale.ts
+-var MARGIN_TOP = 2 / 7;
+-var MARGIN_BOTTOM = 1 / 7;
++var MARGIN_TOP = 1 / 10;
++var MARGIN_BOTTOM = 1 / 10;
+ function computePaneScale(models, bars, includeCandles, i0, i1, drawings, log = false, offsetOf = () => 0) {
+   let min = Infinity;
+   let max = -Infinity;
+diff --git a/node_modules/@luxalgo/vela/dist/index.cjs b/node_modules/@luxalgo/vela/dist/index.cjs
+index 52d3494..553bc00 100644
+--- a/node_modules/@luxalgo/vela/dist/index.cjs
++++ b/node_modules/@luxalgo/vela/dist/index.cjs
+@@ -28220,8 +28220,8 @@ function createProjector(coords, paneOf, paneIdAtY, barsInRange, seriesInRange)
+ }
+ 
+ // src/renderers/native/core/autoscale.ts
+-var MARGIN_TOP = 2 / 7;
+-var MARGIN_BOTTOM = 1 / 7;
++var MARGIN_TOP = 1 / 10;
++var MARGIN_BOTTOM = 1 / 10;
+ function computePaneScale(models, bars, includeCandles, i0, i1, drawings, log = false, offsetOf = () => 0) {
+   let min = Infinity;
+   let max = -Infinity;
+diff --git a/node_modules/@luxalgo/vela/dist/vela.global.js b/node_modules/@luxalgo/vela/dist/vela.global.js
+index 60156d8..2aebc5b 100644
+--- a/node_modules/@luxalgo/vela/dist/vela.global.js
++++ b/node_modules/@luxalgo/vela/dist/vela.global.js
+@@ -35636,8 +35636,8 @@ ${overlayScrollbarCss(".vela-sd-pane")}
+   }
+ 
+   // src/renderers/native/core/autoscale.ts
+-  var MARGIN_TOP = 2 / 7;
+-  var MARGIN_BOTTOM = 1 / 7;
++  var MARGIN_TOP = 1 / 10;
++  var MARGIN_BOTTOM = 1 / 10;
+   function computePaneScale(models, bars, includeCandles, i0, i1, drawings, log = false, offsetOf = () => 0) {
+     let min2 = Infinity;
+     let max2 = -Infinity;
+diff --git a/node_modules/@luxalgo/vela/dist/widget.cjs b/node_modules/@luxalgo/vela/dist/widget.cjs
+index 4262833..6367885 100644
+--- a/node_modules/@luxalgo/vela/dist/widget.cjs
++++ b/node_modules/@luxalgo/vela/dist/widget.cjs
+@@ -34775,8 +34775,8 @@ function createProjector(coords, paneOf, paneIdAtY, barsInRange, seriesInRange)
+ }
+ 
+ // src/renderers/native/core/autoscale.ts
+-var MARGIN_TOP = 2 / 7;
+-var MARGIN_BOTTOM = 1 / 7;
++var MARGIN_TOP = 1 / 10;
++var MARGIN_BOTTOM = 1 / 10;
+ function computePaneScale(models, bars, includeCandles, i0, i1, drawings, log = false, offsetOf = () => 0) {
+   let min = Infinity;
+   let max = -Infinity;
+diff --git a/node_modules/@luxalgo/vela/dist/workspace.cjs b/node_modules/@luxalgo/vela/dist/workspace.cjs
+index 1b95be0..c480e42 100644
+--- a/node_modules/@luxalgo/vela/dist/workspace.cjs
++++ b/node_modules/@luxalgo/vela/dist/workspace.cjs
+@@ -34707,8 +34707,8 @@ function createProjector(coords, paneOf, paneIdAtY, barsInRange, seriesInRange)
+ }
+ 
+ // src/renderers/native/core/autoscale.ts
+-var MARGIN_TOP = 2 / 7;
+-var MARGIN_BOTTOM = 1 / 7;
++var MARGIN_TOP = 1 / 10;
++var MARGIN_BOTTOM = 1 / 10;
+ function computePaneScale(models, bars, includeCandles, i0, i1, drawings, log = false, offsetOf = () => 0) {
+   let min = Infinity;
+   let max = -Infinity;

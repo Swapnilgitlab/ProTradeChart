@@ -94,6 +94,9 @@ project uses [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
+- **Charts no longer leave a stock at all-time highs sitting well below the top of the pane.** Vela's own autoscale padded
+  every chart by nearly 29% above the highest visible price and 14% below the lowest, with no setting to change it; a small
+  patch to the bundled library (`patches/`, applied automatically) brings both down to 10%.
 - **Asking Claude to draft or change a Study no longer fails** with "The compiled grammar is too large": the answer's schema is
   now small, and the Study Specification comes back as JSON text that the app validates as before.
 - **Cached daily bars no longer vanish.** The offline cache trimmed old intraday data by comparing against interval names the

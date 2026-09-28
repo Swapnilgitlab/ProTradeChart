@@ -43,6 +43,14 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
 
 - `installThinMovingAverages()` has to run after **every** `new VelaWorkspace(...)` (Vela re-registers its own on each
   construction).
+- Vela's price-scale autoscale hardcodes its top/bottom padding (`MARGIN_TOP`/`MARGIN_BOTTOM` in its compiled
+  `computePaneScale`) and exposes no config for it — that's why an unpatched chart leaves a stock at all-time highs well
+  short of the top of the pane. We patch it to a smaller, symmetric margin via `patches/@luxalgo+vela+*.patch`
+  (`patch-package`, wired as `postinstall`). The patch targets a literal string across every bundle copy in
+  `node_modules/@luxalgo/vela/dist/` (chunk, `index.cjs`, `vela.global.js`, `widget.cjs`, `workspace.cjs`); a Vela version
+  bump can rename the chunk or reformat the constant and silently fail to apply (`postinstall` will error loudly, it
+  won't apply partially) — regenerate it by re-editing `node_modules` and rerunning `npx patch-package @luxalgo/vela`,
+  and rename the old patch file away since it's pinned to the old version.
 - A background tab is `display: none`, so its chart isn't built until first shown (`ChartView`). Don't assume a tab has a
   live chart.
 - Vela loads a chart to a fixed depth (`market.bars`) and doesn't page on scroll: `chart/historyBackfill.ts` raises the
