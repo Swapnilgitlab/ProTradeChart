@@ -78,8 +78,9 @@ project uses [Semantic Versioning](https://semver.org).
 - The README, About and third-party notices now spell out each data source's terms: the crypto exchanges' own terms, and
   broker data being licensed to you alone.
 - **About** now credits the developer, Swapnil Pawar of ProTradeJournal, with links to their X and GitHub profiles.
-- **New logo and app icon.** The README carries the full logo, and the app icon (window, taskbar, installers), the favicon
-  and the About dialog use its P mark on a light rounded plate, so they stay legible on dark taskbars and docks.
+- **New logo and app icon.** A single candlestick in a green rounded tile, with the wordmark in Geist and "Trade" in
+  green. The README carries the full logo, and the app icon (window, taskbar, installers), the favicon and the About
+  dialog use the tile; the smallest sizes are drawn with a thicker candle so they stay sharp at 16px.
 
 - **The app is now licensed under the GNU AGPL-3.0** (it was MIT) because Pine Script support bundles PineTS, which is
   AGPL-3.0. Nothing changes for using the app; anyone who redistributes it, or a modified version, must do so under the

@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/logo-lockup.png" alt="ProTradeChart — Open Source Charting for the Markets" width="340">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/lockup-on-dark.svg">
+    <img src="assets/brand/lockup-on-light.svg" alt="ProTradeChart" width="420">
+  </picture>
 </p>
 
 # ProTradeChart
