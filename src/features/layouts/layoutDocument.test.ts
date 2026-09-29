@@ -129,6 +129,29 @@ describe('withoutTheme', () => {
     const once = withoutTheme(darkState());
     expect(withoutTheme(once)).toEqual(once);
   });
+
+  it('keeps a canvas background someone chose, and drops either theme’s own', () => {
+    const withBackground = (background: string) => {
+      const state = darkState();
+      config(state).layout.background = background;
+      return config(withoutTheme(state)).layout;
+    };
+    expect(withBackground('#0b1f3a')).toEqual({ background: '#0b1f3a', fontSize: 12 });
+    expect(withBackground('rgb(253, 246, 227)')).toEqual({ background: 'rgb(253, 246, 227)', fontSize: 12 });
+    // The dark and the light theme's backgrounds, however they are spelled, are the theme's.
+    for (const theme of ['#151619', '#ffffff', '#FFF', 'rgb(255,255,255)']) expect(withBackground(theme)).toEqual({ fontSize: 12 });
+  });
+});
+
+describe('a chosen canvas background belongs to the layout', () => {
+  it('is saved and read back', () => {
+    const state = darkState();
+    config(state).layout.background = '#0b1f3a';
+    const parsed = parseLayout(serializeLayout({ ...doc, tabs: [{ symbol: 'binance:ETHUSDT', state }] }))!;
+    expect(config(parsed.tabs[0].state!).layout.background).toBe('#0b1f3a');
+    // The theme's text colour still isn't: the chart picks a readable one for the background.
+    expect(config(parsed.tabs[0].state!).layout.textColor).toBeUndefined();
+  });
 });
 
 describe('withoutUnsupportedSymbols', () => {

@@ -1,0 +1,85 @@
+{
+  "format": 1,
+  "spec": {
+    "version": 1,
+    "name": "Above the 50 EMA",
+    "universe": {
+      "source": "instruments",
+      "provider": "zerodha",
+      "exchanges": [
+        "NSE"
+      ],
+      "series": [
+        "EQ"
+      ],
+      "watchlist": null,
+      "symbols": [],
+      "max_symbols": null
+    },
+    "filters": [
+      {
+        "left": "close",
+        "op": ">",
+        "right": "ema_50"
+      }
+    ],
+    "columns": [
+      "close",
+      "return_1"
+    ],
+    "sort": {
+      "column": "return_1",
+      "descending": true
+    },
+    "benchmark": null
+  },
+  "columns": [
+    "close",
+    "return_1",
+    "ema_50"
+  ],
+  "rows": [
+    {
+      "symbol": "zerodha:NSE:FAST",
+      "name": "Fast",
+      "date": "2025-06-30",
+      "values": [
+        260.0,
+        0.3,
+        198.725943
+      ]
+    },
+    {
+      "symbol": "zerodha:NSE:UP",
+      "name": "Up",
+      "date": "2025-06-30",
+      "values": [
+        300.0,
+        0.001027,
+        292.461538
+      ]
+    }
+  ],
+  "meta": {
+    "engine_version": "1.0",
+    "engine_build": null,
+    "executed_at": null,
+    "seconds": null,
+    "as_of": "2025-06-30",
+    "symbols_requested": 5,
+    "symbols_loaded": 4,
+    "symbols_failed": 1,
+    "symbols_stale": 1,
+    "matched": 2
+  },
+  "warnings": [
+    {
+      "code": "load_failed",
+      "message": "1 of 5 symbols couldn't be loaded and are left out."
+    },
+    {
+      "code": "stale",
+      "message": "1 symbols have no bar in the week before 2025-06-30 (suspended or delisted) and were left out."
+    }
+  ]
+}

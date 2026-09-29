@@ -44,6 +44,19 @@ pub struct Study {
     pub updated_at: String,
 }
 
+/// A saved screen, as the Screener's list shows it: without its last result, which can be megabytes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Screener {
+    pub id: String,
+    pub name: String,
+    pub spec_json: String,
+    /// When it last ran (the engine's `executed_at`), or `None` if it never has.
+    pub ran_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 /// A completed run of a Study, as a list shows it: no `result_json`, which can be megabytes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

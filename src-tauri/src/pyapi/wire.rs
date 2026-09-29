@@ -21,10 +21,31 @@ pub struct ResultPost {
     pub data: serde_json::Value,
 }
 
-pub const RESULT_KINDS: [&str; 4] = ["table", "report", "figure", "study"];
+pub const RESULT_KINDS: [&str; 6] = ["table", "report", "figure", "study", "screen", "watchlist"];
 pub const MAX_TITLE_CHARS: usize = 200;
 /// The first bytes of every PNG file, as base64. A figure that doesn't start like this isn't one.
 pub const PNG_BASE64_PREFIX: &str = "iVBORw0KGgo";
+
+/// A watchlist a script asked for (`pt.set_watchlist`), checked: a result of kind `watchlist`. It is
+/// not forwarded to a window like the others; the app writes it and answers with what it did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchlistUpdate {
+    pub name: String,
+    /// Canonical symbols (a broker's with its exchange), without repeats, in the script's order.
+    pub symbols: Vec<String>,
+    pub replace: bool,
+}
+
+/// What writing a [`WatchlistUpdate`] did, as the script is told.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchlistSync {
+    pub name: String,
+    pub created: bool,
+    pub added: usize,
+    pub removed: usize,
+    pub total: usize,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

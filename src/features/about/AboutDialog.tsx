@@ -3,6 +3,7 @@ import { Dialog } from '../../components/Dialog';
 import { getAppInfo, type AppInfo } from '../../lib/ipc';
 import { LicenseTextDialog } from './LicenseTextDialog';
 import { UpdatesSection } from './UpdatesSection';
+import { SHORTCUTS } from '../../help/topics';
 
 /** Where the complete source of every release is published (the AGPL asks that users can find it). */
 const SOURCE_URL = 'https://github.com/Swapnilgitlab/ProTradeChart';
@@ -24,21 +25,6 @@ interface Props {
   onClose: () => void;
 }
 
-const SHORTCUTS: [string, string][] = [
-  ['Ctrl + T', 'New chart tab'],
-  ['Ctrl + W', 'Close the current tab'],
-  ['Ctrl + PageUp / PageDown', 'Previous / next tab'],
-  ['Ctrl + K', 'Search for a symbol'],
-  ['Ctrl + E', 'Show or hide the Script Editor and Strategy Tester'],
-  ['Ctrl + Shift + Y', 'Open the Python tab'],
-  ['Ctrl + Shift + N', 'New window'],
-  ['Alt + W', 'Show or hide the watchlist panel'],
-  ['Alt + A', 'New price alert for the chart'],
-  ['↑ / ↓ (in the watchlist)', 'Step through symbols'],
-  ['Right-click (in the watchlist)', 'Flag a symbol, add an alert, open it in a new tab, add a section'],
-  ['Drag (in the watchlist)', 'Reorder symbols and sections'],
-  ['? (on a chart)', "Vela's own shortcut list"],
-];
 
 export function AboutDialog({ onClose }: Props) {
   const [info, setInfo] = useState<AppInfo | null>(null);

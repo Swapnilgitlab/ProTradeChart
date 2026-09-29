@@ -125,6 +125,52 @@ class ShowTests(InApp):
             pt.show(pd.DataFrame({"x": [1]}))
 
 
+class SetWatchlistTests(Case):
+    """pt.set_watchlist: the list is posted as a `watchlist` result and the app says what it did."""
+
+    posts = {
+        "/v1/results": lambda payload: (
+            200,
+            {"ok": True, "watchlist": {"name": payload["data"]["name"], "created": True, "added": 2, "removed": 0, "total": 2}},
+        )
+    }
+    run_id = "run-1"
+
+    def test_a_list_is_posted_and_what_the_app_did_is_returned_and_printed(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            done = pt.set_watchlist("Momentum", ["zerodha:NSE:TCS", " zerodha:INFY ", "", None])
+        posted = self.stub.posted()[0]
+        self.assertEqual((posted["runId"], posted["kind"]), ("run-1", "watchlist"))
+        self.assertEqual(posted["data"], {"name": "Momentum", "symbols": ["zerodha:NSE:TCS", "zerodha:INFY"], "mode": "replace"})
+        self.assertEqual(done["total"], 2)
+        self.assertIn("Watchlist 'Momentum' made: 2 added, 0 removed, 2 on it.", out.getvalue())
+
+    def test_a_screens_matches_can_be_passed_as_they_are(self):
+        frame = pd.DataFrame({"symbol": ["zerodha:NSE:A", "zerodha:NSE:B"], "close": [1.0, 2.0]})
+        with redirect_stdout(io.StringIO()):
+            pt.set_watchlist("L", frame, mode="append")
+            pt.set_watchlist("L", frame.set_index("symbol"))
+            pt.set_watchlist("L", frame["symbol"])
+        posted = self.stub.posted()
+        self.assertEqual([p["data"]["symbols"] for p in posted], [["zerodha:NSE:A", "zerodha:NSE:B"]] * 3)
+        self.assertEqual(posted[0]["data"]["mode"], "append")
+
+    def test_a_mistake_is_caught_before_anything_is_sent(self):
+        with self.assertRaises(ValueError):
+            pt.set_watchlist("L", ["zerodha:NSE:A"], mode="merge")
+        with self.assertRaises(TypeError):
+            pt.set_watchlist("L", "zerodha:NSE:A")
+        with self.assertRaises(ValueError):
+            pt.set_watchlist("L", pd.DataFrame({"close": [1.0]}))
+        self.assertEqual(self.stub.requests, [])
+
+    def test_the_apps_refusal_is_an_error(self):
+        self.stub.posts["/v1/results"] = lambda payload: error(400, "bad_request", "'TCS' isn't a symbol the app can show")
+        with self.assertRaises(pt.BadRequestError):
+            pt.set_watchlist("L", ["TCS"])
+
+
 class OutsideTheApp(Case):
     """No run id: a terminal or a notebook. Nothing is posted; the table is printed."""
 
@@ -136,6 +182,13 @@ class OutsideTheApp(Case):
             pt.show(pd.DataFrame({"symbol": ["p:A"], "close": [1.5]}), title="ignored here")
         self.assertIn("p:A", out.getvalue())
         self.assertIn("1.5", out.getvalue())
+        self.assertEqual(self.stub.requests, [])
+
+    def test_set_watchlist_writes_nothing_and_says_so(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertIsNone(pt.set_watchlist("L", ["zerodha:NSE:A"]))
+        self.assertIn("would replace the watchlist 'L' with 1 symbols", out.getvalue())
         self.assertEqual(self.stub.requests, [])
 
     def test_report_prints_its_figures(self):

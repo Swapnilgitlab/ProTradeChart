@@ -79,6 +79,50 @@ def _post(kind: str, title: str | None, data: dict) -> None:
     )
 
 
+def set_watchlist(name: str, symbols, mode: str = "replace") -> dict | None:
+    """Creates the app's watchlist called ``name``, or refreshes it, from ``symbols``.
+
+    ``symbols`` is a list of symbols like ``zerodha:NSE:TCS`` (a bare broker ticker such as
+    ``zerodha:TCS`` means NSE), a pandas Series or Index of them, or a DataFrame with a ``symbol``
+    column (or a symbol index) — a screen's matches, say. With ``mode="replace"`` (the default) the
+    list ends up holding exactly these: symbols no longer on it are removed, those it keeps stay
+    where they are, and new ones go at the end in this order. ``mode="append"`` only adds. A list
+    that doesn't exist yet is made. Returns what was done (``created``, ``added``, ``removed``,
+    ``total``) and prints it. Outside the app (a terminal) nothing is written; it says what would be.
+    """
+    if mode not in ("replace", "append"):
+        raise ValueError(f"mode must be 'replace' or 'append', not {mode!r}.")
+    if isinstance(symbols, pd.DataFrame):
+        if "symbol" in symbols.columns:
+            symbols = symbols["symbol"]
+        elif symbols.index.name == "symbol":
+            symbols = symbols.index
+        else:
+            raise ValueError("Pass a DataFrame with a 'symbol' column (or index), or a list of symbols.")
+    if isinstance(symbols, str):
+        raise TypeError("Pass a list of symbols, not one string.")
+    listed = [str(s).strip() for s in symbols if s is not None and str(s).strip()]
+    if not in_app():
+        print(f"(outside the app) would {mode} the watchlist {name!r} with {len(listed)} symbols")
+        return None
+    answer = client.post(
+        "/v1/results",
+        {
+            "runId": os.environ[client.RUN_ENV],
+            "kind": "watchlist",
+            "title": str(name)[:200],
+            "data": {"name": name, "symbols": listed, "mode": mode},
+        },
+    )
+    done = answer.get("watchlist") or {}
+    verb = "made" if done.get("created") else "refreshed" if mode == "replace" else "added to"
+    print(
+        f"Watchlist {done.get('name', name)!r} {verb}: {done.get('added', 0)} added, "
+        f"{done.get('removed', 0)} removed, {done.get('total', 0)} on it."
+    )
+    return done
+
+
 def show(data, title: str | None = None, symbol_column: str | None = "symbol",
          max_rows: int = MAX_ROWS, digits: int = 2) -> None:
     """Show a DataFrame as a table in the app's Results tab.

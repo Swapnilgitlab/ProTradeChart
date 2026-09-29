@@ -7,10 +7,12 @@ import { chartSymbol, normalizeSymbol } from '../lib/symbols';
 import { BUNDLED_MANIFEST } from '../pine/bundled';
 import { useTheme } from '../theme/ThemeProvider';
 import { trackCursorPrice } from './alertActions';
+import { attributionInk, chosenBackground } from './canvasBackground';
 import { watchHistory } from './historyBackfill';
 import { setEventMark, showStudyEvent, type StudyEvent } from './studyEvent';
 import { installThinMovingAverages } from './thinMovingAverages';
 import { tidyStatusline } from './statuslineMeta';
+import { watchSymbolDrawings } from './symbolDrawings';
 import { showCompanyName } from './watermarkName';
 
 // Vela's own default grid hues, at 20% opacity — the same neutral gray it
@@ -35,10 +37,55 @@ function applyGridOpacity(ws: VelaWorkspace, baseMode: 'light' | 'dark') {
   }
 }
 
+/** Vela's workspace draws one attribution mark over the grid and inks it from the app theme, not
+ *  from the canvas it sits on — black on a dark background a layout chose under a light theme, where
+ *  it would all but vanish. The mark must stay visible (Vela's licence terms), so it is re-inked
+ *  from the background of the cell it is in, the way Vela inks it for a theme. */
+function tintAttribution(ws: VelaWorkspace) {
+  for (const cell of ws.cells()) {
+    let background: unknown;
+    try {
+      background = (cell.chart.renderer.getConfig() as { layout?: { background?: unknown } }).layout?.background;
+    } catch {
+      continue; // a cell still being built
+    }
+    const ink = attributionInk(background);
+    for (const mark of cell.host.querySelectorAll<HTMLElement>('.vela-attribution')) {
+      mark.style.color = ink.color;
+      mark.style.setProperty('--vela-attr-shadow', ink.shadow);
+    }
+  }
+}
+
+/** Switches the tab to a theme, keeping the canvas background of any chart that has one of its own
+ *  (from its layout, or picked in its settings): Vela's `setTheme` re-skins every chart, and the
+ *  theme should only fill in where no background was chosen (see canvasBackground.ts). */
+function applyTheme(ws: VelaWorkspace, baseMode: 'light' | 'dark') {
+  const chosen = ws.cells().map((cell) => {
+    try {
+      return { chart: cell.chart, background: chosenBackground(cell.chart.renderer.getConfig()) };
+    } catch {
+      return { chart: cell.chart, background: null }; // a cell still being built
+    }
+  });
+  ws.setTheme(baseMode);
+  for (const { chart, background } of chosen) {
+    if (!background) continue;
+    try {
+      chart.renderer.applyConfig({ layout: { background } });
+    } catch {
+      // A cell that went away with the switch.
+    }
+  }
+  applyGridOpacity(ws, baseMode);
+  tintAttribution(ws);
+}
+
 /** Starts watching every chart of `ws` that isn't already: loading older
  *  history as the user scrolls or zooms back (see historyBackfill.ts),
- *  remembering the price under the cursor for "add alert here", and putting the
- *  company name under the symbol watermark (see watermarkName.ts).
+ *  remembering the price under the cursor for "add alert here", putting the
+ *  company name under the symbol watermark (see watermarkName.ts), and keeping
+ *  drawings with their symbol (see symbolDrawings.ts).
  *  Cells come and go with layout changes, so this is safe to call repeatedly. */
 function watchAllCells(ws: VelaWorkspace, watched: Map<object, () => void>) {
   const cells = ws.cells();
@@ -53,7 +100,15 @@ function watchAllCells(ws: VelaWorkspace, watched: Map<object, () => void>) {
   for (const cell of cells) {
     const chart = cell.chart;
     if (!watched.has(chart)) {
-      const stops = [watchHistory(chart), trackCursorPrice(chart), showCompanyName(cell), tidyStatusline(cell)];
+      const stops = [
+        watchHistory(chart),
+        trackCursorPrice(chart),
+        showCompanyName(cell),
+        tidyStatusline(cell),
+        watchSymbolDrawings(chart),
+        // A background picked in the chart's settings re-inks the attribution mark.
+        chart.renderer.onConfigChanged(() => tintAttribution(ws)),
+      ];
       watched.set(chart, () => stops.forEach((stop) => stop()));
     }
   }
@@ -243,6 +298,7 @@ export const ChartView = forwardRef<ChartViewHandle, Props>(function ChartView(
           pendingEventRef.current = null;
         }
         applyGridOpacity(ws, theme.baseMode);
+        tintAttribution(ws);
         wsRef.current = ws;
         onWorkspaceRef.current?.(ws);
         setReady(true);
@@ -266,8 +322,7 @@ export const ChartView = forwardRef<ChartViewHandle, Props>(function ChartView(
 
   useEffect(() => {
     if (!ready || !wsRef.current) return;
-    wsRef.current.setTheme(theme.baseMode);
-    applyGridOpacity(wsRef.current, theme.baseMode);
+    applyTheme(wsRef.current, theme.baseMode);
   }, [ready, theme.baseMode]);
 
   // The tab follows whichever chart of the grid is active. Cells come and go
@@ -294,6 +349,7 @@ export const ChartView = forwardRef<ChartViewHandle, Props>(function ChartView(
       });
       applyGridOpacity(ws, modeRef.current);
       watchAllCells(ws, watchedRef.current);
+      tintAttribution(ws);
       if (ws.active.symbol) onSymbolChangeRef.current(normalizeSymbol(ws.active.symbol));
     };
     // Growth is judged only once a layout change has settled: crossing Vela's

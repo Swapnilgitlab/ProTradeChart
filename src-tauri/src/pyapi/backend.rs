@@ -12,7 +12,10 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use super::data::{self, BarsData, BarsRequest, Fetched, Fetcher, DEFAULT_LIMIT, MAX_LIMIT};
 use super::routes::{Backend, InstrumentQuery, WatchlistSel};
-use super::wire::{InstrumentRow, ProviderStatus, ResultPost, WatchlistContent, WatchlistInfo, WatchlistSymbol};
+use super::wire::{
+    InstrumentRow, ProviderStatus, ResultPost, WatchlistContent, WatchlistInfo, WatchlistSymbol, WatchlistSync,
+    WatchlistUpdate,
+};
 use super::{split_symbol, ApiError};
 use crate::db::{now_ms, Database};
 use crate::dhan::client::DhanClient;
@@ -30,6 +33,9 @@ use crate::zerodha::protocol::{
     plan_windows as kite_windows, Interval as KiteInterval, ZerodhaError, ZerodhaErrorKind,
 };
 use crate::zerodha_commands::zerodha_credentials;
+
+/// Tells every window a watchlist was written from outside its panel; the payload is its id.
+pub const WATCHLISTS_CHANGED: &str = "watchlists-changed";
 
 /// The `python-result` event: something a script asked the app to show. `data` is passed on
 /// untouched; the webview validates its shape before drawing.
@@ -259,6 +265,24 @@ impl Backend for AppBackend {
                 },
             )
             .map_err(|e| ApiError::internal(format!("couldn't show the result: {e}")))
+    }
+
+    fn set_watchlist(&self, update: WatchlistUpdate) -> Result<WatchlistSync, ApiError> {
+        let synced = {
+            let db = self.app.state::<Database>();
+            let mut conn = db.conn.lock().map_err(|e| ApiError::internal(e.to_string()))?;
+            watchlists::sync_named(&mut conn, &update.name, &update.symbols, update.replace)
+                .map_err(|e| ApiError::internal(format!("couldn't write the watchlist: {e}")))?
+        };
+        // Every window's watchlist panel reads its lists again.
+        let _ = self.app.emit(WATCHLISTS_CHANGED, synced.id);
+        Ok(WatchlistSync {
+            name: update.name,
+            created: synced.created,
+            added: synced.added,
+            removed: synced.removed,
+            total: synced.total,
+        })
     }
 
     fn bars<'a>(&'a self, request: BarsRequest) -> BoxFuture<'a, Result<BarsData, ApiError>> {

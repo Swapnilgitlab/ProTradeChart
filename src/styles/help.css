@@ -1,0 +1,188 @@
+/* The Help Center: topics on the left, the topic on the right. Every colour is a theme token. */
+
+.dialog.help-dialog {
+  width: min(1100px, 100%);
+  height: min(860px, 100%);
+  max-height: none;
+}
+.help-dialog .dialog-body {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+}
+
+.help-center {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+
+.help-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  padding: 12px 10px 16px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg-base);
+}
+.help-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+}
+.help-search .python-input {
+  flex: 1;
+  min-width: 0;
+}
+.help-group {
+  margin-bottom: 8px;
+}
+.help-group-title {
+  padding: 6px 8px 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.help-topic-link,
+.help-result {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.help-topic-link:hover,
+.help-result:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.help-topic-link.active,
+.help-result.active {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.help-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.help-result {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.help-result-title {
+  font-weight: 600;
+}
+
+.help-content {
+  min-height: 0;
+  padding: 20px 36px 40px;
+  overflow-y: auto;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.help-content > * {
+  max-width: 760px;
+}
+.help-content h1 {
+  margin: 2px 0 4px;
+  font-size: 22px;
+}
+.help-summary {
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: 15px;
+}
+.help-content h2 {
+  margin: 24px 0 8px;
+  font-size: 16px;
+}
+.help-content p {
+  margin: 0 0 10px;
+}
+.help-content code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-soft);
+  font-size: 12.5px;
+}
+.help-steps,
+.help-list {
+  margin: 0 0 12px;
+  padding-left: 22px;
+}
+.help-steps li,
+.help-list li {
+  margin-bottom: 6px;
+}
+.help-note {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--bg-base);
+}
+.help-note svg {
+  flex-shrink: 0;
+  margin-top: 4px;
+  color: var(--accent);
+}
+.help-note p {
+  margin: 0;
+}
+.help-code {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: var(--bg-base);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.help-table {
+  width: 100%;
+  margin: 0 0 14px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.help-table th,
+.help-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  text-align: left;
+  vertical-align: top;
+}
+.help-table th {
+  color: var(--text-secondary);
+  font-weight: 600;
+  border-bottom-color: var(--border);
+}
+.help-table td:first-child {
+  width: 34%;
+}
+.help-related div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}

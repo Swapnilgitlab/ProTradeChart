@@ -281,6 +281,30 @@ is).
   drags on Windows. Changes (order, flag, a section's name or folding) show at once and are then saved; if the backend refuses
   one, the list is read again (`saveOrReload`).
 
+### Quick access, browsing and the Indices list
+
+- **Quick access** (`lib/quickLists.ts`, pure; `features/watchlist/quickLists.ts`, the window's shared state): up to five
+  watchlist ids in the `watchlist_quick` preference, in pin order. The panel shows them as buttons above the list; the browse
+  dialog's stars and the list's **More** menu toggle them; a sixth is refused. Pins of deleted lists are dropped.
+- **From the chart** (`chart/watchlistActions.ts`): pointing to **Add to watchlist** in the chart's right-click menu opens a
+  submenu of every watchlist, checked where it holds the chart's symbol (`lib/watchlistMenu.ts`, pure: quick-access lists
+  first, then by name, then **New watchlist…**). Picking one adds or removes the symbol; **New watchlist…** opens the
+  add-to-watchlist dialog on a new list (`watchlistUi.ts` bus → `Workspace`). Vela builds its menu synchronously, so the
+  lists and their symbols (`list_watchlist_members`) are cached and read again on every watchlist or pin change.
+  Contributed actions can't have submenus in stock Vela; the patch in `patches/` adds that (see CLAUDE.md). Registered
+  once per window in `main.tsx`.
+- **Flags** are one click away: each row has a flag button before its ticker (coloured when set, an outline on hover when
+  not) that opens the same swatches as the row's right-click menu (`FlagSwatches`).
+- **Browsing** (`WatchlistBrowserDialog.tsx`): every list, searchable, with star, open, rename and delete.
+- **The Indices list** (`store/index_catalog.rs`): a curated catalogue of ~55 NSE/BSE indices in three sections (Broad market,
+  Sectors, Themes), each with its Zerodha and its Dhan ticker, since the brokers spell them differently (`NSE:NIFTY_BANK`,
+  `IDX:BANKNIFTY`). `create_indices_watchlist` keeps only what the broker's instrument list has and builds the list with its
+  sections. Strategy, factor and bond indices are left out. There are no sector *stock* lists: no source the app uses publishes
+  index constituents (the owner chose not to add one).
+- **Panel width** (`features/rail/panelWidth.ts`, pure; `PanelResizer.tsx`): the three side panels share
+  `--side-panel-width`, set by dragging the panel's left edge (pointer capture) and kept in `side_panel_width`; clamped so
+  the chart keeps at least 360px.
+
 ### Tab prices
 
 Each chart tab shows its symbol's price and the day's change. `useTabQuotes` polls `fetchQuotes` for just the tabs' symbols (the
@@ -306,6 +330,9 @@ One SQLite file (`charting.db`, in the OS's per-user app data folder), opened by
 | `research_bars`, `research_coverage` | The Python API's store of the brokers' bars, and which span of each series is complete (see "Python") |
 | `studies`, `study_results` | Saved Study Specifications and completed Study runs (see "Studies") |
 | `notebooks`, `notebook_items` | Research Notebooks: Studies and runs grouped with the user's notes |
+| `screeners` | Saved screens and the last run of each (see "Screener") |
+| `symbol_drawings` | Each symbol's drawings, as Vela's own document (see "Drawings per symbol") |
+| `script_schedules`, `schedule_runs` | Scheduled Python scripts and what happened each time one came due (see "Scheduled scripts") |
 | `provider_settings` | Per-provider `enabled` flag and non-secret configuration |
 | `provider_secrets_fallback` | Credentials, **only** when no OS keychain exists (unencrypted; the UI says so) |
 | `dhan_instruments` | Dhan's instrument list, for symbol search and `SecurityId` lookup |
@@ -349,12 +376,44 @@ the brokers' clients pace their own requests (`throttle.rs`), so the burst is sp
 changes none. Vela's state would otherwise smuggle one in: `rendererConfig` holds the chart's background, text, grid and
 border colours, and restoring a state does not re-skin the chart (`setTheme` with the mode it is already in does
 nothing), so a layout saved in the dark theme turned a light-theme chart dark. `withoutTheme()` in
-`features/layouts/layoutDocument.ts` removes exactly those six settings — what `setTheme` changes, no more — both when
-saving and when loading, which also cleans layouts saved by earlier versions. Colours the user picked themselves
-(candles, lines) are kept.
+`features/layouts/layoutDocument.ts` removes those settings — what `setTheme` changes, no more — both when saving and
+when loading, which also cleans layouts saved by earlier versions. Colours the user picked themselves (candles, lines) are
+kept.
+
+**The canvas background is the exception: it belongs to the layout when one was chosen, and to the theme otherwise.**
+Vela writes a background into every chart's settings — its own dark (`#151619`) or light (`#ffffff`) default when nobody
+chose one — so the two are told apart by value (`chart/canvasBackground.ts`): either default is the theme's and is stripped
+like the rest; any other colour (picked in the chart's settings → Canvas) is kept in the layout and restored with it. A
+theme switch would re-skin it, so `ChartView`'s `applyTheme` reads each cell's chosen background first and re-applies it
+after `setTheme` (Vela then re-derives a readable text colour for it). A colour picked to be exactly one of the two defaults
+can't be told from the theme's and follows the theme.
+
+Vela's workspace draws one attribution mark over the grid and inks it from the *theme*, not the canvas, so a dark chosen
+background under a light theme would get a black mark on a dark canvas. The mark must stay visible (see "Vela specifics"),
+so `tintAttribution` re-inks it from its cell's background with Vela's own rule (white on dark, black on light) after
+construction, a theme switch, a grid change and any change to a chart's settings (`renderer.onConfigChanged`).
 
 Vela owns a chart's state after construction, so `initialSymbol` / `initialState` are seeds only, and symbol changes go
 through the imperative `ChartViewHandle`.
+
+## Drawings per symbol
+
+Vela keeps one set of drawings per chart and leaves them in place when the chart changes symbol. `chart/symbolDrawings.ts`
+makes them belong to the symbol instead, for every cell of every grid (`ChartView`'s per-cell hooks):
+
+- On `market:changed` to another symbol, the old symbol's pending edits are saved, the chart is cleared at once, and the new
+  symbol's drawings are loaded (`get_symbol_drawings`). Timeframe changes don't swap anything.
+- `drawing:created` / `edited` / `removed` save the chart's document (`chart.drawings.toJSON()`) under its symbol after
+  `SAVE_DELAY_MS`; `save_symbol_drawings` tells every window (`symbol-drawings-changed`), and other charts of that symbol
+  reload unless they have unsaved edits of their own. A load that returns after the chart moved on is ignored.
+- **Layouts still carry drawings.** The stored document wins. A symbol with *no row* adopts the drawings a chart already has
+  (a layout saved before this, or Vela's own state); an empty document is stored when everything is removed, so a cleared
+  symbol isn't refilled from an old layout.
+- **Vela quirk worked around:** `fromJSON` drops the selection without telling the renderer, which leaves a selected drawing's
+  handles and floating edit toolbar on screen. The port deselects before and after, and — only when something was selected —
+  calls `chart.resize()`, the one public path that closes that toolbar.
+
+`SymbolDrawings` holds the rules with its chart and storage injected, and is unit-tested (`symbolDrawings.test.ts`).
 
 ## Vela specifics worth knowing
 
@@ -413,7 +472,7 @@ use), keeps them, and answers. It is for research — screening, backtesting, an
 | Runner | `python/runner.rs` | Starts `python -u script.py` with no stdin (so `input()` fails instead of waiting), streams each line as a `python-output` event, and on Stop ends the whole process tree (`taskkill /T`, or a process group), because a script may use `multiprocessing`. A lone `\r` marks a progress-bar line the console overwrites. Output past 4 MB is dropped with a notice. It knows nothing of Tauri (output goes to a callback), so it is tested against a real Python. |
 | Scripts | `python/scripts.rs` | Plain `.py` files in `<app data>/python/scripts`, so any editor and `git` work on them. The frontend names a script and never sends a path; `validate_name` refuses anything that could leave the folder, a Windows device name, and a name that would shadow a library (`pandas.py` beside a script replaces pandas for it). Examples (`python/examples/`) are copied in and kept current: the app records a hash of what it wrote (`.examples-seeded`), refreshes an example nobody has touched when a newer one ships, and leaves alone one the user edited or deleted. They must work with no setup (a test runs them for a user with no watchlists). |
 | Client | `python/protrade/` | Standard library plus pandas. It is embedded in the app (`python/client_files.rs`), written to `<app data>/python/lib` at each run and put on the child's `PYTHONPATH`, so it is never `pip install`ed and always matches the running app. A debug build (`tauri:dev`) writes the repository's current copy instead of the embedded one, because the dev watcher doesn't rebuild for changes outside `src-tauri/`: a `git pull` of Python takes effect on the next run. A Study prints and records which engine ran (`[engine] protrade 1.0 (<hash>)`, `meta.engine_build`). A test fails if a module is added to the folder without being listed in `FILES`. |
-| Local API | `pyapi/` | `data.rs` (bars: store reads plus broker fetches), `routes.rs` (auth and routing, against a `Backend` trait), `server.rs` (hyper), `backend.rs` (the real `Backend`, plus the error mapping), `wire.rs` (JSON). Read-only `GET`s: `/v1/bars`, `/v1/instruments`, `/v1/watchlists`, `/v1/watchlist`, `/v1/providers`, `/v1/ping`; plus `POST /v1/results`. |
+| Local API | `pyapi/` | `data.rs` (bars: store reads plus broker fetches), `routes.rs` (auth and routing, against a `Backend` trait), `server.rs` (hyper), `backend.rs` (the real `Backend`, plus the error mapping), `wire.rs` (JSON). Read-only `GET`s: `/v1/bars`, `/v1/instruments`, `/v1/watchlists`, `/v1/watchlist`, `/v1/providers`, `/v1/ping`; plus `POST /v1/results` (which, for kind `watchlist`, writes a watchlist: see "Scripts writing watchlists"). |
 | Results | `pyapi` `POST /v1/results` → `python-result` → `python/results.ts` → `features/python/Results*.tsx` | What a script shows: `pt.show` (a table), `pt.report` (a backtest) and `pt.plot` (a matplotlib PNG); a Study's result is kind `study` (see "Studies"), and one sent by a script in the Python tab is stored with the Studies' results. Rust checks only what makes forwarding safe — the run id, the kind, a title's length, and that a figure's bytes really start like a PNG — and the webview validates the shape before drawing. The report reuses the Strategy Tester's `EquityChart`. |
 | Research store | `store/research_bars.rs` | Bars kept for the API, with a *coverage* per series. See below. |
 | UI | `features/python/`, `python/` (TS) | **A tab of its own**, beside the charts (`features/workspace/tabs.ts`), holding the script list, the editor, the console and the results. `python/console.ts`, `format.ts` and `results.ts` are pure and tested. It loads nothing until the tab is first shown: no Python is probed and no example is written for someone who never opens it. |
@@ -464,6 +523,52 @@ use), keeps them, and answers. It is for research — screening, backtesting, an
   OS keychain like any local program. What this design guarantees is narrower: the app never *hands* a script a credential, no route
   returns one, and a script runs only when the user presses Run — never on opening a layout, importing a file or starting the app.
   The environment a script inherits has `TAURI_*` (the updater's signing key, during development) removed.
+
+### Scheduled scripts
+
+A script can run by itself at set times — to refresh a watchlist every evening, say. This is the one way a script runs without
+the user pressing Run, so it is narrow on purpose.
+
+| Piece | Where | Notes |
+| --- | --- | --- |
+| Rules | `scheduler/plan.rs` | Pure. A `Rule` is the days (Monday first) and either a time (`daily`) or every N minutes (5–720) between two times (`every`), all **IST** like `market.rs` (no DST, no timezone crate). `next_after` finds the next firing; `decide` says what to do with a schedule on one look: wait, plan it, run it, skip it (its last run is still going) or record it **missed**. |
+| Store | `store/schedules.rs`; `script_schedules`, `schedule_runs` | A schedule names a script (checked to exist when saved) and keeps `next_run_at`. Each time one comes due a history row records it: `running` → `ok` / `failed` / `stopped`, or `missed` / `skipped` at once, with a message and the tail of the output (16 KB). The newest 30 are kept per schedule; deleting a schedule deletes its history. |
+| Engine | `scheduler/engine.rs` | One task for the process, started once in `lib.rs` (not per window, so a run never starts twice). Every 15 s it applies `decide` to each switched-on schedule and starts due ones through `start_python` — the Run button's path, same environment and token — with a `StartRun::on_exit` that records how the run ended. A run that can't start (the script is gone, Python isn't set up) is recorded as failed. Emits `schedules-changed` and `schedule-run-finished`; the main window toasts a failure. |
+| UI | `features/python/SchedulesPane.tsx`, `python/schedules.ts` | The Python tab's third output tab, and a **Schedule** button in its toolbar that opens a new schedule for the open script. `schedules.ts` (pure, tested) words a rule, shows times on the IST clock and repeats `Rule::check`. |
+
+- **Nothing is made up.** A schedule runs only while the app is open. On the engine's first look after launch, anything already
+  due is recorded as missed (however recently it came due), so starting the app never runs a script; later, a run more than two
+  minutes late (the machine slept) is missed too. Many missed firings are one row ("Missed 26 runs"). Switching a schedule on,
+  or editing it, plans it from now. A run left `running` when the app closed is marked failed at the next launch.
+- **Only the user makes a schedule**, with the form in the Schedules pane (`save_schedule`). Ask AI has no tool for it, and a
+  script or a layout can't create one.
+
+### Scripts writing watchlists
+
+`pt.set_watchlist(name, symbols, mode)` posts a result of kind `watchlist`. Unlike the other kinds it isn't forwarded to a window:
+`pyapi/routes.rs` checks it (`watchlist_update`: a name of 1–100 characters, at most 2,000 symbols, each `provider:TICKER` from a
+provider the app has; a bare broker ticker becomes `NSE:`) and `Backend::set_watchlist` writes it with
+`store::watchlists::sync_named` — in one transaction, matched by name ignoring case, created if missing. `replace` removes what's
+no longer listed and keeps the rest in place with their flags; new symbols go at the end in the script's order, with company
+names from the instrument lists; section headings are untouched. The script is answered with what was done, which the client
+prints. `watchlists-changed` tells every window, and `watchlistBus` relays it to the panel. It is the only write the local API
+makes besides showing a result.
+
+## Screener
+
+The Screener tab answers "which stocks meet these conditions **today**?". It shares the Studies' engine plumbing and feature
+grammar, so an RSI in a screen is the same number a Study measures.
+
+| Piece | Where | Notes |
+| --- | --- | --- |
+| Screen | `src/screener/spec.ts`, `protrade/screen.py` `normalize_screen` | Universe (the Study universe's shape, without the size filters), `filters` (Study conditions, all must hold), `columns` (features), `sort` and `benchmark`. The two validators run `src/screener/fixtures/screen-cases.json`. A result's columns are the chosen ones plus every feature a filter reads (`outputColumns` / `output_columns`). |
+| Engine | `protrade/screen.py`, `protrade/run_screen.py`, `screener_commands.rs` | `screen_run` writes the screen to a file and starts `python -m protrade.run_screen`. It loads daily bars through the local API (`LOAD_WORKERS` in flight, as a Study) far enough back for every column to settle (`history_bars`: twice the slowest warm-up, at least 260 bars) and judges each symbol on its **latest bar**: `crosses_above` means it crossed on that bar. A symbol whose last bar is a week older than the universe's is left out as stale; one with too little history for a filter doesn't match, and both are counted in warnings. Matches are sorted and capped at 5,000. |
+| Result | `src/screener/result.ts` | Posted as kind `screen`; untrusted, so checked whole (spec through `normalizeScreen`, columns equal to the spec's, every row's shape) and drawn as text. `fixtures/engine-result.json` is real engine output; `python/tests/test_screen.py` fails when the engine's output drifts from it. |
+| Storage | `store/screeners.rs`; `screeners` | Saved screens, each with only its **last** run — a screen asks what qualifies now, so older runs aren't kept. A run of an unsaved screen is shown, not stored. |
+| UI | `features/screener/` | A workspace tab like Studies (`WORKSPACE_LABELS` in `tabs.ts`), opened from the rail. Filters (`ConditionList`, shared with Studies) and columns on the left; name, universe and the pre-run readiness (`screener/readiness.ts`, using `study_estimate` for the cost) on the right; the results table below (sortable, a row opens its chart, add all to a watchlist, CSV). Eight presets (`screener/presets.ts`). |
+
+The first screen of a trading day over a whole exchange fetches every symbol once at the broker's pace (about 12 minutes for
+NSE on Kite); what is fetched is kept, so later screens that day, and Studies, reuse it.
 
 ## Studies
 
@@ -710,6 +815,8 @@ properties on `<html>` and persists the choice. To add a theme, append one entry
   timeframe and indicators, price alerts): nothing that deletes a watchlist or layout, touches a secret or a provider setting,
   or reaches Python or Studies. This mirrors the rule Python's results already follow — a script's output is data to render,
   never something that runs itself — one step further out, onto actions instead of output.
+- **A script runs without a press only on a schedule the user made** (see "Scheduled scripts"): never on startup (a run due
+  then is missed, not made up), never on opening a layout or importing a file, and nothing but the user's form creates a schedule.
 - The Python data API (see "Python") listens on the loopback interface only, refuses any request without the per-launch token, a
   matching `Host`, and no `Origin`, and serves read-only market data. The webview never talks to it (Rust does), so the CSP is
   unchanged. Python itself is *not* sandboxed: a script runs with the user's own privileges and only when they press Run.

@@ -45,6 +45,25 @@ Run outside the app — a terminal, a notebook — these print instead, so the s
 - **A broker that won't go back far enough** (Kite: 60 days per call at one minute, capped in total; Dhan: five years of
   intraday) gives you what it has and a `DataLimitWarning`; `df.attrs["limited_from"]` says where the data really starts.
 
+## Keeping a watchlist up to date
+
+`pt.set_watchlist(name, symbols, mode="replace")` makes the app's watchlist called `name`, or refreshes it. `symbols` is a list
+of symbols, a Series, or a DataFrame with a `symbol` column (a screen's matches). With `replace` the list ends up holding exactly
+these: symbols it no longer has are removed, those it keeps stay where they are with their flags, and new ones go at the end;
+`append` only adds. Section headings are left alone. It prints and returns what was done
+(`{"created", "added", "removed", "total"}`); the app refuses a symbol it can't show, and the script gets a `BadRequestError`.
+
+```python
+import protrade as pt
+
+bars = pt.bars_many(pt.universe("Nifty 50"), "D", start="2025-01-01")
+above = [s for s, df in bars.items() if len(df) > 200 and df.close.iloc[-1] > df.close.rolling(200).mean().iloc[-1]]
+pt.set_watchlist("Above the 200-day", above)
+```
+
+In the Python tab, **Schedule** runs a script like this by itself (every weekday at 16:00 IST, say) while the app is open. A run
+that came due while it was closed is recorded as missed, not made up.
+
 ## Studies
 
 The engine behind the app's Studies tab is `protrade.study`, usable from any script:

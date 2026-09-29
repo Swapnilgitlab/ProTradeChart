@@ -2,10 +2,10 @@ import { getWatchlist, studyEstimate } from '../../lib/ipc';
 import type { UniverseEstimate } from '../../studies/readiness';
 import type { StudySpec } from '../../studies/spec';
 
-/** What loading a Study's universe from `from` will cost (`study_estimate`: reads the database
+/** What loading a Study's (or a screen's) universe from `from` will cost (`study_estimate`: reads the database
  *  only). Null when a named watchlist doesn't exist. */
 export async function estimateUniverse(
-  u: StudySpec['universe'],
+  u: Pick<StudySpec['universe'], 'source' | 'provider' | 'exchanges' | 'series' | 'watchlist' | 'symbols' | 'max_symbols'>,
   from: string,
   watchlists: readonly { id: number; name: string }[],
 ): Promise<UniverseEstimate | null> {

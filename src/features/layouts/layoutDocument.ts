@@ -1,4 +1,5 @@
 import type { WorkspaceState } from '@luxalgo/vela/workspace';
+import { isThemeBackground } from '../../chart/canvasBackground';
 import { chartSymbol, isSupportedSymbol, normalizeSymbol } from '../../lib/symbols';
 
 /** What one saved layout's `stateJson` deserializes to: the WHOLE session —
@@ -7,6 +8,9 @@ import { chartSymbol, isSupportedSymbol, normalizeSymbol } from '../../lib/symbo
  *  A layout says nothing about the theme: the theme is an app-wide preference,
  *  so saving a layout never records it and loading one never changes it (see
  *  `withoutTheme` for the part of Vela's state that would otherwise carry it).
+ *  The one exception is a canvas background someone chose for a chart: that
+ *  belongs to the layout, and the theme only fills in where none was chosen
+ *  (`chart/canvasBackground.ts`).
  *
  *  Versioned because it's hand-parsed JSON from local storage that a future
  *  format change could otherwise choke on. `state` is optional per tab: a tab
@@ -19,13 +23,13 @@ export interface LayoutDocument {
   activeTabIndex: number;
 }
 
-/** The renderer settings that Vela's `setTheme()` owns — the chart's background,
- *  text, grid lines and borders — as paths into a chart's `rendererConfig`.
+/** The renderer settings that Vela's `setTheme()` owns — the chart's text, grid
+ *  lines and borders (and its background, handled apart because one someone chose
+ *  is kept) — as paths into a chart's `rendererConfig`.
  *  Vela writes them into its state, and restoring a state does NOT re-skin the
  *  chart afterwards (`setTheme` with the mode it is already in is a no-op), so
  *  a layout saved under the dark theme would turn a light-theme chart dark. */
 const THEME_OWNED_SETTINGS: readonly (readonly string[])[] = [
-  ['layout', 'background'],
   ['layout', 'textColor'],
   ['grid', 'vertLines', 'color'],
   ['grid', 'horzLines', 'color'],
@@ -46,17 +50,25 @@ function omitPath(obj: Record<string, unknown>, [head, ...rest]: readonly string
   return isRecord(child) ? { ...obj, [head]: omitPath(child, rest) } : obj;
 }
 
+/** A chart's settings without its background when that is the theme's own. A background someone
+ *  chose is kept: it belongs to the layout. */
+function withoutThemeBackground(config: Record<string, unknown>): Record<string, unknown> {
+  const layout = config.layout;
+  return isRecord(layout) && 'background' in layout && isThemeBackground(layout.background) ? omitPath(config, ['layout', 'background']) : config;
+}
+
 /** `state` without the settings the theme owns, so restoring it leaves the
  *  chart in whatever theme the app is showing. Everything else — chart style,
- *  candle colours the user picked, indicators, drawings — is kept. Returns a
- *  new object; the input is untouched. */
+ *  candle colours the user picked, a canvas background they picked,
+ *  indicators, drawings — is kept. Returns a new object; the input is
+ *  untouched. */
 export function withoutTheme(state: WorkspaceState): WorkspaceState {
   if (!Array.isArray(state.charts)) return state;
   return {
     ...state,
     charts: state.charts.map((chart) =>
       isRecord(chart.rendererConfig)
-        ? { ...chart, rendererConfig: THEME_OWNED_SETTINGS.reduce(omitPath, chart.rendererConfig) }
+        ? { ...chart, rendererConfig: withoutThemeBackground(THEME_OWNED_SETTINGS.reduce(omitPath, chart.rendererConfig)) }
         : chart,
     ),
   };

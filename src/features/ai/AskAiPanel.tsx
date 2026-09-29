@@ -149,9 +149,24 @@ export function AskAiPanel({ visible, activeSymbol, openTabs, getTimeframe, say,
           <>
             <div className="ai-panel-conversation">
               {conversation.length === 0 && (
-                <p className="small muted">
-                  Try “Add BTCUSDT to my watchlist”, “Switch to the 1 hour chart”, or “Alert me if this crosses 100”.
-                </p>
+                <div className="study-ai-list">
+                  <h4>What I can do, as cards you approve</h4>
+                  <ul>
+                    <li>Open a symbol, change the timeframe.</li>
+                    <li>Add or remove a built-in indicator on the active chart.</li>
+                    <li>Create a watchlist, add or remove a symbol in one.</li>
+                    <li>Create a price alert at a level you specify, crossing up or down.</li>
+                  </ul>
+                  <p className="small muted">
+                    <strong>What I can’t do at all:</strong> place or modify orders, read prices or indicator values, scan or
+                    screen, delete a watchlist, run backtests, or touch scripts, Studies, or Python.
+                  </p>
+                  <p className="small muted">
+                    So the practical shape of a useful request is: “put RSI and a 50 EMA on WELCORP daily,” “alert me if
+                    WELCORP crosses down 620,” or “add ENGINERSIN to Sharpe Ratio.” You bring the levels and the read; I’ll
+                    set up the chart around them.
+                  </p>
+                </div>
               )}
               {conversation.map((e, ei) => (
                 <div key={ei} className="study-ai-exchange">

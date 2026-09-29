@@ -36,7 +36,105 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if !has_column(conn, "watchlist_items", "flag")? {
         conn.execute_batch("ALTER TABLE watchlist_items ADD COLUMN flag TEXT;")?;
     }
+    // Flags used to belong to a list's row; they belong to the symbol now. Each flagged symbol keeps the
+    // flag of the first list it was flagged on, and the rows' own flags are cleared, so this does nothing
+    // the second time.
+    conn.execute_batch(
+        "INSERT OR IGNORE INTO symbol_flags (symbol, flag, flagged_at)
+           SELECT symbol, flag, CAST(strftime('%s', 'now') AS INTEGER) * 1000 FROM watchlist_items
+           WHERE flag IS NOT NULL ORDER BY watchlist_id, position;
+         UPDATE watchlist_items SET flag = NULL WHERE flag IS NOT NULL;",
+    )?;
     Ok(())
+}
+
+// ---- Colour flags ----------------------------------------------------------------------------------
+
+/// The id a colour's list goes by: negative, so it can never be a real watchlist's. Red is -1, purple -6.
+pub fn flag_list_id(flag: &str) -> Option<i64> {
+    FLAGS.iter().position(|f| *f == flag).map(|i| -(i as i64) - 1)
+}
+
+/// The colour whose list `id` is, if it is one.
+pub fn flag_of_list(id: i64) -> Option<&'static str> {
+    if id >= 0 {
+        return None;
+    }
+    FLAGS.get((-id - 1) as usize).copied()
+}
+
+fn flag_list_name(flag: &str) -> String {
+    let mut chars = flag.chars();
+    let first = chars
+        .next()
+        .map(|c| c.to_uppercase().collect::<String>())
+        .unwrap_or_default();
+    format!("{first}{} flag", chars.as_str())
+}
+
+/// Flags a symbol with a colour, or clears its flag. Changing the colour counts as flagging it anew;
+/// setting the colour it already has changes nothing. The caller checks the name with `is_flag`.
+pub fn set_symbol_flag(conn: &Connection, symbol: &str, flag: Option<&str>, now: i64) -> rusqlite::Result<()> {
+    match flag {
+        None => conn.execute("DELETE FROM symbol_flags WHERE symbol = ?1", params![symbol])?,
+        Some(flag) => conn.execute(
+            "INSERT INTO symbol_flags (symbol, flag, flagged_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(symbol) DO UPDATE SET flag = excluded.flag,
+               flagged_at = CASE WHEN symbol_flags.flag = excluded.flag THEN symbol_flags.flagged_at ELSE excluded.flagged_at END",
+            params![symbol, flag, now],
+        )?,
+    };
+    Ok(())
+}
+
+/// The six colour lists as a list selector shows them, with how many symbols each holds.
+pub fn flag_lists(conn: &Connection) -> rusqlite::Result<Vec<WatchlistSummary>> {
+    FLAGS
+        .iter()
+        .map(|flag| {
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM symbol_flags WHERE flag = ?1",
+                params![flag],
+                |r| r.get(0),
+            )?;
+            Ok(WatchlistSummary {
+                id: flag_list_id(flag).expect("a known flag"),
+                name: flag_list_name(flag),
+                created_at: String::new(),
+                item_count: count,
+            })
+        })
+        .collect()
+}
+
+/// A colour's list: every symbol flagged with it, most recently flagged first. It has no sections and
+/// no order of its own; its rows' ids are only positions.
+pub fn flag_list(conn: &Connection, flag: &str) -> rusqlite::Result<WatchlistDetail> {
+    let mut stmt =
+        conn.prepare("SELECT symbol FROM symbol_flags WHERE flag = ?1 ORDER BY flagged_at DESC, symbol ASC")?;
+    let symbols = stmt
+        .query_map(params![flag], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let names = crate::store::symbol_names::known(conn, &symbols)?;
+    let items = symbols
+        .into_iter()
+        .enumerate()
+        .map(|(i, symbol)| WatchlistItem {
+            id: i as i64 + 1,
+            position: i as i64 + 1,
+            name: names.get(&symbol).cloned(),
+            flag: Some(flag.to_string()),
+            symbol,
+        })
+        .collect();
+    Ok(WatchlistDetail {
+        id: flag_list_id(flag).expect("a known flag"),
+        name: flag_list_name(flag),
+        created_at: String::new(),
+        items,
+        sections: Vec::new(),
+        added: None,
+    })
 }
 
 pub fn list(conn: &Connection) -> rusqlite::Result<Vec<WatchlistSummary>> {
@@ -70,9 +168,11 @@ pub fn get(conn: &Connection, id: i64) -> rusqlite::Result<Option<WatchlistDetai
 
     // `position` is the display order, so a hand-built (or hand-reordered) list keeps its sequence; the id
     // breaks a tie.
+    // A symbol's flag is its own (`symbol_flags`), the same on every list.
     let mut stmt = conn.prepare(
-        "SELECT id, symbol, name, position, flag FROM watchlist_items
-         WHERE watchlist_id = ?1 ORDER BY position ASC, id ASC",
+        "SELECT i.id, i.symbol, i.name, i.position, f.flag FROM watchlist_items i
+         LEFT JOIN symbol_flags f ON f.symbol = i.symbol
+         WHERE i.watchlist_id = ?1 ORDER BY i.position ASC, i.id ASC",
     )?;
     let items = stmt
         .query_map(params![id], |r| {
@@ -160,6 +260,89 @@ pub fn add_items(conn: &mut Connection, watchlist_id: i64, items: &[NewWatchlist
     Ok(added)
 }
 
+/// What [`sync_named`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Synced {
+    pub id: i64,
+    pub created: bool,
+    pub added: usize,
+    pub removed: usize,
+    pub total: usize,
+}
+
+/// Creates or refreshes the watchlist called `name` (matched ignoring case; the oldest if two share
+/// it) from a script's list. `replace` makes it hold exactly `symbols`: symbols it no longer has are
+/// removed, and those it keeps stay where they were, with their flags; new ones go at the end, in the
+/// order given. Otherwise the new ones are only added. Section headings are left alone. One
+/// transaction, so a list is never seen half-refreshed.
+pub fn sync_named(conn: &mut Connection, name: &str, symbols: &[String], replace: bool) -> rusqlite::Result<Synced> {
+    let names = crate::store::symbol_names::known(conn, symbols)?;
+    let tx = conn.transaction()?;
+    let existing: Option<i64> = tx
+        .query_row(
+            "SELECT id FROM watchlists WHERE name = ?1 COLLATE NOCASE ORDER BY id LIMIT 1",
+            params![name],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let id = match existing {
+        Some(id) => id,
+        None => {
+            tx.execute("INSERT INTO watchlists (name) VALUES (?1)", params![name])?;
+            tx.last_insert_rowid()
+        }
+    };
+    let mut removed = 0;
+    if replace {
+        let wanted: HashSet<&str> = symbols.iter().map(String::as_str).collect();
+        let mut stmt = tx.prepare("SELECT symbol FROM watchlist_items WHERE watchlist_id = ?1")?;
+        let current = stmt
+            .query_map(params![id], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+        for symbol in current.iter().filter(|s| !wanted.contains(s.as_str())) {
+            removed += tx.execute(
+                "DELETE FROM watchlist_items WHERE watchlist_id = ?1 AND symbol = ?2",
+                params![id, symbol],
+            )?;
+        }
+    }
+    let mut added = 0;
+    {
+        let mut position = next_position(&tx, id)?;
+        let mut stmt = tx.prepare(
+            "INSERT OR IGNORE INTO watchlist_items (watchlist_id, symbol, name, position) VALUES (?1, ?2, ?3, ?4)",
+        )?;
+        for symbol in symbols {
+            if stmt.execute(params![id, symbol, names.get(symbol), position])? == 1 {
+                position += 1;
+                added += 1;
+            }
+        }
+    }
+    let total: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM watchlist_items WHERE watchlist_id = ?1",
+        params![id],
+        |r| r.get(0),
+    )?;
+    tx.commit()?;
+    Ok(Synced {
+        id,
+        created: existing.is_none(),
+        added,
+        removed,
+        total: total as usize,
+    })
+}
+
+/// Every list's symbols as `(watchlist id, symbol)`, for showing which lists hold a symbol (the chart's
+/// "Add to watchlist" check marks) without reading each list.
+pub fn members(conn: &Connection) -> rusqlite::Result<Vec<(i64, String)>> {
+    let mut stmt = conn.prepare("SELECT watchlist_id, symbol FROM watchlist_items ORDER BY watchlist_id, position")?;
+    let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    rows.collect()
+}
+
 pub fn remove_items(conn: &mut Connection, watchlist_id: i64, symbols: &[String]) -> rusqlite::Result<()> {
     let tx = conn.transaction()?;
     {
@@ -169,15 +352,6 @@ pub fn remove_items(conn: &mut Connection, watchlist_id: i64, symbols: &[String]
         }
     }
     tx.commit()
-}
-
-/// Marks a symbol with a colour, or clears the mark. The caller checks the name with `is_flag`.
-pub fn set_flag(conn: &Connection, watchlist_id: i64, symbol: &str, flag: Option<&str>) -> rusqlite::Result<()> {
-    conn.execute(
-        "UPDATE watchlist_items SET flag = ?1 WHERE watchlist_id = ?2 AND symbol = ?3",
-        params![flag, watchlist_id, symbol],
-    )?;
-    Ok(())
 }
 
 /// Every row of a list — symbols and section headings together — in the order shown. A heading comes
@@ -630,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    fn flags_are_set_cleared_and_only_on_that_list() {
+    fn a_flag_belongs_to_the_symbol_on_every_list() {
         let db = Database::open_in_memory().unwrap();
         let mut conn = db.conn.lock().unwrap();
         let a = create(&conn, "A").unwrap();
@@ -638,7 +812,7 @@ mod tests {
         add_items(&mut conn, a, &[item("x"), item("y")]).unwrap();
         add_items(&mut conn, b, &[item("x")]).unwrap();
 
-        set_flag(&conn, a, "x", Some("red")).unwrap();
+        set_symbol_flag(&conn, "x", Some("red"), 1).unwrap();
         let flags = |list: i64| -> Vec<Option<String>> {
             get(&conn, list)
                 .unwrap()
@@ -649,10 +823,84 @@ mod tests {
                 .collect()
         };
         assert_eq!(flags(a), [Some("red".to_string()), None]);
-        assert_eq!(flags(b), [None], "the same symbol on another list keeps its own flag");
+        assert_eq!(
+            flags(b),
+            [Some("red".to_string())],
+            "the same symbol on another list shows the same flag"
+        );
 
-        set_flag(&conn, a, "x", None).unwrap();
+        set_symbol_flag(&conn, "x", None, 2).unwrap();
         assert_eq!(flags(a), [None, None]);
+        assert_eq!(flags(b), [None]);
+    }
+
+    #[test]
+    fn each_colour_has_a_list_of_its_symbols_newest_first() {
+        let db = Database::open_in_memory().unwrap();
+        let conn = db.conn.lock().unwrap();
+        set_symbol_flag(&conn, "p:OLD", Some("red"), 1).unwrap();
+        set_symbol_flag(&conn, "p:NEW", Some("red"), 3).unwrap();
+        set_symbol_flag(&conn, "p:BLUE", Some("blue"), 2).unwrap();
+        // Setting the colour it already has doesn't make it newer; a new colour does.
+        set_symbol_flag(&conn, "p:OLD", Some("red"), 9).unwrap();
+
+        let red = flag_list(&conn, "red").unwrap();
+        assert_eq!((red.id, red.name.as_str()), (-1, "Red flag"));
+        assert_eq!(
+            red.items.iter().map(|i| i.symbol.as_str()).collect::<Vec<_>>(),
+            ["p:NEW", "p:OLD"]
+        );
+        assert!(red.items.iter().all(|i| i.flag.as_deref() == Some("red")) && red.sections.is_empty());
+
+        set_symbol_flag(&conn, "p:BLUE", Some("red"), 10).unwrap();
+        assert_eq!(flag_list(&conn, "red").unwrap().items[0].symbol, "p:BLUE");
+        let counts: Vec<(String, i64)> = flag_lists(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|s| (s.name, s.item_count))
+            .collect();
+        assert_eq!(counts[0], ("Red flag".to_string(), 3));
+        assert_eq!(counts[4], ("Blue flag".to_string(), 0));
+        assert_eq!(counts.len(), FLAGS.len());
+    }
+
+    #[test]
+    fn colour_list_ids_are_negative_and_round_trip() {
+        for (i, flag) in FLAGS.iter().enumerate() {
+            let id = flag_list_id(flag).unwrap();
+            assert_eq!(id, -(i as i64) - 1);
+            assert_eq!(flag_of_list(id), Some(*flag));
+        }
+        assert_eq!(flag_of_list(0), None);
+        assert_eq!(flag_of_list(5), None);
+        assert_eq!(flag_of_list(-7), None);
+        assert_eq!(flag_list_id("pink"), None);
+    }
+
+    #[test]
+    fn flags_on_rows_are_carried_over_to_their_symbols_once() {
+        let db = Database::open_in_memory().unwrap();
+        let mut conn = db.conn.lock().unwrap();
+        let a = create(&conn, "A").unwrap();
+        let b = create(&conn, "B").unwrap();
+        add_items(&mut conn, a, &[item("x"), item("y")]).unwrap();
+        add_items(&mut conn, b, &[item("x")]).unwrap();
+        // As an older version left them: on the rows, the same symbol flagged differently on two lists.
+        conn.execute_batch(&format!(
+            "UPDATE watchlist_items SET flag = 'green' WHERE watchlist_id = {a} AND symbol = 'x';
+                 UPDATE watchlist_items SET flag = 'red' WHERE watchlist_id = {b} AND symbol = 'x';"
+        ))
+        .unwrap();
+        migrate(&conn).unwrap();
+        assert_eq!(
+            get(&conn, b).unwrap().unwrap().items[0].flag.as_deref(),
+            Some("green"),
+            "the first list's flag wins"
+        );
+        // Cleared afterwards and removed: a second run brings nothing back.
+        set_symbol_flag(&conn, "x", None, 5).unwrap();
+        migrate(&conn).unwrap();
+        assert_eq!(get(&conn, a).unwrap().unwrap().items[0].flag, None);
     }
 
     #[test]
@@ -661,5 +909,54 @@ mod tests {
         assert!(!is_flag("pink"));
         assert!(!is_flag(""));
         assert!(!is_flag("Red"));
+    }
+
+    #[test]
+    fn members_lists_every_lists_symbols() {
+        let db = Database::open_in_memory().unwrap();
+        let mut conn = db.conn.lock().unwrap();
+        let a = create(&conn, "A").unwrap();
+        let b = create(&conn, "B").unwrap();
+        add_items(&mut conn, a, &[item("x:1"), item("x:2")]).unwrap();
+        add_items(&mut conn, b, &[item("x:2")]).unwrap();
+        assert_eq!(
+            members(&conn).unwrap(),
+            vec![(a, "x:1".to_string()), (a, "x:2".to_string()), (b, "x:2".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_script_creates_a_list_by_name_and_refreshes_it_in_place() {
+        let db = Database::open_in_memory().unwrap();
+        let mut conn = db.conn.lock().unwrap();
+        let list = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let first = sync_named(&mut conn, "Momentum", &list(&["z:A", "z:B", "z:C"]), true).unwrap();
+        assert_eq!(
+            (first.created, first.added, first.removed, first.total),
+            (true, 3, 0, 3)
+        );
+        set_symbol_flag(&conn, "z:B", Some("red"), 1).unwrap();
+        add_section(&mut conn, first.id, "Keep me", None).unwrap();
+        // Refreshed under another spelling of its name: B stays where it was with its flag, A and C
+        // go, D and E are added at the end in the script's order, and the heading is untouched.
+        let again = sync_named(&mut conn, "momentum", &list(&["z:E", "z:B", "z:D"]), true).unwrap();
+        assert_eq!(
+            (again.id, again.created, again.added, again.removed, again.total),
+            (first.id, false, 2, 2, 3)
+        );
+        assert_eq!(symbols(&conn, first.id), ["z:B", "z:E", "z:D"]);
+        let detail = get(&conn, first.id).unwrap().unwrap();
+        assert_eq!(detail.items[0].flag.as_deref(), Some("red"));
+        assert_eq!(detail.sections.len(), 1);
+        // Appending adds only what is new; an empty replace empties it.
+        let more = sync_named(&mut conn, "Momentum", &list(&["z:B", "z:F"]), false).unwrap();
+        assert_eq!((more.added, more.removed, more.total), (1, 0, 4));
+        let cleared = sync_named(&mut conn, "Momentum", &[], true).unwrap();
+        assert_eq!((cleared.removed, cleared.total), (4, 0));
+        assert_eq!(list_names(&conn), ["Momentum"]);
+    }
+
+    fn list_names(conn: &Connection) -> Vec<String> {
+        list(conn).unwrap().into_iter().map(|w| w.name).collect()
     }
 }

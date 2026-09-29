@@ -191,11 +191,21 @@ a {
   flex-shrink: 0;
 }
 
+/* The tabs and their arrows. It doesn't grow, so the + button sits right after the last tab, and it
+   shrinks to the room left beside the actions. */
+.tab-strip {
+  position: relative;
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+}
 .tab-bar-scroll {
   display: flex;
   align-items: flex-end;
   flex: 1;
   min-width: 0;
+  /* Scrolling a tab into view keeps it clear of the arrows over the edges. */
+  scroll-padding-inline: 30px;
   gap: 2px;
   overflow-x: auto;
   scrollbar-width: none;
@@ -203,13 +213,55 @@ a {
 .tab-bar-scroll::-webkit-scrollbar {
   display: none;
 }
+/* Tabs hidden past an edge fade out there, beside the arrow that brings them back. */
+.tab-bar-scroll.fade-left {
+  mask-image: linear-gradient(to right, transparent 12px, #000 40px);
+}
+.tab-bar-scroll.fade-right {
+  mask-image: linear-gradient(to left, transparent 12px, #000 40px);
+}
+.tab-bar-scroll.fade-left.fade-right {
+  mask-image: linear-gradient(to right, transparent 12px, #000 40px, #000 calc(100% - 40px), transparent calc(100% - 12px));
+}
+.tab-scroll {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  background: var(--surface-1);
+  box-shadow: 0 0 0 1px var(--border);
+}
+.tab-scroll.left {
+  left: 0;
+}
+.tab-scroll.right {
+  right: 0;
+}
+.tab-new {
+  flex-shrink: 0;
+  margin: 0 4px 4px;
+}
+/* The strip no longer fills the bar, so the actions keep to the right edge themselves. */
+.tab-bar-actions {
+  margin-left: auto;
+}
 
 .tab-chip {
+  /* Tabs share the strip like a browser's: up to 250px each, shrinking together as more open, down to
+     a minimum; only then does the strip scroll. A container, so as a tab narrows it drops its price,
+     then its day's change, then (unless active or hovered) its close button — the name goes last. */
+  container: tab / inline-size;
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
-  max-width: 300px;
+  /* An explicit width, not just a flex basis: size containment (for the queries) gives the tab no
+     natural width, and the strip sizes itself from its tabs' widths. */
+  flex: 0 1 auto;
+  width: 250px;
+  min-width: 76px;
+  overflow: hidden;
   height: 32px;
   padding: 0 8px 0 12px;
   border-radius: var(--r-md) var(--r-md) 0 0;
@@ -225,6 +277,8 @@ a {
   color: var(--text-primary);
 }
 .tab-chip.active {
+  /* The tab you are on stays readable however many are open. */
+  min-width: 120px;
   background: var(--bg-base);
   border-color: var(--border);
   color: var(--text-primary);
@@ -235,9 +289,30 @@ a {
 }
 
 .tab-chip-label {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.tab-chip > svg,
+.tab-chip-close {
+  flex-shrink: 0;
+}
+@container tab (max-width: 230px) {
+  .tab-chip .tab-chip-price {
+    display: none;
+  }
+}
+@container tab (max-width: 160px) {
+  .tab-chip .tab-chip-quote {
+    display: none;
+  }
+}
+@container tab (max-width: 110px) {
+  .tab-chip:not(.active):not(:hover) .tab-chip-close {
+    display: none;
+  }
 }
 
 /* The price and the day's change beside a tab's name. The label gives way first: these stay whole. */
@@ -528,7 +603,8 @@ a {
 .ai-panel {
   display: flex;
   flex-direction: column;
-  width: 300px;
+  /* Set by dragging the panel's edge (PanelResizer), kept in a preference. */
+  width: var(--side-panel-width, 300px);
   flex-shrink: 0;
   min-height: 0;
   border-left: 1px solid var(--border);
@@ -785,8 +861,30 @@ a {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The flag button before each ticker: its colour when flagged, and an outline on hover when not, so
+   flagging needs no right-click. It keeps its slot either way, so tickers stay aligned. */
 .watchlist-flag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  visibility: hidden;
+}
+.watchlist-flag.on,
+.watchlist-row:hover .watchlist-flag,
+.watchlist-flag:focus-visible {
+  visibility: visible;
+}
+.watchlist-flag:hover {
+  background: var(--border);
 }
 .watchlist-symbol .sub {
   font-size: 11px;
@@ -1547,4 +1645,145 @@ code {
   height: 8px;
   border-radius: 50%;
   background: var(--accent);
+}
+
+/* Checkbox rows in Vela's menus (our patch: the chart's "Add SYMBOL to watchlist" list): a box in the
+   14px mark column, ticked when the list holds the symbol. Vela's own tokens, so it follows its theme. */
+.vela-menu-item .vela-menu-checkbox {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+  opacity: 0.75;
+}
+.vela-menu-item .vela-menu-checkbox .vela-icon {
+  width: 11px;
+  height: 11px;
+  font-size: 11px;
+  visibility: hidden;
+}
+.vela-menu-item .vela-menu-checkbox.on {
+  opacity: 1;
+  color: var(--vela-fg-bright, currentColor);
+}
+.vela-menu-item .vela-menu-checkbox.on .vela-icon {
+  visibility: visible;
+}
+
+/* The side panel's draggable left edge: a thin hit area over the panel's border. */
+.panel-resizer {
+  position: relative;
+  z-index: 2;
+  width: 6px;
+  margin-right: -6px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  touch-action: none;
+}
+.panel-resizer:hover,
+.panel-resizer:active {
+  background: linear-gradient(to right, transparent 2px, var(--accent) 2px, var(--accent) 4px, transparent 4px);
+}
+/* While dragging, the charts' own pointer handling mustn't catch the cursor, and nothing gets selected. */
+body.resizing-panel {
+  cursor: col-resize;
+  user-select: none;
+}
+body.resizing-panel .app-canvases {
+  pointer-events: none;
+}
+
+/* ---- Quick-access watchlists and the browse dialog ------------------------------------ */
+
+.watchlist-quick {
+  display: flex;
+  gap: 4px;
+  padding: 0 10px 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.watchlist-quick-tab {
+  flex-shrink: 0;
+  max-width: 140px;
+  padding: 3px 9px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.watchlist-quick-tab:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+.watchlist-quick-tab.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.wl-browser-search {
+  width: 100%;
+  margin-bottom: 6px;
+}
+.wl-browser-hint {
+  margin: 0 0 8px;
+}
+.wl-browser-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wl-browser-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.wl-browser-row.active .wl-browser-name {
+  font-weight: 600;
+}
+.wl-browser-name {
+  overflow: hidden;
+  padding: 4px 2px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.wl-browser-name:hover {
+  color: var(--accent);
+}
+.wl-browser-star.on {
+  color: #f5b301;
+}
+.wl-browser-count {
+  flex-shrink: 0;
+  min-width: 72px;
+  text-align: right;
+}
+.wl-browser-new {
+  display: inline-flex;
+  gap: 6px;
+}
+.dialog-footer .grow {
+  flex: 1;
+}
+.wl-browser-row .grow {
+  flex: 1;
+  min-width: 0;
 }

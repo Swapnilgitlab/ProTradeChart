@@ -7,11 +7,13 @@ interface Props {
   children: ReactNode;
   footer?: ReactNode;
   wide?: boolean;
+  /** Extra classes for the dialog box, for one that needs its own size (Help). */
+  className?: string;
 }
 
 /** A modal dialog: dims the app, closes on Escape or a backdrop click, and
  *  returns focus to whatever had it before. */
-export function Dialog({ title, onClose, children, footer, wide }: Props) {
+export function Dialog({ title, onClose, children, footer, wide, className }: Props) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -36,7 +38,7 @@ export function Dialog({ title, onClose, children, footer, wide }: Props) {
     <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div
         ref={dialogRef}
-        className={`dialog${wide ? ' wide' : ''}`}
+        className={`dialog${wide ? ' wide' : ''}${className ? ` ${className}` : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

@@ -77,7 +77,53 @@ pub fn delete_pine_script(id: String, db: State<Database>) -> Result<(), String>
 // ---- Watchlists ------------------------------------------------------------
 
 fn watchlist_detail(conn: &Connection, id: i64) -> Result<WatchlistDetail, String> {
+    if let Some(flag) = watchlists::flag_of_list(id) {
+        return sql(watchlists::flag_list(conn, flag));
+    }
     sql(watchlists::get(conn, id))?.ok_or_else(|| format!("watchlist {id} not found"))
+}
+
+/// Refuses what only a real watchlist can do (be renamed, deleted, reordered, given sections) when `id`
+/// is a colour's list, whose contents are simply the symbols flagged with it.
+fn real_list(id: i64) -> Result<(), String> {
+    match watchlists::flag_of_list(id) {
+        Some(_) => Err(
+            "A colour flag list holds whatever is flagged with its colour, newest first; it can't be changed that way."
+                .into(),
+        ),
+        None => Ok(()),
+    }
+}
+
+/// The six colour lists, with how many symbols each holds.
+#[tauri::command]
+pub fn list_flag_lists(db: State<Database>) -> Result<Vec<WatchlistSummary>, String> {
+    sql(watchlists::flag_lists(&*lock(&db)?))
+}
+
+/// Flags a symbol with a colour (`red`, `orange`, `yellow`, `green`, `blue`, `purple`) — on every list it is
+/// on — or clears its flag with `None`. Tells every window, so lists and colour lists follow.
+#[tauri::command]
+pub fn set_symbol_flag(
+    symbol: String,
+    flag: Option<String>,
+    app: tauri::AppHandle,
+    db: State<Database>,
+) -> Result<(), String> {
+    if let Some(flag) = &flag {
+        if !watchlists::is_flag(flag) {
+            return Err(format!("'{flag}' is not a flag colour"));
+        }
+    }
+    sql(watchlists::set_symbol_flag(
+        &*lock(&db)?,
+        &symbol,
+        flag.as_deref(),
+        crate::db::now_ms(),
+    ))?;
+    use tauri::Emitter;
+    let _ = app.emit(crate::pyapi::backend::WATCHLISTS_CHANGED, 0);
+    Ok(())
 }
 
 #[tauri::command]
@@ -85,9 +131,49 @@ pub fn list_watchlists(db: State<Database>) -> Result<Vec<WatchlistSummary>, Str
     sql(watchlists::list(&*lock(&db)?))
 }
 
+/// Which symbols every list holds, as `[watchlist id, symbol]` pairs.
+#[tauri::command]
+pub fn list_watchlist_members(db: State<Database>) -> Result<Vec<(i64, String)>, String> {
+    sql(watchlists::members(&*lock(&db)?))
+}
+
 #[tauri::command]
 pub fn get_watchlist(id: i64, db: State<Database>) -> Result<WatchlistDetail, String> {
     watchlist_detail(&*lock(&db)?, id)
+}
+
+/// Makes the Indices watchlist (the broad market, sectors and themes) from a broker's instrument list.
+#[tauri::command]
+pub fn create_indices_watchlist(provider: String, db: State<Database>) -> Result<WatchlistDetail, String> {
+    let source = crate::store::instrument_list::Source::parse(&provider)
+        .ok_or("Indices come from Zerodha's or Dhan's instrument list.")?;
+    let mut conn = lock(&db)?;
+    let made = crate::store::index_catalog::create(&mut conn, source)?;
+    watchlist_detail(&conn, made.id)
+}
+
+/// A symbol's drawings document, or `None` when the app has never stored one for it.
+#[tauri::command]
+pub fn get_symbol_drawings(symbol: String, db: State<Database>) -> Result<Option<String>, String> {
+    crate::store::symbol_drawings::get(&*lock(&db)?, &symbol)
+}
+
+/// Stores a symbol's drawings, and tells every window, so its other charts of the symbol follow.
+#[tauri::command]
+pub fn save_symbol_drawings(
+    symbol: String,
+    doc_json: String,
+    source: String,
+    app: tauri::AppHandle,
+    db: State<Database>,
+) -> Result<(), String> {
+    crate::store::symbol_drawings::save(&*lock(&db)?, &symbol, &doc_json)?;
+    use tauri::Emitter;
+    let _ = app.emit(
+        "symbol-drawings-changed",
+        serde_json::json!({ "symbol": symbol, "source": source }),
+    );
+    Ok(())
 }
 
 #[tauri::command]
@@ -107,14 +193,17 @@ pub fn rename_watchlist(id: i64, name: String, db: State<Database>) -> Result<()
     if name.is_empty() {
         return Err("a watchlist needs a name".to_string());
     }
+    real_list(id)?;
     sql(watchlists::rename(&*lock(&db)?, id, name))
 }
 
 #[tauri::command]
 pub fn delete_watchlist(id: i64, db: State<Database>) -> Result<(), String> {
+    real_list(id)?;
     sql(watchlists::delete(&*lock(&db)?, id))
 }
 
+/// Adds symbols to a list. Adding to a colour's list flags them with that colour.
 #[tauri::command]
 pub fn add_watchlist_items(
     watchlist_id: i64,
@@ -122,36 +211,38 @@ pub fn add_watchlist_items(
     db: State<Database>,
 ) -> Result<WatchlistDetail, String> {
     let mut conn = lock(&db)?;
-    let added = sql(watchlists::add_items(&mut conn, watchlist_id, &items))?;
+    let added = match watchlists::flag_of_list(watchlist_id) {
+        Some(flag) => {
+            let before = sql(watchlists::flag_list(&conn, flag))?;
+            let now = crate::db::now_ms();
+            let mut added = 0;
+            for item in &items {
+                if !before.items.iter().any(|i| i.symbol == item.symbol) {
+                    sql(watchlists::set_symbol_flag(&conn, &item.symbol, Some(flag), now))?;
+                    added += 1;
+                }
+            }
+            added
+        }
+        None => sql(watchlists::add_items(&mut conn, watchlist_id, &items))?,
+    };
     let mut detail = watchlist_detail(&conn, watchlist_id)?;
     detail.added = Some(added);
     Ok(detail)
 }
 
+/// Removes symbols from a list. Removing from a colour's list clears their flag.
 #[tauri::command]
 pub fn remove_watchlist_items(watchlist_id: i64, symbols: Vec<String>, db: State<Database>) -> Result<(), String> {
-    sql(watchlists::remove_items(&mut *lock(&db)?, watchlist_id, &symbols))
-}
-
-/// Marks a symbol with a colour (`red`, `orange`, `yellow`, `green`, `blue`, `purple`), or clears it with `None`.
-#[tauri::command]
-pub fn set_watchlist_item_flag(
-    watchlist_id: i64,
-    symbol: String,
-    flag: Option<String>,
-    db: State<Database>,
-) -> Result<(), String> {
-    if let Some(flag) = &flag {
-        if !watchlists::is_flag(flag) {
-            return Err(format!("'{flag}' is not a flag colour"));
+    let mut conn = lock(&db)?;
+    if let Some(flag) = watchlists::flag_of_list(watchlist_id) {
+        let listed = sql(watchlists::flag_list(&conn, flag))?;
+        for symbol in symbols.iter().filter(|s| listed.items.iter().any(|i| &i.symbol == *s)) {
+            sql(watchlists::set_symbol_flag(&conn, symbol, None, 0))?;
         }
+        return Ok(());
     }
-    sql(watchlists::set_flag(
-        &*lock(&db)?,
-        watchlist_id,
-        &symbol,
-        flag.as_deref(),
-    ))
+    sql(watchlists::remove_items(&mut conn, watchlist_id, &symbols))
 }
 
 /// Puts a list's rows (symbols and section headings) in the given order; see `watchlists::write_order`
@@ -162,6 +253,7 @@ pub fn set_watchlist_order(
     order: Vec<RowRef>,
     db: State<Database>,
 ) -> Result<WatchlistDetail, String> {
+    real_list(watchlist_id)?;
     let mut conn = lock(&db)?;
     sql(watchlists::set_order(&mut conn, watchlist_id, &order))?;
     watchlist_detail(&conn, watchlist_id)
@@ -179,6 +271,7 @@ pub fn add_watchlist_section(
     if name.is_empty() {
         return Err("a section needs a name".to_string());
     }
+    real_list(watchlist_id)?;
     let mut conn = lock(&db)?;
     sql(watchlists::add_section(&mut conn, watchlist_id, name, before))?;
     watchlist_detail(&conn, watchlist_id)

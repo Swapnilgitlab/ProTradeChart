@@ -236,6 +236,7 @@ pub async fn python_run(
             cwd: paths.scripts.clone(),
             run_id,
             remove_after: None,
+            on_exit: None,
         },
     )
     .await
@@ -247,7 +248,22 @@ pub(crate) struct StartRun {
     pub cwd: PathBuf,
     pub run_id: String,
     pub remove_after: Option<PathBuf>,
+    /// Told how the run ended, with the tail of its output: for a run no window is watching (a
+    /// schedule's). The events are sent either way.
+    pub on_exit: Option<OnExit>,
 }
+
+/// How a run ended, for [`StartRun::on_exit`].
+pub(crate) struct RunEnd {
+    pub outcome: Result<Outcome, String>,
+    /// The last lines it printed (stdout and stderr together, stderr lines marked `! `).
+    pub output: String,
+}
+
+pub(crate) type OnExit = Box<dyn FnOnce(RunEnd) + Send>;
+
+/// Output kept for [`RunEnd`]: enough to see why a run failed.
+const KEPT_OUTPUT_BYTES: usize = 32 * 1024;
 
 /// Starts Python with the client on its path and the local API's address and token in its
 /// environment, streaming its output as `python-output` and its end as `python-exit`. Shared by
@@ -263,6 +279,7 @@ pub(crate) async fn start_python(
         cwd,
         run_id,
         remove_after,
+        on_exit,
     } = run;
     if !valid_run_id(&run_id) {
         return Err("That isn't a valid run id.".into());
@@ -307,7 +324,21 @@ pub(crate) async fn start_python(
 
     let sink = app.clone();
     let output_run = run_id.clone();
+    let kept: Option<Arc<std::sync::Mutex<String>>> = on_exit.as_ref().map(|_| Default::default());
+    let keeper = kept.clone();
     let emit: Emit = Arc::new(move |stream, line| {
+        if let Some(kept) = &keeper {
+            if let Ok(mut text) = kept.lock() {
+                if matches!(stream, Stream::Stderr) {
+                    text.push_str("! ");
+                }
+                text.push_str(&line.text);
+                text.push('\n');
+                if text.len() > 2 * KEPT_OUTPUT_BYTES {
+                    *text = crate::store::schedules::tail(&text, KEPT_OUTPUT_BYTES);
+                }
+            }
+        }
         let _ = sink.emit(
             "python-output",
             OutputEvent {
@@ -322,6 +353,19 @@ pub(crate) async fn start_python(
     let finished_run = run_id.clone();
     tauri::async_runtime::spawn(async move {
         let result = runner::run_streaming(cmd, Some(stop_rx), emit).await;
+        if let Some(on_exit) = on_exit {
+            let output = kept
+                .and_then(|k| {
+                    k.lock()
+                        .ok()
+                        .map(|t| crate::store::schedules::tail(&t, KEPT_OUTPUT_BYTES))
+                })
+                .unwrap_or_default();
+            on_exit(RunEnd {
+                outcome: result.clone(),
+                output,
+            });
+        }
         if let Ok(mut runs) = handle.state::<PythonState>().runs.lock() {
             runs.remove(&finished_run);
         }

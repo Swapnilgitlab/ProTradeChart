@@ -10,7 +10,9 @@
 //! - the `Authorization: Bearer` token must match. It is 256 random bits, made at launch
 //!   and handed only to the scripts the app starts, and it is compared in constant time.
 //!
-//! Everything answered is read-only market data.
+//! Everything answered is read-only market data. The one exception is a posted result: shown in the
+//! app's window, or — for kind `watchlist` — written to the watchlist the script named, after the
+//! same checks, through the same store code the watchlist panel uses.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,8 +23,8 @@ use subtle::ConstantTimeEq;
 use super::data::{BarsData, BarsRequest, MAX_LIMIT};
 use super::valid_run_id;
 use super::wire::{
-    bars_body, error_json, InstrumentRow, ProviderStatus, ResultPost, WatchlistContent, WatchlistInfo, MAX_TITLE_CHARS,
-    PNG_BASE64_PREFIX, RESULT_KINDS,
+    bars_body, error_json, InstrumentRow, ProviderStatus, ResultPost, WatchlistContent, WatchlistInfo, WatchlistSync,
+    WatchlistUpdate, MAX_TITLE_CHARS, PNG_BASE64_PREFIX, RESULT_KINDS,
 };
 use super::ApiError;
 use crate::store::instrument_list::Filter;
@@ -45,6 +47,85 @@ pub trait Backend: Send + Sync {
     /// Shows a result a script posted, in the app. The one thing here that isn't a read, and it
     /// only ever reaches the app's own window.
     fn publish(&self, post: ResultPost) -> Result<(), ApiError>;
+    /// Creates or refreshes a watchlist from a script's list (`pt.set_watchlist`).
+    fn set_watchlist(&self, update: WatchlistUpdate) -> Result<WatchlistSync, ApiError>;
+}
+
+/// The most symbols a script may put on one watchlist.
+pub const MAX_WATCHLIST_SYMBOLS: usize = 2_000;
+const MAX_WATCHLIST_NAME: usize = 100;
+const MAX_SYMBOL_CHARS: usize = 64;
+/// Where a symbol's data comes from; a script can't put one on a list from anywhere else.
+const WATCHLIST_PROVIDERS: [&str; 6] = ["zerodha", "dhan", "binance", "coinbase", "hyperliquid", "csv"];
+
+/// A `watchlist` result's data checked and made canonical: `{name, symbols, mode}`, mode `replace`
+/// (the default) or `append`. A broker symbol without an exchange is on NSE, as everywhere else in
+/// the app (`normalizeSymbol`).
+pub fn watchlist_update(data: &serde_json::Value) -> Result<WatchlistUpdate, ApiError> {
+    let name = data.get("name").and_then(|v| v.as_str()).map(str::trim).unwrap_or("");
+    if name.is_empty() || name.chars().count() > MAX_WATCHLIST_NAME || name.chars().any(char::is_control) {
+        return Err(ApiError::bad_request(format!(
+            "A watchlist needs a name of 1 to {MAX_WATCHLIST_NAME} characters."
+        )));
+    }
+    let replace = match data.get("mode").and_then(|v| v.as_str()).unwrap_or("replace") {
+        "replace" => true,
+        "append" => false,
+        other => {
+            return Err(ApiError::bad_request(format!(
+                "mode must be replace or append, not '{other}'."
+            )))
+        }
+    };
+    let list = data
+        .get("symbols")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| ApiError::bad_request("symbols must be a list of symbols like zerodha:NSE:RELIANCE."))?;
+    if list.len() > MAX_WATCHLIST_SYMBOLS {
+        return Err(ApiError::bad_request(format!(
+            "A watchlist can take at most {MAX_WATCHLIST_SYMBOLS} symbols at once."
+        )));
+    }
+    let mut symbols: Vec<String> = Vec::with_capacity(list.len());
+    for item in list {
+        let raw = item.as_str().map(str::trim).unwrap_or("");
+        let symbol = canonical_symbol(raw).ok_or_else(|| {
+            ApiError::bad_request(format!(
+                "'{}' isn't a symbol the app can show: write it like zerodha:NSE:RELIANCE or binance:BTCUSDT.",
+                raw.chars().take(MAX_SYMBOL_CHARS).collect::<String>()
+            ))
+        })?;
+        if !symbols.contains(&symbol) {
+            symbols.push(symbol);
+        }
+    }
+    Ok(WatchlistUpdate {
+        name: name.to_string(),
+        symbols,
+        replace,
+    })
+}
+
+fn canonical_symbol(raw: &str) -> Option<String> {
+    if raw.is_empty() || raw.len() > MAX_SYMBOL_CHARS || raw.chars().any(char::is_control) {
+        return None;
+    }
+    let (provider, ticker) = raw.split_once(':')?;
+    let provider = provider.to_ascii_lowercase();
+    let ticker = ticker.trim();
+    if !WATCHLIST_PROVIDERS.contains(&provider.as_str()) || ticker.is_empty() {
+        return None;
+    }
+    if provider == "zerodha" || provider == "dhan" {
+        let ticker = ticker.to_ascii_uppercase();
+        let ticker = if ticker.contains(':') {
+            ticker
+        } else {
+            format!("NSE:{ticker}")
+        };
+        return Some(format!("{provider}:{ticker}"));
+    }
+    Some(format!("{provider}:{ticker}"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -220,6 +301,10 @@ fn post_result(ctx: &Ctx, req: &Req) -> Result<Vec<u8>, ApiError> {
         if !png.starts_with(PNG_BASE64_PREFIX) {
             return Err(ApiError::bad_request("A figure must carry a base64 PNG in data.png."));
         }
+    }
+    if post.kind == "watchlist" {
+        let done = ctx.backend.set_watchlist(watchlist_update(&post.data)?)?;
+        return json(&serde_json::json!({ "ok": true, "watchlist": done }));
     }
     ctx.backend.publish(post)?;
     json(&serde_json::json!({ "ok": true }))
@@ -406,6 +491,8 @@ pub mod testing {
         pub no_watchlists: Mutex<bool>,
         /// Every result a script posted, in order.
         pub results: Mutex<Vec<ResultPost>>,
+        /// Every watchlist a script asked for, in order.
+        pub watchlist_updates: Mutex<Vec<WatchlistUpdate>>,
         /// How many daily bars a request gets back: one, unless a test wants a history to work on.
         pub bar_count: Mutex<usize>,
     }
@@ -531,6 +618,18 @@ pub mod testing {
         fn publish(&self, post: ResultPost) -> Result<(), ApiError> {
             self.results.lock().unwrap().push(post);
             Ok(())
+        }
+
+        fn set_watchlist(&self, update: WatchlistUpdate) -> Result<WatchlistSync, ApiError> {
+            let done = WatchlistSync {
+                name: update.name.clone(),
+                created: true,
+                added: update.symbols.len(),
+                removed: 0,
+                total: update.symbols.len(),
+            };
+            self.watchlist_updates.lock().unwrap().push(update);
+            Ok(done)
         }
     }
 }
@@ -795,6 +894,77 @@ mod tests {
         long["title"] = "t".repeat(200).into();
         assert_eq!(ask(&ctx, &post(&long)).await.0, 200);
         assert_eq!(backend.results.lock().unwrap().len(), 1, "only the last was valid");
+    }
+
+    fn watchlist(data: Value) -> Value {
+        serde_json::json!({ "runId": "run-1", "kind": "watchlist", "title": "x", "data": data })
+    }
+
+    #[tokio::test]
+    async fn a_script_can_create_or_refresh_a_watchlist_and_is_told_what_happened() {
+        let (ctx, backend) = ctx();
+        let (status, resp) = ask(
+            &ctx,
+            &post(&watchlist(serde_json::json!({
+                "name": "  Momentum ",
+                "symbols": ["zerodha:NSE:TCS", "zerodha:infy", "DHAN:BSE:RELIANCE", "binance:BTCUSDT", "zerodha:NSE:TCS"],
+            }))),
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert_eq!(resp["watchlist"]["name"], "Momentum");
+        assert_eq!(resp["watchlist"]["total"], 4);
+        let updates = backend.watchlist_updates.lock().unwrap();
+        assert_eq!(
+            updates[0],
+            WatchlistUpdate {
+                name: "Momentum".into(),
+                // A bare broker ticker is on NSE; repeats go; the script's order stays.
+                symbols: vec![
+                    "zerodha:NSE:TCS".into(),
+                    "zerodha:NSE:INFY".into(),
+                    "dhan:BSE:RELIANCE".into(),
+                    "binance:BTCUSDT".into()
+                ],
+                replace: true,
+            }
+        );
+        // It isn't shown as a result as well.
+        assert!(backend.results.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_watchlist_from_a_script_is_checked_before_anything_is_written() {
+        let (ctx, backend) = ctx();
+        let many: Vec<String> = (0..2001).map(|i| format!("zerodha:NSE:S{i}")).collect();
+        for data in [
+            serde_json::json!({ "symbols": [] }),
+            serde_json::json!({ "name": "", "symbols": [] }),
+            serde_json::json!({ "name": "x".repeat(101), "symbols": [] }),
+            serde_json::json!({ "name": "A\nB", "symbols": [] }),
+            serde_json::json!({ "name": "L", "symbols": "zerodha:NSE:TCS" }),
+            serde_json::json!({ "name": "L", "symbols": ["TCS"] }),
+            serde_json::json!({ "name": "L", "symbols": ["yahoo:AAPL"] }),
+            serde_json::json!({ "name": "L", "symbols": ["zerodha:"] }),
+            serde_json::json!({ "name": "L", "symbols": [7] }),
+            serde_json::json!({ "name": "L", "symbols": [format!("zerodha:NSE:{}", "A".repeat(80))] }),
+            serde_json::json!({ "name": "L", "symbols": many }),
+            serde_json::json!({ "name": "L", "symbols": [], "mode": "merge" }),
+        ] {
+            let (status, _) = ask(&ctx, &post(&watchlist(data.clone()))).await;
+            assert_eq!(status, 400, "{data}");
+        }
+        assert!(backend.watchlist_updates.lock().unwrap().is_empty());
+        // Appending, and an empty list (a screen that found nothing today), are both fine.
+        let (status, _) = ask(
+            &ctx,
+            &post(&watchlist(
+                serde_json::json!({ "name": "L", "symbols": [], "mode": "append" }),
+            )),
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert!(!backend.watchlist_updates.lock().unwrap()[0].replace);
     }
 
     #[tokio::test]

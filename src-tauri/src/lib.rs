@@ -11,7 +11,10 @@ mod providers;
 mod pyapi;
 mod python;
 mod python_commands;
+mod schedule_commands;
+mod scheduler;
 mod schema;
+mod screener_commands;
 mod secrets;
 mod store;
 mod study_commands;
@@ -129,6 +132,9 @@ pub fn run() {
                 }),
             )));
 
+            // Scripts the user scheduled. Only ever started here, once.
+            scheduler::engine::start(app.handle().clone());
+
             // Keep the brokers' instrument lists fresh in the background.
             let refresh_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -155,11 +161,16 @@ pub fn run() {
             commands::list_watchlists,
             commands::get_watchlist,
             commands::create_watchlist,
+            commands::create_indices_watchlist,
+            commands::list_watchlist_members,
+            commands::get_symbol_drawings,
+            commands::save_symbol_drawings,
             commands::rename_watchlist,
             commands::delete_watchlist,
             commands::add_watchlist_items,
             commands::remove_watchlist_items,
-            commands::set_watchlist_item_flag,
+            commands::set_symbol_flag,
+            commands::list_flag_lists,
             commands::set_watchlist_order,
             commands::add_watchlist_section,
             commands::rename_watchlist_section,
@@ -228,6 +239,18 @@ pub fn run() {
             study_commands::set_notebook_item_note,
             study_commands::set_notebook_order,
             study_commands::export_study_file,
+            screener_commands::list_screeners,
+            screener_commands::save_screener,
+            screener_commands::delete_screener,
+            screener_commands::save_screener_result,
+            screener_commands::get_screener_result,
+            screener_commands::screen_run,
+            schedule_commands::list_schedules,
+            schedule_commands::save_schedule,
+            schedule_commands::delete_schedule,
+            schedule_commands::list_schedule_runs,
+            schedule_commands::run_schedule_now,
+            schedule_commands::stop_schedule_run,
             ai_commands::list_ai_providers,
             ai_commands::ai_set_key,
             ai_commands::ai_delete_key,

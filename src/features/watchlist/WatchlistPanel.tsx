@@ -18,11 +18,13 @@ import {
   ExternalLink,
   FileUp,
   Flag,
+  LayoutList,
   ListPlus,
   MoreHorizontal,
   Pencil,
   Plus,
   SeparatorHorizontal,
+  Star,
   Trash2,
   X,
 } from 'lucide-react';
@@ -41,15 +43,17 @@ import {
   deleteWatchlist,
   deleteWatchlistSection,
   errorMessage,
+  flagOfList,
   getPreference,
   getSymbolNames,
   getWatchlist,
+  listFlagLists,
   listWatchlists,
   removeWatchlistItems,
   renameWatchlist,
   renameWatchlistSection,
   setPreference,
-  setWatchlistItemFlag,
+  setSymbolFlag,
   setWatchlistOrder,
   setWatchlistSectionCollapsed,
   WATCHLIST_FLAGS,
@@ -78,6 +82,9 @@ import {
 import { useProviderState } from '../providers/useProviderState';
 import { SymbolSearchBox, type PickedSymbol } from '../search/SymbolSearchBox';
 import { useRowDrag } from './useRowDrag';
+import { MAX_QUICK_LISTS } from '../../lib/quickLists';
+import { loadQuickLists, toggleQuickListPin, useQuickLists } from './quickLists';
+import { WatchlistBrowserDialog } from './WatchlistBrowserDialog';
 import { subscribeWatchlistsChanged } from './watchlistBus';
 
 interface Props {
@@ -98,6 +105,8 @@ type FormMode = 'create' | 'rename' | null;
 /** Regaining window focus refreshes prices, but not if they were fetched this recently. */
 const FOCUS_REFRESH_MIN_GAP_MS = 10_000;
 const PREF_ACTIVE = 'watchlist_active';
+/** The flag colour a plain click on a row's flag applies: the last one chosen. */
+const PREF_LAST_FLAG = 'watchlist_last_flag';
 /** Rows rendered beyond the visible ones, so a short scroll never shows a gap. */
 const OVERSCAN_ROWS = 8;
 /** A row's height until the first one is measured. */
@@ -141,6 +150,10 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
   const [error, setError] = useState<string | null>(null);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [browseOpen, setBrowseOpen] = useState(false);
+  /** The row whose flag button was pressed: its colour choices open under the button. */
+  const [flagPicker, setFlagPicker] = useState<{ x: number; y: number; key: string } | null>(null);
+  const pins = useQuickLists();
   const [formMode, setFormMode] = useState<FormMode>(null);
   const [formName, setFormName] = useState('');
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
@@ -170,6 +183,29 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
 
   const fail = useCallback((err: unknown) => setError(errorMessage(err)), []);
 
+  useEffect(() => {
+    void loadQuickLists();
+  }, []);
+
+  /** The six colour lists (every symbol flagged with a colour), for the list selector. */
+  const [flagLists, setFlagLists] = useState<WatchlistSummary[]>([]);
+  const refreshFlagLists = useCallback(() => {
+    listFlagLists().then(setFlagLists).catch(() => {});
+  }, []);
+  /** The colour one click on an unflagged row's flag applies: the last one chosen. */
+  const [lastFlag, setLastFlag] = useState<WatchlistFlag>('red');
+  useEffect(() => {
+    getPreference(PREF_LAST_FLAG)
+      .then((v) => {
+        if (v && (WATCHLIST_FLAGS as readonly string[]).includes(v)) setLastFlag(v as WatchlistFlag);
+      })
+      .catch(() => {});
+  }, []);
+  const rememberFlag = useCallback((flag: WatchlistFlag) => {
+    setLastFlag(flag);
+    setPreference(PREF_LAST_FLAG, flag).catch(() => {});
+  }, []);
+
   const selectWatchlist = useCallback(
     async (id: number) => {
       setActiveId(id);
@@ -191,9 +227,10 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
   useEffect(() => {
     (async () => {
       try {
-        const [lists, savedActive] = await Promise.all([listWatchlists(), getPreference(PREF_ACTIVE)]);
+        const [lists, colours, savedActive] = await Promise.all([listWatchlists(), listFlagLists(), getPreference(PREF_ACTIVE)]);
         setWatchlists(lists);
-        const preferred = lists.find((l) => String(l.id) === savedActive) ?? lists[0];
+        setFlagLists(colours);
+        const preferred = [...lists, ...colours].find((l) => String(l.id) === savedActive) ?? lists[0];
         if (preferred) await selectWatchlist(preferred.id);
       } catch (err) {
         fail(err);
@@ -207,6 +244,7 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
   useEffect(
     () =>
       subscribeWatchlistsChanged(() => {
+        refreshFlagLists();
         listWatchlists()
           .then(async (lists) => {
             setWatchlists(lists);
@@ -215,7 +253,7 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
           })
           .catch(fail);
       }),
-    [activeId, fail],
+    [activeId, fail, refreshFlagLists],
   );
 
   // The list as rows: symbols and section headings in one sequence, and — for what is on screen — with
@@ -404,7 +442,29 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
     }
   }
 
+  /** Reads the lists again after the browse dialog changed them, staying on the current one if it
+   *  still exists. */
+  async function refreshLists() {
+    const lists = await listWatchlists();
+    setWatchlists(lists);
+    if (activeId !== null && lists.some((l) => l.id === activeId)) setDetail(await getWatchlist(activeId));
+    else if (lists[0]) await selectWatchlist(lists[0].id);
+    else {
+      setActiveId(null);
+      setDetail(null);
+    }
+  }
+
+  function togglePin(id: number) {
+    if (!toggleQuickListPin(id)) toast(`Up to ${MAX_QUICK_LISTS} watchlists can have quick access. Unpin one first.`, 'info');
+  }
+
   function upsertSummary(d: WatchlistDetail) {
+    // A colour's list isn't one of the watchlists; its count comes with the colour lists.
+    if (flagOfList(d.id)) {
+      refreshFlagLists();
+      return;
+    }
     setWatchlists((prev) => {
       const summary = { id: d.id, name: d.name, createdAt: d.createdAt, itemCount: d.items.length };
       return prev.some((w) => w.id === d.id) ? prev.map((w) => (w.id === d.id ? summary : w)) : [...prev, summary];
@@ -441,6 +501,7 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
     if (!(await confirmDelete(`Delete the watchlist "${detail.name}" and all its symbols?`))) return;
     try {
       await deleteWatchlist(detail.id);
+      if (pins.includes(detail.id)) toggleQuickListPin(detail.id);
       const remaining = watchlists.filter((w) => w.id !== detail.id);
       setWatchlists(remaining);
       if (remaining[0]) await selectWatchlist(remaining[0].id);
@@ -489,10 +550,19 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
     }
   }
 
+  /** Flags a symbol — on every list, since a flag is the symbol's — and makes a chosen colour the one
+   *  a plain click applies next time. On a colour's list, a symbol given another colour (or none) leaves it. */
   function setFlag(symbol: string, flag: WatchlistFlag | null) {
     if (!detail) return;
-    setDetail({ ...detail, items: detail.items.map((i) => (i.symbol === symbol ? { ...i, flag } : i)) });
-    void saveOrReload(() => setWatchlistItemFlag(detail.id, symbol, flag));
+    if (flag) rememberFlag(flag);
+    const colour = flagOfList(detail.id);
+    const items =
+      colour && flag !== colour ? detail.items.filter((i) => i.symbol !== symbol) : detail.items.map((i) => (i.symbol === symbol ? { ...i, flag } : i));
+    setDetail({ ...detail, items });
+    void saveOrReload(async () => {
+      await setSymbolFlag(symbol, flag);
+      refreshFlagLists();
+    });
   }
 
   /** Puts the rows in a new order — on screen at once, then in the database. */
@@ -552,7 +622,9 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
     void saveOrReload(() => deleteWatchlistSection(id));
   }
 
-  const canReorder = detail != null && sortKey === null;
+  /** The colour, when the list showing is a colour's list: newest flag first, no sections, no reordering. */
+  const colourList = flagOfList(detail?.id);
+  const canReorder = detail != null && sortKey === null && colourList === null;
   const { drag, onRowPointerDown, consumeClick } = useRowDrag({
     listRef,
     rowHeight,
@@ -570,8 +642,8 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
   const draggedKey = drag ? rowKey(drag.row) : null;
 
   // Rows are memoised, so they get callbacks that never change identity.
-  const latest = useRef({ onSelectSymbol, handleRemove, rowByKey, toggleSection, finishRename });
-  latest.current = { onSelectSymbol, handleRemove, rowByKey, toggleSection, finishRename };
+  const latest = useRef({ onSelectSymbol, handleRemove, rowByKey, toggleSection, finishRename, setFlag, lastFlag });
+  latest.current = { onSelectSymbol, handleRemove, rowByKey, toggleSection, finishRename, setFlag, lastFlag };
   const selectRow = useCallback(
     (symbol: string) => {
       if (!consumeClick()) latest.current.onSelectSymbol(symbol);
@@ -597,6 +669,22 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
     e.preventDefault();
     setMenu({ x: e.clientX, y: e.clientY, key });
   }, []);
+  const openFlagPicker = useCallback((e: ReactMouseEvent, key: string) => {
+    e.preventDefault();
+    const box = e.currentTarget.getBoundingClientRect();
+    setFlagPicker({ x: box.left, y: box.bottom + 4, key });
+  }, []);
+  /** A click on a row's flag: an unflagged symbol gets the last colour used, at once; a flagged one opens
+   *  the colour choices (to change or remove it). A right-click always opens them (`openFlagPicker`). */
+  const clickFlag = useCallback(
+    (e: ReactMouseEvent, key: string) => {
+      const row = latest.current.rowByKey.get(key);
+      if (row?.kind !== 'item') return;
+      if (row.flag) openFlagPicker(e, key);
+      else latest.current.setFlag(row.symbol, latest.current.lastFlag);
+    },
+    [openFlagPicker],
+  );
 
   async function handleFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.currentTarget.files?.[0];
@@ -633,6 +721,8 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
 
   const sortMark = (key: SortKey) => (sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
   const menuRow = menu ? rowByKey.get(menu.key) : undefined;
+  const pickedRow = flagPicker ? rowByKey.get(flagPicker.key) : undefined;
+  const flagRow = pickedRow?.kind === 'item' ? pickedRow : undefined;
   const closeMenu = () => setMenu(null);
   // The row a menu was opened on is gone (removed from elsewhere, another list opened): so is the menu.
   useEffect(() => {
@@ -649,6 +739,7 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
       <div className="watchlist-header">
         <div className="menu-anchor" ref={switcherRef}>
           <button type="button" className="menu-trigger" onClick={() => setSwitcherOpen((v) => !v)} aria-haspopup="menu" aria-expanded={switcherOpen}>
+            {colourList && <Flag size={13} fill="currentColor" style={{ color: `var(--flag-${colourList})` }} aria-hidden="true" />}
             <span>{detail?.name ?? 'Watchlists'}</span>
             <ChevronDown size={14} />
           </button>
@@ -661,11 +752,40 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
                 </button>
               ))}
               {watchlists.length === 0 && <div className="menu-empty small">No watchlists yet.</div>}
+              {/* A list per colour: every symbol flagged with it, on any watchlist. */}
+              <div className="menu-divider" />
+              <div className="menu-heading">Flagged</div>
+              {flagLists.map((w) => {
+                const colour = flagOfList(w.id);
+                return (
+                  <button key={w.id} type="button" role="menuitem" className={`menu-item${w.id === activeId ? ' active' : ''}`} onClick={() => selectWatchlist(w.id)}>
+                    <Flag size={13} fill="currentColor" style={{ color: `var(--flag-${colour})` }} aria-hidden="true" />
+                    <span className="grow">{w.name}</span>
+                    <span className="muted small">{w.itemCount}</span>
+                  </button>
+                );
+              })}
+              <div className="menu-divider" />
+              <button
+                type="button"
+                role="menuitem"
+                className="menu-item"
+                onClick={() => {
+                  setSwitcherOpen(false);
+                  setBrowseOpen(true);
+                }}
+              >
+                <LayoutList size={14} />
+                <span className="grow">Browse all watchlists…</span>
+              </button>
             </div>
           )}
         </div>
 
         <div className="watchlist-header-actions">
+          <button type="button" className="icon-button" aria-label="Browse all watchlists" title="All watchlists" onClick={() => setBrowseOpen(true)}>
+            <LayoutList size={15} />
+          </button>
           <button
             type="button"
             className="icon-button"
@@ -684,19 +804,23 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
             </button>
             {moreOpen && (
               <div className="menu" role="menu">
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="menu-item"
-                  onClick={() => {
-                    setMoreOpen(false);
-                    fileInputRef.current?.click();
-                  }}
-                >
-                  <FileUp size={14} />
-                  <span className="grow">Import from file…</span>
-                </button>
-                {detail && (
+                {/* A colour's list is simply what is flagged with it: nothing here applies to it. */}
+                {colourList && <div className="menu-empty small">Flag or unflag symbols to change this list.</div>}
+                {!colourList && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => {
+                      setMoreOpen(false);
+                      fileInputRef.current?.click();
+                    }}
+                  >
+                    <FileUp size={14} />
+                    <span className="grow">Import from file…</span>
+                  </button>
+                )}
+                {detail && !colourList && (
                   <>
                     <button
                       type="button"
@@ -709,6 +833,18 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
                     >
                       <SeparatorHorizontal size={14} />
                       <span className="grow">Add section</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="menu-item"
+                      onClick={() => {
+                        setMoreOpen(false);
+                        togglePin(detail.id);
+                      }}
+                    >
+                      <Star size={14} />
+                      <span className="grow">{pins.includes(detail.id) ? 'Remove from quick access' : 'Add to quick access'}</span>
                     </button>
                     <button
                       type="button"
@@ -736,6 +872,29 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
           <input ref={fileInputRef} type="file" accept=".csv,.txt" style={{ display: 'none' }} onChange={handleFilePicked} />
         </div>
       </div>
+
+      {pins.length > 0 && (
+        <div className="watchlist-quick" role="tablist" aria-label="Quick-access watchlists">
+          {pins.map((id) => {
+            const list = watchlists.find((w) => w.id === id);
+            return (
+              list && (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={id === activeId}
+                  className={`watchlist-quick-tab${id === activeId ? ' active' : ''}`}
+                  title={`${list.name} (${list.itemCount})`}
+                  onClick={() => void selectWatchlist(id)}
+                >
+                  {list.name}
+                </button>
+              )
+            );
+          })}
+        </div>
+      )}
 
       {formMode && (
         <form className="watchlist-toolbar" onSubmit={submitForm}>
@@ -833,6 +992,9 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
                       onSelect={selectRow}
                       onRemove={removeRow}
                       onMenu={openMenu}
+                      defaultFlag={lastFlag}
+                      onFlagClick={clickFlag}
+                      onFlagMenu={openFlagPicker}
                       onPress={pressRow}
                     />
                   );
@@ -842,6 +1004,32 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
             )}
           </div>
         </>
+      )}
+
+      {flagPicker && flagRow && (
+        <ContextMenu x={flagPicker.x} y={flagPicker.y} label={`Flag ${displayTicker(flagRow.symbol)}`} onClose={() => setFlagPicker(null)}>
+          <FlagSwatches
+            current={flagRow.flag}
+            onFlag={(flag) => {
+              setFlagPicker(null);
+              setFlag(flagRow.symbol, flag);
+            }}
+          />
+          {flagRow.flag && (
+            <button
+              type="button"
+              role="menuitem"
+              className="menu-item"
+              onClick={() => {
+                setFlagPicker(null);
+                setFlag(flagRow.symbol, null);
+              }}
+            >
+              <X size={14} />
+              <span className="grow">Remove flag</span>
+            </button>
+          )}
+        </ContextMenu>
       )}
 
       {menu && menuRow && (
@@ -869,6 +1057,19 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
             />
           )}
         </ContextMenu>
+      )}
+      {browseOpen && (
+        <WatchlistBrowserDialog
+          lists={watchlists}
+          activeId={activeId}
+          onOpen={(id) => {
+            setBrowseOpen(false);
+            void refreshLists().then(() => selectWatchlist(id));
+          }}
+          onChanged={() => refreshLists().catch(fail)}
+          onClose={() => setBrowseOpen(false)}
+          say={toast}
+        />
       )}
     </aside>
   );
@@ -910,12 +1111,18 @@ interface RowProps {
   onSelect: (symbol: string) => void;
   onRemove: (symbol: string) => void;
   onMenu: (e: ReactMouseEvent, key: string) => void;
+  /** The colour a click on the flag of an unflagged row applies. */
+  defaultFlag: WatchlistFlag;
+  /** A click on the flag: the default colour if unflagged, the colour choices if flagged. */
+  onFlagClick: (e: ReactMouseEvent, key: string) => void;
+  /** A right-click on the flag: the colour choices. */
+  onFlagMenu: (e: ReactMouseEvent, key: string) => void;
   onPress: (e: ReactPointerEvent, key: string) => void;
 }
 
 /** One watchlist row: the ticker (with its colour flag), the company name beneath it, price and change.
  *  Memoised, so a refresh re-renders only the rows whose price moved. */
-const WatchlistRow = memo(function WatchlistRow({ rowKey: key, symbol, name, flag, quote, selected, dragging, dropEdge, onSelect, onRemove, onMenu, onPress }: RowProps) {
+const WatchlistRow = memo(function WatchlistRow({ rowKey: key, symbol, name, flag, quote, selected, dragging, dropEdge, onSelect, onRemove, onMenu, defaultFlag, onFlagClick, onFlagMenu, onPress }: RowProps) {
   const change = quote?.changePercent ?? null;
   const ticker = displayTicker(symbol);
   const flash = useTickFlash(quote?.price);
@@ -932,7 +1139,27 @@ const WatchlistRow = memo(function WatchlistRow({ rowKey: key, symbol, name, fla
     >
       <div className="watchlist-symbol">
         <span className="ticker">
-          {flag && <Flag size={11} fill="currentColor" className="watchlist-flag" style={{ color: `var(--flag-${flag})` }} aria-label={`${flag} flag`} />}
+          {/* Always there, so a flag is one click away: coloured when set, an outline (in the colour a
+              click would give) on hover when not. A right-click offers every colour. */}
+          <button
+            type="button"
+            className={`watchlist-flag${flag ? ' on' : ''}`}
+            style={{ color: `var(--flag-${flag ?? defaultFlag})` }}
+            aria-label={flag ? `${ticker}: ${flag} flag — change or remove it` : `Flag ${ticker} ${defaultFlag}`}
+            title={flag ? 'Change or remove the flag (right-click for colours)' : `Flag ${defaultFlag} (right-click for other colours)`}
+            onPointerDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onFlagClick(e, key);
+            }}
+            onContextMenu={(e) => {
+              e.stopPropagation();
+              onFlagMenu(e, key);
+            }}
+          >
+            <Flag size={11} fill={flag ? 'currentColor' : 'none'} />
+          </button>
           <span className="ticker-text">{ticker}</span>
         </span>
         <span className="sub">{name ?? NO_NAME}</span>
@@ -1027,6 +1254,29 @@ function SectionNameInput({ initial, onDone }: { initial: string; onDone: (typed
   );
 }
 
+/** The flag colours as swatches; the one already set removes the flag. Shared by the row's flag
+ *  button and its right-click menu. */
+function FlagSwatches({ current, onFlag }: { current: WatchlistFlag | null; onFlag: (flag: WatchlistFlag | null) => void }) {
+  return (
+    <div className="menu-flags" role="group" aria-label="Flag">
+      <span className="menu-flags-label">Flag</span>
+      {WATCHLIST_FLAGS.map((flag) => (
+        <button
+          key={flag}
+          type="button"
+          role="menuitemradio"
+          aria-checked={current === flag}
+          aria-label={flag}
+          title={current === flag ? `Remove the ${flag} flag` : `Flag ${flag}`}
+          className={`flag-swatch${current === flag ? ' on' : ''}`}
+          style={{ background: `var(--flag-${flag})` }}
+          onClick={() => onFlag(current === flag ? null : flag)}
+        />
+      ))}
+    </div>
+  );
+}
+
 interface ItemMenuProps {
   row: ItemRow;
   canReorder: boolean;
@@ -1051,22 +1301,7 @@ function ItemMenu({ row, canReorder, isFirst, onOpenInNewTab, onAddAlert, onFlag
         <Bell size={14} />
         <span className="grow">Add alert…</span>
       </button>
-      <div className="menu-flags" role="group" aria-label="Flag">
-        <span className="menu-flags-label">Flag</span>
-        {WATCHLIST_FLAGS.map((flag) => (
-          <button
-            key={flag}
-            type="button"
-            role="menuitemradio"
-            aria-checked={row.flag === flag}
-            aria-label={flag}
-            title={row.flag === flag ? `Remove the ${flag} flag` : `Flag ${flag}`}
-            className={`flag-swatch${row.flag === flag ? ' on' : ''}`}
-            style={{ background: `var(--flag-${flag})` }}
-            onClick={() => onFlag(row.flag === flag ? null : flag)}
-          />
-        ))}
-      </div>
+      <FlagSwatches current={row.flag} onFlag={onFlag} />
       {canReorder && (
         <>
           {!isFirst && (

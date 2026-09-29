@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CirclePlay, FilePlus2, FolderOpen, Save, Settings2, Square, Trash2 } from 'lucide-react';
+import { CalendarClock, CirclePlay, FilePlus2, FolderOpen, Save, Settings2, Sparkles, Square, Trash2 } from 'lucide-react';
 import { useDismiss } from '../../components/useDismiss';
 import { confirmDelete, confirmDiscard } from '../../lib/dialogs';
 import {
@@ -27,10 +27,12 @@ import { parseStudyResult } from '../../studies/result';
 import { storeStudyRun } from '../studies/storeRun';
 import { CodeEditor } from '../pine/CodeEditor';
 import { AddToWatchlistDialog } from './AddToWatchlistDialog';
+import { AiPromptDialog } from './AiPromptDialog';
 import { PythonConsole } from './PythonConsole';
 import { pythonExtensions } from './pythonLanguage';
 import { PythonSettings } from './PythonSettings';
 import { ResultsPane } from './ResultsPane';
+import { SchedulesPane } from './SchedulesPane';
 
 const PREF_LAST_SCRIPT = 'python_last_script';
 /** Output arrives a line at a time; it is shown a batch at a time, so a script that prints
@@ -67,10 +69,13 @@ export function PythonPanel({ visible, onOpenSymbol }: Props) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [tab, setTab] = useState<'console' | 'results'>('console');
+  const [tab, setTab] = useState<'console' | 'results' | 'schedules'>('console');
+  /** Bumped to open a new schedule for the open script. */
+  const [scheduleRequest, setScheduleRequest] = useState(0);
   const [results, setResults] = useState<PythonResult[]>([]);
   const [selectedResult, setSelectedResult] = useState<number | null>(null);
   const [adding, setAdding] = useState<string[] | null>(null);
+  const [aiPromptOpen, setAiPromptOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
   useDismiss(settingsRef, settingsOpen, () => setSettingsOpen(false));
   const nextResultId = useRef(1);
@@ -395,6 +400,15 @@ export function PythonPanel({ visible, onOpenSymbol }: Props) {
 
           <div className="pine-toolbar-spacer" />
 
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="AI prompt"
+            title="Copy a prompt describing this app's Python API, to paste into an outside AI before asking it for a script"
+            onClick={() => setAiPromptOpen(true)}
+          >
+            <Sparkles size={15} />
+          </button>
           <div className="menu-anchor" ref={settingsRef}>
             <button
               type="button"
@@ -408,6 +422,19 @@ export function PythonPanel({ visible, onOpenSymbol }: Props) {
             </button>
             {settingsOpen && <PythonSettings env={env} onEnvChanged={setEnv} say={say} />}
           </div>
+          <button
+            type="button"
+            className="btn pine-btn"
+            onClick={() => {
+              setTab('schedules');
+              setScheduleRequest((n) => n + 1);
+            }}
+            disabled={!current}
+            title="Run this script by itself at set times"
+          >
+            <CalendarClock size={14} />
+            Schedule
+          </button>
           <button type="button" className="btn pine-btn" onClick={() => void save()} disabled={!dirty} title="Save (Ctrl+S)">
             <Save size={14} />
             Save
@@ -488,6 +515,15 @@ export function PythonPanel({ visible, onOpenSymbol }: Props) {
               Results
               {results.length > 0 && <span className="pine-tab-count">{results.length}</span>}
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'schedules'}
+              className={`pine-tab${tab === 'schedules' ? ' active' : ''}`}
+              onClick={() => setTab('schedules')}
+            >
+              Schedules
+            </button>
           </div>
           <div className="python-output-body">
             <div className="python-output-pane" hidden={tab !== 'console'}>
@@ -510,11 +546,15 @@ export function PythonPanel({ visible, onOpenSymbol }: Props) {
                 onAddToWatchlist={setAdding}
               />
             </div>
+            <div className="python-output-pane" hidden={tab !== 'schedules'}>
+              <SchedulesPane scripts={scripts.map((s) => s.name)} currentScript={current} newRequest={scheduleRequest} />
+            </div>
           </div>
         </div>
       </div>
 
       {adding && <AddToWatchlistDialog symbols={adding} onClose={() => setAdding(null)} say={say} />}
+      {aiPromptOpen && <AiPromptDialog onClose={() => setAiPromptOpen(false)} />}
     </div>
   );
 }

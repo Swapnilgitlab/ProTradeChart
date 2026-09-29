@@ -1,0 +1,86 @@
+/* The Screener tab. It wears the Studies tab's classes (`studies-panel`, `study-*`: side list, toolbar,
+   sections, progress, tables); this adds only what is its own. Every colour is a theme token. */
+
+/* Filters on the left, the screen's name, universe and readiness on the right. */
+.screener-builder {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  padding-bottom: 8px;
+}
+
+.screener-columns {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.screener-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+  padding: 0 2px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-base);
+  font-size: 12px;
+}
+.screener-chip.invalid {
+  border-color: var(--loss);
+  color: var(--loss);
+}
+.screener-chip .icon-button {
+  width: 18px;
+  height: 18px;
+}
+.screener-add-column {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.screener-add-column .python-input {
+  width: 220px;
+}
+
+.screener-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.screener-checks li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.screener-checks svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.screener-results-wrap {
+  padding: 0 16px 24px;
+}
+.screener-warnings {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+.screener-empty {
+  padding: 8px 0;
+}
+/* The table is the page: let it grow, and keep its header in view while it scrolls. */
+.screener-table-scroll {
+  max-height: calc(100vh - 180px);
+}
+.screener-symbol {
+  font-weight: 600;
+}
+.screener-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+}

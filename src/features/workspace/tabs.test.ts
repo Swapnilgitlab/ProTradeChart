@@ -4,6 +4,7 @@ import {
   activeChartTab,
   canCloseTab,
   chartTabs,
+  homeTab,
   pythonTab,
   studiesTab,
   workspaceTabs,
@@ -15,6 +16,7 @@ import {
 const chart = (id: string, symbol = `zerodha:NSE:${id.toUpperCase()}`): Tab => ({ kind: 'chart', id, symbol });
 const python = (id = 'py'): Tab => ({ kind: 'python', id });
 const studies = (id = 'st'): Tab => ({ kind: 'studies', id });
+const home = (id = 'home'): Tab => ({ kind: 'home', id });
 
 describe('picking the tabs apart', () => {
   it('finds the charts and the python tab', () => {
@@ -22,6 +24,13 @@ describe('picking the tabs apart', () => {
     expect(chartTabs(tabs).map((t) => t.id)).toEqual(['a', 'b']);
     expect(pythonTab(tabs)?.id).toBe('py');
     expect(pythonTab([chart('a')])).toBeUndefined();
+  });
+
+  it('finds the home tab, another workspace like Python', () => {
+    const tabs = [chart('a'), home()];
+    expect(homeTab(tabs)?.id).toBe('home');
+    expect(workspaceTabs(tabs).map((t) => t.id)).toEqual(['home']);
+    expect(canCloseTab(tabs, 'home')).toBe(true);
   });
 });
 

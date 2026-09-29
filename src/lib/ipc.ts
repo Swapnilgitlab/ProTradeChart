@@ -170,6 +170,16 @@ export const listWatchlists = () => invoke<WatchlistSummary[]>('list_watchlists'
 
 export const getWatchlist = (id: number) => invoke<WatchlistDetail>('get_watchlist', { id });
 
+/** Makes the Indices watchlist (broad market, sectors, themes) from a broker's instrument list. */
+export const createIndicesWatchlist = (provider: 'zerodha' | 'dhan') => invoke<WatchlistDetail>('create_indices_watchlist', { provider });
+
+/** A symbol's drawings (Vela's document, as JSON), or null when none were ever stored for it. */
+export const getSymbolDrawings = (symbol: string) => invoke<string | null>('get_symbol_drawings', { symbol });
+
+/** Stores a symbol's drawings; every window hears `symbol-drawings-changed` with `source`. */
+export const saveSymbolDrawings = (symbol: string, docJson: string, source: string) =>
+  invoke<void>('save_symbol_drawings', { symbol, docJson, source });
+
 export const createWatchlist = (name: string) => invoke<WatchlistDetail>('create_watchlist', { name });
 
 export const renameWatchlist = (id: number, name: string) => invoke<void>('rename_watchlist', { id, name });
@@ -179,11 +189,23 @@ export const deleteWatchlist = (id: number) => invoke<void>('delete_watchlist', 
 export const addWatchlistItems = (watchlistId: number, items: NewWatchlistItem[]) =>
   invoke<WatchlistDetail>('add_watchlist_items', { watchlistId, items });
 
+/** Which symbols every list holds, as `[watchlistId, symbol]` pairs. */
+export const listWatchlistMembers = () => invoke<[number, string][]>('list_watchlist_members');
+
 export const removeWatchlistItems = (watchlistId: number, symbols: string[]) =>
   invoke<void>('remove_watchlist_items', { watchlistId, symbols });
 
-export const setWatchlistItemFlag = (watchlistId: number, symbol: string, flag: WatchlistFlag | null) =>
-  invoke<void>('set_watchlist_item_flag', { watchlistId, symbol, flag });
+/** Flags a symbol with a colour — the same on every list it is on — or clears its flag. */
+export const setSymbolFlag = (symbol: string, flag: WatchlistFlag | null) => invoke<void>('set_symbol_flag', { symbol, flag });
+
+/** The six colour lists (every symbol flagged with that colour), with their counts. Their ids are negative. */
+export const listFlagLists = () => invoke<WatchlistSummary[]>('list_flag_lists');
+
+/** The colour whose list `id` is, or null for a real watchlist: red is -1 … purple -6 (`watchlists::flag_list_id`). */
+export function flagOfList(id: number | null | undefined): WatchlistFlag | null {
+  if (id == null || id >= 0) return null;
+  return WATCHLIST_FLAGS[-id - 1] ?? null;
+}
 
 /** Puts the rows in this order and returns the list as it now stands. Rows left out keep their order after the
  *  ones named, so a list that changed under the caller isn't scrambled. */
@@ -585,6 +607,84 @@ export interface StudyEstimate {
 
 /** What a Study's data will cost to load. Reads the database only; asks no broker. */
 export const studyEstimate = (request: StudyEstimateRequest) => invoke<StudyEstimate>('study_estimate', { request });
+
+// ---- Scheduled scripts --------------------------------------------------------------
+
+/** When a schedule fires (`scheduler/plan.rs` `Rule`). Minutes count from midnight IST. */
+export type ScheduleRule =
+  | { days: boolean[]; kind: 'daily'; at: number }
+  | { days: boolean[]; kind: 'every'; minutes: number; from: number; until: number };
+
+export type ScheduleRunStatus = 'running' | 'ok' | 'failed' | 'stopped' | 'missed' | 'skipped';
+
+/** What happened one time a schedule came due. Times are epoch ms. */
+export interface ScheduleRun {
+  id: number;
+  scheduleId: string;
+  runId: string | null;
+  status: ScheduleRunStatus;
+  dueAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  message: string;
+  /** The tail of what it printed; stderr lines start `! `. */
+  output: string;
+}
+
+export interface Schedule {
+  id: string;
+  script: string;
+  rule: ScheduleRule;
+  enabled: boolean;
+  /** Epoch ms; null while it is switched off. */
+  nextRunAt: number | null;
+  lastRun: ScheduleRun | null;
+}
+
+export const listSchedules = () => invoke<Schedule[]>('list_schedules');
+
+/** Creates or changes a schedule. Only the user's press in the Python tab calls this. */
+export const saveSchedule = (id: string, script: string, rule: ScheduleRule, enabled: boolean) =>
+  invoke<void>('save_schedule', { id, script, rule, enabled });
+
+export const deleteSchedule = (id: string) => invoke<void>('delete_schedule', { id });
+
+/** A schedule's history, newest first. */
+export const listScheduleRuns = (scheduleId: string) => invoke<ScheduleRun[]>('list_schedule_runs', { scheduleId });
+
+export const runScheduleNow = (id: string) => invoke<void>('run_schedule_now', { id });
+
+export const stopScheduleRun = (id: string) => invoke<void>('stop_schedule_run', { id });
+
+// ---- Screener ------------------------------------------------------------------
+
+/** A saved screen, without its last result. */
+export interface ScreenerRow {
+  id: string;
+  name: string;
+  specJson: string;
+  /** When it last ran, or null if it never has. */
+  ranAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listScreeners = () => invoke<ScreenerRow[]>('list_screeners');
+
+export const saveScreener = (id: string, name: string, specJson: string) => invoke<void>('save_screener', { id, name, specJson });
+
+/** Deletes a screen and its last result. */
+export const deleteScreener = (id: string) => invoke<void>('delete_screener', { id });
+
+/** Keeps a run as the screen's last one. False when the screen isn't saved, so the run wasn't kept. */
+export const saveScreenerResult = (id: string, resultJson: string, ranAt: string) =>
+  invoke<boolean>('save_screener_result', { id, resultJson, ranAt });
+
+/** The screen's last run as JSON, or null if it has none. */
+export const getScreenerResult = (id: string) => invoke<string | null>('get_screener_result', { id });
+
+/** Starts the Python engine on a screen. Its progress, result and exit arrive as `python-*` events for `runId`. */
+export const runScreen = (specJson: string, runId: string) => invoke<void>('screen_run', { specJson, runId });
 
 // ---- Research Notebooks -------------------------------------------------------
 

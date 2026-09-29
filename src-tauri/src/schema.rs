@@ -210,6 +210,62 @@ CREATE TABLE IF NOT EXISTS study_results (
 );
 CREATE INDEX IF NOT EXISTS idx_study_results_study ON study_results(study_id, executed_at);
 
+-- Saved screens (the Screener tab). `spec_json` is owned by the frontend (`src/screener/spec.ts`)
+-- and the Python engine (`protrade/screen.py`); `result_json` is the screen's last run, kept so it
+-- reopens without running again (NULL until it has run). Both are opaque to Rust.
+CREATE TABLE IF NOT EXISTS screeners (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  spec_json    TEXT NOT NULL,
+  result_json  TEXT,
+  ran_at       TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Python scripts the user scheduled to run by themselves (`scheduler/`). `rule_json` is a `scheduler::plan::Rule`;
+-- `next_run_at` (epoch ms) is when it next fires, NULL while it is switched off.
+CREATE TABLE IF NOT EXISTS script_schedules (
+  id           TEXT PRIMARY KEY,
+  script       TEXT NOT NULL,
+  rule_json    TEXT NOT NULL,
+  enabled      INTEGER NOT NULL DEFAULT 1,
+  next_run_at  INTEGER,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- What happened each time a schedule came due: a run (with the tail of its output), or a run missed
+-- while the app was closed, or skipped because the last one was still going. The newest few are kept.
+CREATE TABLE IF NOT EXISTS schedule_runs (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  schedule_id  TEXT NOT NULL REFERENCES script_schedules(id) ON DELETE CASCADE,
+  run_id       TEXT,
+  status       TEXT NOT NULL,
+  due_at       INTEGER NOT NULL,
+  started_at   INTEGER,
+  finished_at  INTEGER,
+  message      TEXT NOT NULL DEFAULT '',
+  output       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_schedule_runs_schedule ON schedule_runs(schedule_id, id);
+
+-- Colour flags, one per symbol (`store/watchlists.rs`): a flagged symbol shows its flag on every watchlist, and each
+-- colour's list is the symbols flagged with it, newest first. (Flags used to live on `watchlist_items.flag`;
+-- `watchlists::migrate` carries them over once.)
+CREATE TABLE IF NOT EXISTS symbol_flags (
+  symbol      TEXT PRIMARY KEY,
+  flag        TEXT NOT NULL,
+  flagged_at  INTEGER NOT NULL
+);
+
+-- Drawings, per symbol (`store/symbol_drawings.rs`): Vela's drawings document, opaque to Rust. Every chart of
+-- the symbol shows them. An empty document means "all removed", which is not the same as no row.
+CREATE TABLE IF NOT EXISTS symbol_drawings (
+  symbol      TEXT PRIMARY KEY,
+  doc_json    TEXT NOT NULL,
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Research Notebooks: named collections of Studies and results with the user's notes. Items refer to a
 -- Study or a run by id; one whose target has gone is still listed (as no longer available).
 -- `position` is numbered from 1.

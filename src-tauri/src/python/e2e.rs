@@ -233,6 +233,72 @@ async fn a_study_runs_through_the_real_api_and_posts_one_result_even_with_no_eve
     h.cleanup();
 }
 
+#[tokio::test]
+async fn a_script_refreshes_a_watchlist_through_the_real_api_and_is_told_what_happened() {
+    let Some(h) = harness("watchlist").await else { return };
+    let ran = h
+        .run(
+            "import protrade as pt, pandas as pd\n\
+             done = pt.set_watchlist('Momentum', pd.DataFrame({'symbol': ['zerodha:TCS', 'zerodha:NSE:INFY']}))\n\
+             assert done['total'] == 2, done",
+            None,
+        )
+        .await;
+    assert_eq!(ran.outcome, Outcome::Exited(Some(0)), "stderr: {}", ran.stderr);
+    assert!(
+        ran.stdout.contains("Watchlist 'Momentum' made: 2 added"),
+        "{}",
+        ran.stdout
+    );
+    let updates = h.backend.watchlist_updates.lock().unwrap().clone();
+    assert_eq!(updates.len(), 1);
+    assert_eq!(updates[0].symbols, ["zerodha:NSE:TCS", "zerodha:NSE:INFY"]);
+    // Refused by the app: the script gets an exception it can read, and nothing is written.
+    let bad = h
+        .run("import protrade as pt\npt.set_watchlist('X', ['TCS'])", None)
+        .await;
+    assert_eq!(bad.outcome, Outcome::Exited(Some(1)));
+    assert!(bad.stderr.contains("isn't a symbol the app can show"), "{}", bad.stderr);
+    assert_eq!(h.backend.watchlist_updates.lock().unwrap().len(), 1);
+    h.cleanup();
+}
+
+#[tokio::test]
+async fn a_screen_runs_through_the_real_api_and_posts_its_matches() {
+    let Some(h) = harness("screen").await else { return };
+    *h.backend.bar_count.lock().unwrap() = 400;
+    let ran = h
+        .run(
+            "import json, sys\n\
+             from protrade import run_screen\n\
+             spec = {'name': 'E2E screen', 'universe': {'source': 'symbols', 'symbols': ['zerodha:NSE:A', 'zerodha:NSE:B', 'zerodha:NSE:C', 'zerodha:NSE:D']},\n\
+                     'filters': ['close > ema_50'], 'columns': ['close', 'rsi_14'], 'sort': {'column': 'close'}}\n\
+             open('e2e-screen.json', 'w').write(json.dumps(spec))\n\
+             sys.exit(run_screen.main(['run_screen', 'e2e-screen.json']))",
+            None,
+        )
+        .await;
+    let _ = std::fs::remove_file("e2e-screen.json");
+    assert_eq!(ran.outcome, Outcome::Exited(Some(0)), "stderr: {}", ran.stderr);
+    assert!(ran.stdout.contains("[progress] 100% Complete"), "{}", ran.stdout);
+    let shown = h.backend.results.lock().unwrap().clone();
+    assert_eq!(shown.len(), 1);
+    assert_eq!(
+        (shown[0].kind.as_str(), shown[0].title.as_deref()),
+        ("screen", Some("E2E screen"))
+    );
+    let data = &shown[0].data;
+    assert_eq!(data["columns"], serde_json::json!(["close", "rsi_14", "ema_50"]));
+    assert_eq!(data["meta"]["symbols_loaded"], 4);
+    // The fake's rising and wavy series sit above their 50 EMA at the end; the crashing ones don't.
+    let rows = data["rows"].as_array().unwrap();
+    assert!(!rows.is_empty() && rows.len() < 4, "{rows:?}");
+    for row in rows {
+        assert!(row["values"][0].as_f64().unwrap() > row["values"][2].as_f64().unwrap());
+    }
+    h.cleanup();
+}
+
 /// A script that isn't started by the app has nowhere to show things, so it prints instead of failing.
 #[tokio::test]
 async fn showing_something_outside_the_app_prints_it() {

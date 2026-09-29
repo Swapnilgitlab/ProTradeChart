@@ -7,6 +7,54 @@ project uses [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- **A Home tab.** A house icon in the right rail opens an overview of the application — starting a chart or opening a
+  saved layout, the watchlist and alerts, Ask AI, Python, Studies and the Screener, connecting data and AI providers,
+  importing your own data, the theme and keyboard shortcuts, and About and Help — one click from each other.
+- **Flag a watchlist symbol in one click.** Each row has a flag button before its ticker. A click flags the symbol with the
+  colour you last used; a right-click (or a click on a flagged symbol) offers every colour and **Remove flag**.
+- **A list per flag colour.** A flag now belongs to the symbol — it shows on every list the symbol is on — and each colour
+  has its own list (**Red flag** … **Purple flag**, under **Flagged** in the list selector) of every symbol flagged with it,
+  newest first. Adding a symbol to one flags it; removing it unflags it. Flags set on individual lists before this are
+  carried over (a symbol flagged differently on two lists keeps the first list's colour).
+- **Add to watchlist from the chart, as in TradingView.** Point to **Add SYMBOL to watchlist** in a chart's right-click
+  menu to see every watchlist with a checkbox, ticked where it already holds the symbol. Tick or untick as many as you like —
+  the menu stays open — or choose **New watchlist…**. Quick-access lists come first. (This replaces the separate
+  "Add to “name”" items.)
+- **Tabs fit however many are open.** Tabs narrow together as more open — dropping the price, then the day's change, then the
+  close button on inactive tabs — and the active tab stays readable. Past their minimum width the strip scrolls, with arrows
+  at its ends, the mouse wheel, and the active tab always kept in view; the **+** button stays beside the tabs.
+- **A chart's background belongs to its layout.** A canvas background chosen in a chart's settings is saved with the layout,
+  restored with it, and kept when the theme changes; a chart without one follows the theme as before. Vela's attribution
+  mark is re-inked to stay visible on whatever background it sits on.
+- **Drawings belong to their symbol.** A drawing made on RELIANCE now shows on every chart of RELIANCE — any tab, window,
+  layout or timeframe — and no longer follows a chart onto another symbol. Drawings are saved automatically; those saved in
+  existing layouts are taken over by their symbol the first time the layout opens.
+- **Add to a watchlist from the chart.** Right-click a chart → **Add to watchlist…** (any list, or a new one), or one click on
+  **Add to “name”** for each quick-access list.
+- **Quick-access watchlists.** Star up to five lists: they sit as buttons across the top of the watchlist panel and appear in
+  the chart's right-click menu.
+- **Browse all watchlists.** A dialog listing every watchlist, to search, open, star, rename, delete and create them.
+- **Indices watchlist.** One click builds a watchlist of Indian indices from your Zerodha or Dhan instrument list, grouped as
+  Broad market, Sectors (Nifty Bank, IT, Pharma, Auto, FMCG, Metal…) and Themes.
+- **Resizable side panel.** Drag the left edge of the watchlist, alerts or Ask AI panel to change its width (double-click to
+  reset); the width is remembered.
+- **Help Center.** A **Help** icon at the bottom of the right rail (or `F1`) opens a searchable guide to every part of the
+  app — charts, grids, layouts, the Script Editor and Strategy Tester, watchlists, alerts, the Screener, Python, schedules,
+  Studies, Ask AI, data and AI providers, importing data, themes and updates — with an indicator reference, the keyboard
+  shortcuts, privacy and security, and troubleshooting.
+- **Scheduled Python scripts.** In the Python tab, **Schedule** runs a script by itself at set times while the app is open:
+  once a day, or every N minutes between two times, on the days you choose (IST). The new **Schedules** tab lists every schedule
+  with its next run and what happened each time — with the output of each run, why one failed (the main window also says so),
+  and runs that were **missed** because the app was closed or the computer asleep. A missed run is never made up, and starting
+  the app never runs a script. Switch one off, run it now, stop it, edit or delete it.
+- **Scripts can keep a watchlist up to date.** `pt.set_watchlist(name, symbols)` makes the watchlist or refreshes it — replacing
+  its symbols (those it keeps stay where they were, flags and sections untouched) or, with `mode="append"`, adding to them. It
+  takes a list, a Series or a screen's DataFrame. Schedule such a script for after the close and the list is fresh every evening.
+- **A Screener.** A new rail button opens a Screener tab: pick a universe (a broker's NSE/BSE list, a watchlist, or symbols),
+  filter on any of the Studies' indicators judged on each stock's latest bar ("crosses above" means today), choose columns and
+  an order, and run it. Matches come back as a sortable table — click one to chart it, add them all to a watchlist, or save a
+  CSV. Screens are saved with their last result; eight presets (52-week highs, volume spikes, golden crosses, RSI oversold in
+  an uptrend…) are there to start from.
 - **OpenAI as a second AI provider, and one place to manage both keys.** A new **AI providers** icon on the right rail opens a
   dialog for either provider's API key — Claude (Anthropic) or GPT (OpenAI) — with a choice of which one to use once both are
   configured. The Study Builder's drafts, revisions, explanations, research plans and syntheses, and the new Ask AI below, all

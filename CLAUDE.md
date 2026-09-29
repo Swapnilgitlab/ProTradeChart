@@ -36,6 +36,10 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   only in Rust, and must never be sent to the webview or logged. `Secrets` remembers the OS store's answer for a minute, so
   write a credential only through `Secrets::set` / `delete` (which update it), never to `keyring` directly. See "Adding a
   broker" in `docs/ARCHITECTURE.md`.
+- A chart's canvas background belongs to the layout when one was chosen, and falls back to the theme
+  (`chart/canvasBackground.ts`): `withoutTheme` keeps any background that isn't Vela's own dark/light default, and
+  `ChartView`'s `applyTheme` re-applies chosen backgrounds after every `setTheme`. Vela inks its attribution mark from the
+  theme, so `tintAttribution` re-inks it from the canvas — keep that wherever backgrounds change, or the mark can vanish.
 - Every theme must define every token in `ThemeTokens` (`src/theme/themes.ts`); a test enforces it.
 - AI providers (Anthropic, OpenAI) are two plain structs with the same `check_key`/`message` pair, not a trait — `ai/claude.rs`,
   `ai/openai.rs`, both built from the provider-neutral `AiRequest`/`Reply` in `ai/mod.rs`. Add a third the same way, then add it
@@ -55,6 +59,14 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   bump can rename the chunk or reformat the constant and silently fail to apply (`postinstall` will error loudly, it
   won't apply partially) — regenerate it by re-editing `node_modules` and rerunning `npx patch-package @luxalgo/vela`,
   and rename the old patch file away since it's pinned to the old version.
+- The same patch extends Vela's menus for the chart's **Add SYMBOL to watchlist** list (`chart/watchlistActions.ts`):
+  (1) a contributed context-menu action may carry `labelFor(ctx)` (a label naming the chart's symbol) and a **submenu**
+  (`submenu(ctx)` items, ids `action:<id>::<item>`, picked ones routed to `runItem(ctx, item)`) — `ChartContextMenu` in
+  `chunk-EMB53WNQ.js`, `widget.cjs`, `workspace.cjs`; (2) a menu item may be a **checkbox** (`checkbox: true`): a box in the
+  mark column, the menu stays open when it is picked, and the box flips at once — the `Menu` surface in
+  `chunk-BKHSQ4YM.js`, `ui.cjs`, `index.cjs`, `widget.cjs`, `workspace.cjs`, `vela.global.js`, styled by `.vela-menu-checkbox`
+  in `app.css`. Vite pre-bundles Vela, so after changing `node_modules` restart the dev server with `--force` (or delete
+  `node_modules/.vite`).
 - A background tab is `display: none`, so its chart isn't built until first shown (`ChartView`). Don't assume a tab has a
   live chart.
 - Vela loads a chart to a fixed depth (`market.bars`) and doesn't page on scroll: `chart/historyBackfill.ts` raises the
@@ -113,10 +125,33 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   let the webview or anything else reach it. `POST /v1/results` is the one route that isn't a read.
 - What a script shows (`pt.show`, `pt.report`, `pt.plot`) is untrusted data: `python/results.ts` validates it and the panel
   draws text and a checked PNG only. Never render a script's output as HTML, and refuse a result you don't recognise rather
-  than guessing at it. A script runs
-  only when the user presses Run — never on startup, on importing a file, or on opening a layout. Python isn't sandboxed; don't
-  imply it is. And since the Python commands let the webview save and run a script, anything that lets outside content reach the
+  than guessing at it. A script runs only when the user presses Run, or when a **schedule the user made by hand** in the Python
+  tab comes due while the app is open — never on startup, on importing a file, or on opening a layout. Python isn't sandboxed;
+  don't imply it is. And since the Python commands let the webview save and run a script, anything that lets outside content reach the
   DOM (HTML from a broker, a file or a script's output) is now a code-execution risk: keep the CSP strict and render text only.
+- Scheduled scripts (`scheduler/`, `store/schedules.rs`, `features/python/SchedulesPane.tsx`) are the one way a script runs
+  without a press, so the rules are strict. Only `save_schedule`, called from the Schedules pane, makes one: never give Ask AI a
+  tool for it, and never let a script or a layout create one. The engine (`scheduler::engine`, started once in `lib.rs`) never
+  makes up a run: anything already due on its **first look after launch** is recorded as missed, as is a run more than
+  `GRACE_MS` late (the machine slept), and switching a schedule on or editing it plans from now. Keep `plan::decide` pure and
+  that rule in it. Times are IST, like `market.rs`; don't add a timezone crate.
+- A script writes a watchlist only through `pt.set_watchlist` — a result of kind `watchlist` that `pyapi/routes.rs`
+  (`watchlist_update`) checks and `store::watchlists::sync_named` writes; it is not forwarded to a window. Its symbols are
+  made canonical there (a bare broker ticker is NSE). `replace` keeps surviving rows where they are, with their flags, and never
+  touches section headings. Every write emits `watchlists-changed`, which `watchlistBus` relays to the panel. Don't add any
+  other write route to the local API.
+- A screen (the Screener tab, `src/screener/`, `protrade/screen.py`) judges its filters on each symbol's **latest bar** only, in
+  the Studies' feature grammar. `normalizeScreen` and `normalize_screen` apply the same rules (both run
+  `src/screener/fixtures/screen-cases.json`), and `src/screener/fixtures/engine-result.json` is real engine output that
+  `result.test.ts` parses: when the result's shape changes, regenerate it with `PROTRADE_WRITE_FIXTURE=1` (see
+  `python/tests/test_screen.py`). A saved screen keeps only its last run (`store/screeners.rs`).
+- Drawings belong to the symbol (`chart/symbolDrawings.ts`, `store/symbol_drawings.rs`), not the chart: every chart swaps
+  them on a symbol change. A symbol with no stored row adopts a layout's drawings; an *empty* document means "cleared" — never
+  delete the row instead. Anything that replaces a chart's drawings must go through the port (deselect, `fromJSON`, deselect,
+  and `chart.resize()` if a drawing was selected) or Vela leaves an orphaned edit toolbar on screen.
+- The Help Center's content is `src/help/topics.ts` (data, drawn as text by `features/help/HelpDialog.tsx`, never as HTML).
+  When you add or change a feature a user sees, update its topic in the same change; name buttons exactly as the UI does.
+  `SHORTCUTS` there is also what About lists, and the indicator reference is built from `studies/assistant.ts`'s meanings.
 - Ask AI never acts on its own: a tool call is data (`ProposedAction`) until `features/ai/actions.ts::prepareAction` turns it into
   a confirmation card, and only pressing Approve calls the real function. Adding an allowlisted action means adding it in *two*
   places that must agree — a `ToolSpec` in `ai/prompts.rs::ask_ai_tools` and a matching case in `prepareAction` — and a tool
@@ -137,6 +172,11 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   alert and a chart will disagree about what they are looking at. `NSE:` is the one exchange hidden (both brokers read a bare
   ticker as NSE); don't hide another without giving the backends a way to find it from a bare ticker. See "How a symbol is
   shown" in `docs/ARCHITECTURE.md`.
+- A colour flag belongs to the **symbol** (`symbol_flags`), not a list's row: `watchlists::get` joins it in, and
+  `watchlist_items.flag` is legacy (migrated once, then cleared — don't write it). Each colour's list has a reserved
+  **negative** id (red -1 … purple -6, `flag_list_id` / `ipc.ts` `flagOfList`, kept in step by tests): `get_watchlist`
+  builds it from the flags, adding to or removing from it flags or unflags, and `real_list` refuses rename, delete, order and
+  sections for it. Anything new that takes a watchlist id must handle a negative one.
 - A watchlist's rows are `watchlist_items` and `watchlist_sections` sharing one `position` sequence (numbered from 1: `0` would
   read as "not migrated"). Add rows through `add_items` / `add_section` so they get one, and reorder only through `set_order`.
   The list is windowed on **one fixed row height**, so anything else that lives in it (a section heading) must be exactly a
@@ -147,7 +187,12 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   there, and its `subscribe` receives the chart's ticker in whatever form Vela chose, so the tap goes through `normalizeSymbol`.
 - The right rail (`features/rail/`) shows one panel at a time; the watchlist panel stays mounted while hidden and must not fetch
   prices then (`visible`). The alerts *list* is that rail's panel; only the new/edit **form** is a dialog. The rail also carries
-  the Script Editor, Python and Data providers buttons (actions, not panels) — the tab bar no longer has them.
+  the Home, Script Editor, Python, Studies and Screener buttons (actions, not panels) — the tab bar no longer has them.
+- The Home tab (`features/home/HomePage.tsx`, `kind: 'home'` in `features/workspace/tabs.ts`) is a workspace tab like Python,
+  at most one open, opened from the rail's Home button. It holds no state of its own: every card just calls the same
+  callback its equivalent elsewhere in `Workspace.tsx` already uses (`openPython`, `showRailPanel('watchlist')`, `setAboutOpen`,
+  …), so add a new card by wiring it the same way rather than duplicating logic. Add a feature here too, and it belongs on the
+  Home tab: update its section in `HomePage.tsx` in the same change, the same rule the Help Center gotcha above already follows.
 - A Study's source of truth is its **Study Specification** (`src/studies/spec.ts`), not Python. `normalizeSpec` (TS) and
   `normalize_spec` (`python/protrade/study.py`) apply the same rules, and `studies/metrics.ts` accepts exactly the feature
   grammar `protrade/features.py` computes: change one side, change the other. The engine's result is untrusted script output

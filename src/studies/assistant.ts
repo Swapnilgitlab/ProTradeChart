@@ -16,7 +16,7 @@ import type { StudyResultData, TestResult } from './result';
 import { FINDS, LIMITS, MEASURE_STATS, normalizeSpec, OPS, SERIES, SpecError, type StudySpec } from './spec';
 
 /** What each family computes. A `Record` over every family, so a new one can't be left out. */
-const FAMILY_MEANING: Record<Family, string> = {
+export const FAMILY_MEANING: Record<Family, string> = {
   return: 'close / close N bars earlier − 1',
   gain_from_low: 'close / lowest close of the last N+1 bars − 1',
   sma: 'simple moving average of close',
@@ -49,7 +49,7 @@ const FAMILY_MEANING: Record<Family, string> = {
   stoch_d: '3-bar average of stoch_k_N',
 };
 
-const PLAIN_MEANING: Record<(typeof PLAIN)[number], string> = {
+export const PLAIN_MEANING: Record<(typeof PLAIN)[number], string> = {
   open: "the bar's open",
   high: "the bar's high",
   low: "the bar's low",

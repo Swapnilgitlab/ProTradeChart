@@ -211,7 +211,7 @@ pub fn study_estimate(request: EstimateRequest, db: State<Database>) -> Result<S
 
 /// Where a run's spec is written for the engine to read: named by the run, which is checked
 /// to be a safe file name first.
-fn spec_file(studies_dir: &std::path::Path, run_id: &str) -> Result<PathBuf, String> {
+pub(crate) fn spec_file(studies_dir: &std::path::Path, run_id: &str) -> Result<PathBuf, String> {
     if !valid_run_id(run_id) {
         return Err("That isn't a valid run id.".into());
     }
@@ -247,6 +247,7 @@ pub async fn study_run(
             cwd: dir,
             run_id,
             remove_after: Some(file.clone()),
+            on_exit: None,
         },
     )
     .await;

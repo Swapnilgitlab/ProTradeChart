@@ -1,4 +1,4 @@
-/** The tab set: chart tabs, and the Python and Studies workspaces when they are open.
+/** The tab set: chart tabs, and the Python, Studies and Screener workspaces when they are open.
  *
  *  Pure, so the rules that are easy to get wrong — which chart the shared chrome follows while
  *  Python is showing, what a layout saves, what may be closed — are tested without a component. */
@@ -15,6 +15,12 @@ export interface ChartTab {
   initialState?: WorkspaceState;
 }
 
+/** The Home tab: a landing page linking to every other part of the app. At most one is open. */
+export interface HomeTab {
+  kind: 'home';
+  id: string;
+}
+
 /** The Python workspace: scripts, an editor, a console and results. At most one is open. */
 export interface PythonTab {
   kind: 'python';
@@ -27,8 +33,22 @@ export interface StudiesTab {
   id: string;
 }
 
+/** The Screener workspace: build, save and run screens. At most one is open. */
+export interface ScreenerTab {
+  kind: 'screener';
+  id: string;
+}
+
 /** A tab that isn't a chart: a workspace with no symbol of its own. */
-export type WorkspaceTab = PythonTab | StudiesTab;
+export type WorkspaceTab = HomeTab | PythonTab | StudiesTab | ScreenerTab;
+
+/** What a workspace tab is called, in the tab bar and wherever else it is named. */
+export const WORKSPACE_LABELS: Record<WorkspaceTab['kind'], string> = {
+  home: 'Home',
+  python: 'Python',
+  studies: 'Studies',
+  screener: 'Screener',
+};
 
 export type Tab = ChartTab | WorkspaceTab;
 
@@ -36,11 +56,17 @@ export const isChartTab = (tab: Tab): tab is ChartTab => tab.kind === 'chart';
 
 export const chartTabs = (tabs: readonly Tab[]): ChartTab[] => tabs.filter(isChartTab);
 
+export const homeTab = (tabs: readonly Tab[]): HomeTab | undefined =>
+  tabs.find((t): t is HomeTab => t.kind === 'home');
+
 export const pythonTab = (tabs: readonly Tab[]): PythonTab | undefined =>
   tabs.find((t): t is PythonTab => t.kind === 'python');
 
 export const studiesTab = (tabs: readonly Tab[]): StudiesTab | undefined =>
   tabs.find((t): t is StudiesTab => t.kind === 'studies');
+
+export const screenerTab = (tabs: readonly Tab[]): ScreenerTab | undefined =>
+  tabs.find((t): t is ScreenerTab => t.kind === 'screener');
 
 /** The open workspaces, in tab order: what a loaded layout leaves in place beside its charts. */
 export const workspaceTabs = (tabs: readonly Tab[]): WorkspaceTab[] => tabs.filter((t): t is WorkspaceTab => !isChartTab(t));
@@ -59,7 +85,7 @@ export function activeChartTab(tabs: readonly Tab[], activeTabId: string, lastCh
   return chartTabs(tabs)[0] ?? null;
 }
 
-/** Whether this tab may be closed. A workspace (Python, Studies) always can; a chart only while it isn't the last one,
+/** Whether this tab may be closed. A workspace (Python, Studies, Screener) always can; a chart only while it isn't the last one,
  *  because the watchlist, the alerts and the Pine dock all need a chart to talk about. */
 export function canCloseTab(tabs: readonly Tab[], id: string): boolean {
   const tab = tabs.find((t) => t.id === id);

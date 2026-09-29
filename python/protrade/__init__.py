@@ -11,6 +11,9 @@ Scripts run from the app's Python tab reach market data through it::
 The app fetches from the broker (it holds the credentials, and this package never sees
 them), keeps what it fetched, and answers over a local, token-protected connection.
 
+A script can also keep one of the app's watchlists up to date (``pt.set_watchlist``), which is
+how a scheduled script refreshes a list every evening.
+
 Studies (``pt.ResearchStudy``, see ``protrade.study``) measure what stocks looked like around
 historical events, from a Study Specification the app's Studies tab builds.
 """
@@ -40,7 +43,7 @@ from .client import (
     RateLimitedError,
     UpstreamError,
 )
-from .results import plot, report, show
+from .results import plot, report, set_watchlist, show
 from .study import ResearchStudy, SpecError, StudyDataError
 
 __all__ = [
@@ -66,6 +69,7 @@ __all__ = [
     "providers",
     "report",
     "resample",
+    "set_watchlist",
     "show",
     "status",
     "universe",

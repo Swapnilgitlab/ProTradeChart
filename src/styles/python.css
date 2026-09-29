@@ -476,3 +476,111 @@
   font-size: 12px;
   word-break: break-all;
 }
+
+/* The AI prompt dialog's copyable text: a big, wrapping, read-only block, not the usual one-line field. */
+.ai-prompt-text {
+  width: 100%;
+  height: 60vh;
+  max-height: 480px;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  font-family: "Cascadia Mono", "JetBrains Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+/* ---- Schedules (the Python tab's third output tab) ----------------------------------------- */
+
+.schedules {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  overflow: auto;
+  padding: 8px 12px;
+}
+.schedules-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.schedules-head .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.schedules-empty code {
+  font-size: 11px;
+}
+.schedule-form {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-base);
+}
+.schedule-form p {
+  margin: 0 0 8px;
+}
+.schedule-every {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.schedule-every input[type='number'] {
+  width: 64px;
+}
+.schedules-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.schedule {
+  border-bottom: 1px solid var(--border-soft);
+}
+.schedule.off .schedule-script,
+.schedule.off .schedule-rule {
+  opacity: 0.6;
+}
+.schedule-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 12px;
+}
+.schedule-script {
+  font-weight: 600;
+}
+.schedule-toggle {
+  display: inline-flex;
+}
+.schedule-history {
+  padding: 0 0 8px 28px;
+}
+.schedule-run-line {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  padding: 3px 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.schedule-run-line:disabled {
+  cursor: default;
+}
+.schedule-run-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.schedule-output {
+  max-height: 200px;
+  margin: 2px 0 6px;
+}

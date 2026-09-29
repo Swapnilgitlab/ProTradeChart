@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AppWindow, Bell, Code, Database, FlaskConical, Info, KeyRound, List, Plug, Plus, Sparkles, SquareTerminal, X } from 'lucide-react';
+import { AppWindow, Bell, ChevronLeft, ChevronRight, CircleHelp, Code, Database, FlaskConical, Home, Info, KeyRound, List, ListFilter, Plug, Plus, Sparkles, SquareTerminal, X } from 'lucide-react';
 import type { VelaWorkspace, WorkspaceState } from '@luxalgo/vela/workspace';
 import { startAlertEngine } from '../../alerts/engine';
 import { onOpenAlerts, openAlerts } from '../../alerts/ui';
@@ -21,6 +22,8 @@ import { displayTicker, isSupportedSymbol } from '../../lib/symbols';
 import { openNewWindow } from '../../lib/windows';
 import { publishDockRequest } from '../../pine/dockBus';
 import { AboutDialog } from '../about/AboutDialog';
+import { HelpDialog } from '../help/HelpDialog';
+import { HomePage } from '../home/HomePage';
 import { AlertFormDialog, type AlertFormSeed } from '../alerts/AlertFormDialog';
 import { AlertsPanel } from '../alerts/AlertsPanel';
 import { useAlerts } from '../alerts/useAlerts';
@@ -29,10 +32,13 @@ import { useUpdateState } from '../../updates/useUpdateState';
 import { ImportDataDialog } from '../datasets/ImportDataDialog';
 import { PineDock } from '../pine/PineDock';
 import { PythonPanel } from '../python/PythonPanel';
+import { ScreenerPanel } from '../screener/ScreenerPanel';
 import { StudiesPanel } from '../studies/StudiesPanel';
 import type { StudyEvent } from '../../chart/studyEvent';
 import { LayoutMenu, type LayoutSummary } from '../layouts/LayoutMenu';
 import { RightRail, type RailAction, type RailPanelButton } from '../rail/RightRail';
+import { PanelResizer } from '../rail/PanelResizer';
+import { clampPanelWidth, DEFAULT_PANEL_WIDTH, parsePanelWidth, PREF_PANEL_WIDTH } from '../rail/panelWidth';
 import {
   PREF_LEGACY_WATCHLIST_COLLAPSED,
   PREF_RAIL_PANEL,
@@ -47,20 +53,26 @@ import { DataProvidersDialog } from '../providers/DataProvidersDialog';
 import { parseLayout, serializeLayout, withoutUnsupportedSymbols, type LayoutDocument } from '../layouts/layoutDocument';
 import { SymbolSearchBox } from '../search/SymbolSearchBox';
 import { WatchlistPanel } from '../watchlist/WatchlistPanel';
+import { onOpenAddToWatchlist } from '../watchlist/watchlistUi';
+import { AddToWatchlistDialog } from '../python/AddToWatchlistDialog';
 import { TabQuote } from './TabQuote';
+import { useTabStrip } from './tabStrip';
 import { useTabQuotes } from './useTabQuotes';
 import {
   activeChartIndex,
   activeChartTab,
   canCloseTab,
   chartTabs,
+  homeTab,
   isChartTab,
   pythonTab,
+  screenerTab,
   studiesTab,
   tabAfterClosing,
   tabAfterStep,
   type ChartTab,
   type Tab,
+  WORKSPACE_LABELS,
   workspaceTabs,
 } from './tabs';
 
@@ -95,6 +107,17 @@ export function Workspace() {
   const [currentLayoutId, setCurrentLayoutId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  /** Which topic Help opens on, when a caller (the Home tab, a dialog) knows what to show. */
+  const [helpTopic, setHelpTopic] = useState<string | undefined>(undefined);
+  const openHelp = useCallback((topicId?: string) => {
+    setHelpTopic(topicId);
+    setHelpOpen(true);
+  }, []);
+  const tabStripRef = useRef<HTMLDivElement>(null);
+  /** Symbols a chart's right-click menu asked to put on a watchlist. */
+  const [addingToWatchlist, setAddingToWatchlist] = useState<{ symbols: string[]; newList: boolean } | null>(null);
+  useEffect(() => onOpenAddToWatchlist((symbols, options) => setAddingToWatchlist({ symbols, newList: options.newList ?? false })), []);
   const [providersOpen, setProvidersOpen] = useState(false);
   const [aiProvidersOpen, setAiProvidersOpen] = useState(false);
   const [aiProviders, reloadAiProviders] = useAiProviders();
@@ -104,6 +127,12 @@ export function Workspace() {
   const [dockOpen, setDockOpen] = useState(false);
   /** The panel the right rail is showing beside the chart, if any. The watchlist until saved settings say otherwise. */
   const [railPanel, setRailPanel] = useState<RailPanelId | null>('watchlist');
+  const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
+  useEffect(() => {
+    getPreference(PREF_PANEL_WIDTH)
+      .then((raw) => setPanelWidth(clampPanelWidth(parsePanelWidth(raw), window.innerWidth)))
+      .catch(() => {});
+  }, []);
   const { alerts } = useAlerts();
   const [alertsSeenAt, setAlertsSeenAt] = useState<number | null>(null);
   const chartRefs = useRef<Map<string, ChartViewHandle>>(new Map());
@@ -160,7 +189,7 @@ export function Workspace() {
           'info',
         );
       }
-      // A layout holds charts; the Python and Studies tabs are workspaces, not part of a saved session,
+      // A layout holds charts; the Python, Studies and Screener tabs are workspaces, not part of a saved session,
       // so they stay open across a load with their scripts, Studies and runs untouched.
       const next = usable.tabs.map((t) => createTab(t.symbol, t.state));
       chartRefs.current.clear();
@@ -227,6 +256,18 @@ export function Workspace() {
     [layouts],
   );
 
+  /** Opens the Home tab, or shows it when it is already open. */
+  const openHome = useCallback(() => {
+    const existing = homeTab(tabs);
+    if (existing) {
+      setActiveTabId(existing.id);
+      return;
+    }
+    const created: Tab = { kind: 'home', id: crypto.randomUUID() };
+    setTabs((prev) => [...prev, created]);
+    setActiveTabId(created.id);
+  }, [tabs]);
+
   /** Opens the Python workspace, or shows it when it is already open. */
   const openPython = useCallback(() => {
     const existing = pythonTab(tabs);
@@ -247,6 +288,18 @@ export function Workspace() {
       return;
     }
     const created: Tab = { kind: 'studies', id: crypto.randomUUID() };
+    setTabs((prev) => [...prev, created]);
+    setActiveTabId(created.id);
+  }, [tabs]);
+
+  /** Opens the Screener workspace, or shows it when it is already open. */
+  const openScreener = useCallback(() => {
+    const existing = screenerTab(tabs);
+    if (existing) {
+      setActiveTabId(existing.id);
+      return;
+    }
+    const created: Tab = { kind: 'screener', id: crypto.randomUUID() };
     setTabs((prev) => [...prev, created]);
     setActiveTabId(created.id);
   }, [tabs]);
@@ -344,6 +397,22 @@ export function Workspace() {
     if (getCurrentWindow().label !== 'main') return;
     return startBackgroundUpdates();
   }, []);
+  // A scheduled script runs with no window watching; one that fails is said once, here.
+  useEffect(() => {
+    if (getCurrentWindow().label !== 'main') return;
+    let cancelled = false;
+    let off: (() => void) | null = null;
+    void listen<{ script: string; status: string; message: string }>('schedule-run-finished', ({ payload }) => {
+      if (payload.status === 'failed') toast(`Scheduled run of ${payload.script} failed: ${payload.message}`, 'error');
+    }).then((stop) => {
+      if (cancelled) stop();
+      else off = stop;
+    });
+    return () => {
+      cancelled = true;
+      off?.();
+    };
+  }, [toast]);
   const updateState = useUpdateState();
   const updateWaiting = updateState.kind === 'available' || updateState.kind === 'installed';
   useEffect(() => {
@@ -372,6 +441,11 @@ export function Workspace() {
         e.preventDefault();
         return;
       }
+      if (e.key === 'F1' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        openHelp();
+        e.preventDefault();
+        return;
+      }
       if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'w') {
         toggleRailPanel('watchlist');
         e.preventDefault();
@@ -391,7 +465,7 @@ export function Workspace() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [openTab, closeTab, stepTab, openPython, toggleRailPanel, activeTabId, chartSymbol]);
+  }, [openTab, closeTab, stepTab, openPython, toggleRailPanel, openHelp, activeTabId, chartSymbol]);
 
   /** Never silently drops the save. A tab that was never shown has no live
    *  chart (see ChartView), so it falls back to its own last-known state —
@@ -437,6 +511,14 @@ export function Workspace() {
   // while the Python tab is.
   const railTools: RailAction[] = [
     {
+      id: 'home',
+      label: 'Home',
+      title: 'Home: an overview of the application',
+      icon: Home,
+      pressed: activeTab?.kind === 'home',
+      onClick: openHome,
+    },
+    {
       id: 'script-editor',
       label: 'Script Editor',
       title: 'Script Editor and Strategy Tester (Ctrl+E)',
@@ -460,10 +542,19 @@ export function Workspace() {
       pressed: activeTab?.kind === 'studies',
       onClick: openStudies,
     },
+    {
+      id: 'screener',
+      label: 'Screener',
+      title: 'Screener: which stocks match your conditions today',
+      icon: ListFilter,
+      pressed: activeTab?.kind === 'screener',
+      onClick: openScreener,
+    },
   ];
   const railFooter: RailAction[] = [
     { id: 'data-providers', label: 'Data providers', title: 'Data providers: where prices come from', icon: Plug, onClick: () => setProvidersOpen(true) },
     { id: 'ai-providers', label: 'AI providers', title: 'AI providers: API keys for Claude, GPT and which one to use', icon: KeyRound, onClick: () => setAiProvidersOpen(true) },
+    { id: 'help', label: 'Help', title: 'Help: how every part of the app works (F1)', icon: CircleHelp, pressed: helpOpen, onClick: () => openHelp() },
   ];
 
   async function handleDeleteLayout(id: string) {
@@ -477,25 +568,37 @@ export function Workspace() {
   }
 
   // What Ask AI is told is open — the same labels the tab bar itself shows.
-  const openTabLabels = tabs.map((tab) => (isChartTab(tab) ? displayTicker(tab.symbol) : tab.kind === 'studies' ? 'Studies' : 'Python'));
+  const openTabLabels = tabs.map((tab) => (isChartTab(tab) ? displayTicker(tab.symbol) : WORKSPACE_LABELS[tab.kind]));
+
+  const tabStrip = useTabStrip(tabStripRef, activeTabId, tabs.length);
 
   return (
     <div className="app">
       <div className="tab-bar">
-        <div className="tab-bar-scroll" role="tablist">
+        {/* As wide as its tabs, up to the room there is; the arrows sit over its edges, so showing them
+            never takes room from the tabs. */}
+        <div className="tab-strip">
+        <div
+          className={`tab-bar-scroll${tabStrip.overflow.left ? ' fade-left' : ''}${tabStrip.overflow.right ? ' fade-right' : ''}`}
+          role="tablist"
+          ref={tabStripRef}
+        >
           {tabs.map((tab) => {
-            const label = isChartTab(tab) ? displayTicker(tab.symbol) : tab.kind === 'studies' ? 'Studies' : 'Python';
+            const label = isChartTab(tab) ? displayTicker(tab.symbol) : WORKSPACE_LABELS[tab.kind];
             return (
               <div
                 key={tab.id}
                 role="tab"
                 aria-selected={tab.id === activeTabId}
                 className={`tab-chip${tab.id === activeTabId ? ' active' : ''}${isChartTab(tab) ? '' : ' python'}`}
+                title={label}
                 onClick={() => showTab(tab.id)}
                 onAuxClick={(e) => e.button === 1 && closeTab(tab.id)}
               >
+                {tab.kind === 'home' && <Home size={13} aria-hidden="true" />}
                 {tab.kind === 'python' && <SquareTerminal size={13} aria-hidden="true" />}
                 {tab.kind === 'studies' && <FlaskConical size={13} aria-hidden="true" />}
+                {tab.kind === 'screener' && <ListFilter size={13} aria-hidden="true" />}
                 <span className="tab-chip-label">{label}</span>
                 {isChartTab(tab) && <TabQuote symbol={tab.symbol} quote={tabQuotes.get(tab.symbol)} />}
                 {canCloseTab(tabs, tab.id) && (
@@ -514,10 +617,22 @@ export function Workspace() {
               </div>
             );
           })}
-          <button type="button" className="icon-button" style={{ margin: '0 4px 4px', flexShrink: 0 }} aria-label="New chart tab" title="New tab (Ctrl+T)" onClick={() => openTab()}>
-            <Plus size={15} />
-          </button>
         </div>
+        {tabStrip.overflow.left && (
+          <button type="button" className="icon-button tab-scroll left" aria-label="Show earlier tabs" title="Earlier tabs" onClick={() => tabStrip.scrollBy(-1)}>
+            <ChevronLeft size={15} />
+          </button>
+        )}
+        {tabStrip.overflow.right && (
+          <button type="button" className="icon-button tab-scroll right" aria-label="Show later tabs" title="Later tabs" onClick={() => tabStrip.scrollBy(1)}>
+            <ChevronRight size={15} />
+          </button>
+        )}
+        </div>
+        {/* Outside the strip, so it stays in reach however many tabs are open. */}
+        <button type="button" className="icon-button tab-new" aria-label="New chart tab" title="New tab (Ctrl+T)" onClick={() => openTab()}>
+          <Plus size={15} />
+        </button>
 
         <div className="tab-bar-actions">
           <LayoutMenu
@@ -554,7 +669,7 @@ export function Workspace() {
         </div>
       </div>
 
-      <div className="app-body">
+      <div className="app-body" style={{ "--side-panel-width": `${panelWidth}px` } as React.CSSProperties}>
         <div className="app-main">
           <div className="app-canvases">
             {startup === 'ready' && tabs.map((tab) => (
@@ -571,6 +686,30 @@ export function Workspace() {
                     onGridGrow={showGridHint}
                     onWorkspace={(ws) => setTabWorkspace(tab.id, ws)}
                   />
+                ) : tab.kind === 'home' ? (
+                  <HomePage
+                    layouts={layouts.map(toSummary)}
+                    onNewChart={() => openTab()}
+                    onNewWindow={openNewWindow}
+                    onOpenLayout={(id) => {
+                      const row = layouts.find((l) => l.id === id);
+                      if (row) applyLayoutRow(row);
+                    }}
+                    onOpenWatchlist={() => showRailPanel('watchlist')}
+                    onOpenAlerts={() => showRailPanel('alerts')}
+                    onOpenAskAi={() => showRailPanel('assistant')}
+                    onOpenPython={openPython}
+                    onOpenStudies={openStudies}
+                    onOpenScreener={openScreener}
+                    onOpenDataProviders={() => setProvidersOpen(true)}
+                    onOpenAiProviders={() => setAiProvidersOpen(true)}
+                    onOpenImportData={() => setImportOpen(true)}
+                    onOpenAbout={() => setAboutOpen(true)}
+                    onOpenHelp={openHelp}
+                  />
+                ) : tab.kind === 'screener' ? (
+                  // Stays mounted, like Studies, so a running screen keeps going while charts are looked at.
+                  <ScreenerPanel visible={tab.id === activeTabId} onOpenSymbol={goToSymbol} />
                 ) : tab.kind === 'studies' ? (
                   // Stays mounted, like Python, so a running Study keeps going while charts are looked at.
                   <StudiesPanel visible={tab.id === activeTabId} onOpenEvent={goToEvent} onOpenPython={openPython} />
@@ -585,6 +724,13 @@ export function Workspace() {
           {/* The Pine dock belongs to a chart, so it is hidden while a workspace tab is showing. */}
           {activeTab && isChartTab(activeTab) && <PineDock workspace={workspaces[activeTab.id] ?? null} onOpenChange={setDockOpen} />}
         </div>
+        {railPanel !== null && (
+          <PanelResizer
+            width={panelWidth}
+            onResize={setPanelWidth}
+            onCommit={(width) => void setPreference(PREF_PANEL_WIDTH, String(width)).catch(() => {})}
+          />
+        )}
         {/* The watchlist stays mounted while another panel shows, so its list, sort and scroll are still there. */}
         <WatchlistPanel
           visible={railPanel === 'watchlist'}
@@ -617,6 +763,16 @@ export function Workspace() {
 
       {importOpen && <ImportDataDialog onClose={() => setImportOpen(false)} onOpenSymbol={goToSymbol} />}
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
+      {helpOpen && <HelpDialog initialTopic={helpTopic} onClose={() => setHelpOpen(false)} />}
+      {addingToWatchlist && (
+        <AddToWatchlistDialog
+          symbols={addingToWatchlist.symbols}
+          startWithNewList={addingToWatchlist.newList}
+          newListName="My watchlist"
+          onClose={() => setAddingToWatchlist(null)}
+          say={(level, text) => toast(text, level === 'error' ? 'error' : 'success')}
+        />
+      )}
       {providersOpen && <DataProvidersDialog onClose={() => setProvidersOpen(false)} />}
       {aiProvidersOpen && <AiProvidersDialog providers={aiProviders} onClose={() => setAiProvidersOpen(false)} onChanged={reloadAiProviders} say={toast} />}
       {alertForm && <AlertFormDialog seed={alertForm} onClose={() => setAlertForm(null)} />}
