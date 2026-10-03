@@ -1,10 +1,12 @@
-//! Housekeeping for a data source the app no longer has.
+//! Housekeeping for the data sources the app no longer has.
 
 use rusqlite::Connection;
 
 use super::preferences;
+use crate::secrets::Secrets;
 
 const YAHOO_PURGED_PREF: &str = "yahooLeftoversPurged";
+const DHAN_PURGED_PREF: &str = "dhanLeftoversPurged";
 
 /// Yahoo Finance used to be a data source. What it left in the database is cache
 /// the app can rebuild, or a setting nothing reads any more, so it is removed once,
@@ -33,6 +35,43 @@ pub fn purge_yahoo_leftovers_once(conn: &mut Connection) -> rusqlite::Result<()>
         [],
     )?;
     preferences::set(&tx, YAHOO_PURGED_PREF, "1")?;
+    tx.commit()
+}
+
+/// Dhan used to be a data source. Its credentials are removed from the OS credential store (they
+/// were a secret the app no longer needs to hold), and what it left in the database — cached and
+/// stored bars, its instrument list, its settings — is removed once, on the first launch after it
+/// was dropped. A market-data store that was downloaded from Dhan is forgotten too, so the next
+/// download comes from the broker that remains.
+///
+/// Nothing the user wrote is touched: watchlists, layouts and alerts keep their `dhan:` symbols
+/// (they simply can no longer be loaded).
+pub fn purge_dhan_leftovers_once(conn: &mut Connection, secrets: &Secrets) -> rusqlite::Result<()> {
+    if preferences::get(conn, DHAN_PURGED_PREF)?.is_some() {
+        return Ok(());
+    }
+    for key in ["accessToken", "clientId"] {
+        secrets.delete(conn, "dhan", key)?;
+    }
+    let store_was_dhan = preferences::get(conn, "marketData.provider")?.as_deref() == Some("dhan");
+    let tx = conn.transaction()?;
+    for table in ["bars_cache", "research_bars", "research_coverage", "market_symbols"] {
+        tx.execute(&format!("DELETE FROM {table} WHERE symbol LIKE 'dhan:%'"), [])?;
+    }
+    tx.execute_batch("DROP TABLE IF EXISTS dhan_instruments;")?;
+    tx.execute("DELETE FROM provider_settings WHERE provider = 'dhan'", [])?;
+    tx.execute("DELETE FROM provider_secrets_fallback WHERE provider = 'dhan'", [])?;
+    tx.execute(
+        "DELETE FROM ui_preferences WHERE key IN ('pine_dock_dhan', 'dhan_feed') OR (key = 'default_provider' AND value = 'dhan')",
+        [],
+    )?;
+    if store_was_dhan {
+        tx.execute(
+            "DELETE FROM ui_preferences WHERE key LIKE 'marketData.%' AND key != 'marketData.auto'",
+            [],
+        )?;
+    }
+    preferences::set(&tx, DHAN_PURGED_PREF, "1")?;
     tx.commit()
 }
 
@@ -145,5 +184,79 @@ mod tests {
         let mut conn = db.conn.lock().unwrap();
         purge_yahoo_leftovers_once(&mut conn).unwrap();
         assert!(cached_symbols(&conn).is_empty());
+    }
+
+    mod dhan {
+        use super::*;
+        use crate::secrets::testing::MemoryKeychain;
+
+        #[test]
+        fn dhan_credentials_data_and_settings_go_but_zerodhas_stay() {
+            let db = old_database();
+            let secrets = Secrets::new(Box::new(MemoryKeychain::default()));
+            let mut conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE dhan_instruments (ticker TEXT PRIMARY KEY);
+                 INSERT INTO research_coverage (symbol, interval, from_ts, to_ts, synced_at) VALUES
+                   ('dhan:NSE:RELIANCE', 'D', 1, 2, 3), ('zerodha:NSE:TCS', 'D', 1, 2, 3);
+                 INSERT OR REPLACE INTO ui_preferences (key, value) VALUES ('default_provider', 'dhan'),
+                   ('marketData.provider', 'dhan'), ('marketData.lastUpdate', '5'), ('marketData.auto', 'false');",
+            )
+            .unwrap();
+            secrets.set(&conn, "dhan", "accessToken", "tok").unwrap();
+            secrets.set(&conn, "zerodha", "accessToken", "kite").unwrap();
+
+            purge_dhan_leftovers_once(&mut conn, &secrets).unwrap();
+
+            assert_eq!(secrets.get(&conn, "dhan", "accessToken").unwrap(), None);
+            assert_eq!(
+                secrets.get(&conn, "zerodha", "accessToken").unwrap().as_deref(),
+                Some("kite")
+            );
+            assert_eq!(cached_symbols(&conn), ["AAPL", "QPOWER.NS", "zerodha:NSE:TCS"]);
+            assert_eq!(count(&conn, "SELECT COUNT(*) FROM research_coverage"), 1);
+            assert_eq!(
+                count(
+                    &conn,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE name = 'dhan_instruments'"
+                ),
+                0
+            );
+            assert_eq!(
+                count(&conn, "SELECT COUNT(*) FROM provider_settings WHERE provider = 'dhan'"),
+                0
+            );
+            assert_eq!(preferences::get(&conn, "default_provider").unwrap(), None);
+            assert_eq!(
+                preferences::get(&conn, "marketData.provider").unwrap(),
+                None,
+                "the next download picks again"
+            );
+            assert_eq!(preferences::get(&conn, "marketData.lastUpdate").unwrap(), None);
+            assert_eq!(
+                preferences::get(&conn, "marketData.auto").unwrap().as_deref(),
+                Some("false"),
+                "a choice the user made stays"
+            );
+        }
+
+        #[test]
+        fn a_store_downloaded_from_zerodha_is_kept_and_it_runs_once() {
+            let db = Database::open_in_memory().unwrap();
+            let secrets = Secrets::new(Box::new(MemoryKeychain::default()));
+            let mut conn = db.conn.lock().unwrap();
+            preferences::set(&conn, "marketData.provider", "zerodha").unwrap();
+            purge_dhan_leftovers_once(&mut conn, &secrets).unwrap();
+            assert_eq!(
+                preferences::get(&conn, "marketData.provider").unwrap().as_deref(),
+                Some("zerodha")
+            );
+            cache(&conn, "dhan:NSE:LATER", "1D");
+            purge_dhan_leftovers_once(&mut conn, &secrets).unwrap();
+            assert!(
+                cached_symbols(&conn).contains(&"dhan:NSE:LATER".to_string()),
+                "the second launch leaves later rows alone"
+            );
+        }
     }
 }

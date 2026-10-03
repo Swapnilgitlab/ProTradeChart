@@ -18,6 +18,7 @@ import { FINDS, LIMITS, MEASURE_STATS, normalizeSpec, OPS, SERIES, SpecError, ty
 /** What each family computes. A `Record` over every family, so a new one can't be left out. */
 export const FAMILY_MEANING: Record<Family, string> = {
   return: 'close / close N bars earlier − 1',
+  change: 'close − close N bars earlier, in rupees',
   gain_from_low: 'close / lowest close of the last N+1 bars − 1',
   sma: 'simple moving average of close',
   ema: 'exponential moving average of close',
@@ -58,6 +59,9 @@ export const PLAIN_MEANING: Record<(typeof PLAIN)[number], string> = {
   macd: 'MACD (12, 26) as a fraction of close',
   macd_signal: 'MACD signal line (9) as a fraction of close',
   macd_hist: 'MACD − signal, as a fraction of close',
+  gap: "open / the previous bar's close − 1",
+  gap_up: 'the gap when the open is above the previous close, else 0',
+  gap_down: 'how far the open is below the previous close (a positive fraction), else 0',
 };
 
 /** The Study Specification and its feature grammar, for Claude. */
@@ -75,7 +79,7 @@ Returns, distances, slopes and volatilities are fractions: 0.25 is +25%, 1.0 is 
 - name: a short title (at most 120 characters). description: one or two sentences of what the Study asks.
 - template: null.
 - universe.source: "instruments" (every listed stock of the exchanges), "watchlist" (universe.watchlist names one of the user's watchlists) or "symbols" (universe.symbols lists symbols written provider:EXCHANGE:TICKER, e.g. zerodha:NSE:RELIANCE).
-- universe.provider: "zerodha" or "dhan". universe.exchanges: one or more of "NSE", "BSE" (NSE alone unless asked).
+- universe.provider: always "zerodha". universe.exchanges: one or more of "NSE", "BSE" (NSE alone unless asked).
 - universe.series: which listings count as stocks, one or more of ${SERIES.map((s) => `"${s}"`).join(', ')} (EQ: ordinary shares; BE: trade-for-trade; SME: the SME platforms). ["EQ"] unless asked.
 - universe.market_cap_min: always null (no market-cap data exists).
 - universe.min_avg_traded_value: rupees a day, the 50-day average of close × volume at the event, or null. 1e7 is ₹1 Cr.
@@ -83,7 +87,7 @@ Returns, distances, slopes and volatilities are fractions: 0.25 is +25%, 1.0 is 
 - period.start: first date an event may fall on, YYYY-MM-DD. period.end: last date, or null for the latest data.
 - event.conditions: 1 to ${LIMITS.conditions} conditions that must all hold. The event is the first bar on which they all hold after a bar on which they didn't.
 - event.label: a short name for the event. event.cooldown_days: bars before the same stock can have another event (252 for once-a-year events like doubling; shorter for frequent ones).
-- A condition is {left, op, right, label}: left is a feature name, op is one of ${OPS.map((o) => `"${o}"`).join(', ')}, right is a number or another feature name. crosses_above/crosses_below hold on the bar that crosses. label may be null.
+- A condition is {left, op, right, label}: left is a feature name, op is one of ${OPS.map((o) => `"${o}"`).join(', ')}, right is a number or another feature name, or [low, high] for "between" and "outside" (between includes both ends). crosses_above/crosses_below hold on the bar that crosses. label may be null. A Study reads daily bars: never add @W or @M to a feature name.
 - pre_event_filters: up to ${LIMITS.filters} conditions, each with at = bars before the event it is judged at (0: on the event bar). A filter judged before the event uses only what was known then.
 - lookback_windows: bars before the event at which metrics are observed, 1 to ${LIMITS.windows} values of at most ${MAX_WINDOW}, e.g. [252, 126, 63, 21].
 - forward_windows: bars after the event whose returns are measured, 1 to ${LIMITS.windows} values, e.g. [21, 63, 126, 252].
@@ -175,7 +179,7 @@ export const SPEC_SCHEMA = object({
   template: nullable(STRING),
   universe: object({
     source: { type: 'string', enum: ['instruments', 'watchlist', 'symbols'] },
-    provider: { type: 'string', enum: ['zerodha', 'dhan'] },
+    provider: { type: 'string', enum: ['zerodha'] },
     exchanges: { type: 'array', items: { type: 'string', enum: ['NSE', 'BSE'] } },
     series: { type: 'array', items: { type: 'string', enum: [...SERIES] } },
     watchlist: nullable(STRING),

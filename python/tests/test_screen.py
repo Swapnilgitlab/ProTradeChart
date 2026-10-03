@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
-from support import Case, ms  # noqa: E402  (also puts the package on the path)
+from support import Case, ms, panel_bytes  # noqa: E402  (also puts the package on the path)
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
@@ -108,11 +108,16 @@ def body(symbol, closes, volume=1e5):
     }
 
 
+def latest(frame, s):
+    """One symbol's (passed, not judged, values), as a whole run judges it."""
+    return screen.judge({"zerodha:NSE:X": frame}, s)["zerodha:NSE:X"][1:]
+
+
 class LatestBarTests(unittest.TestCase):
     def test_filters_are_judged_on_the_latest_bar_only(self):
         s = screen.normalize_screen(spec())
         rising = pd.Series(np.linspace(100, 200, len(DAYS)), index=DAYS)
-        passed, unknown, values = screen.latest(feat.Features(frame_of(rising)), s)
+        passed, unknown, values = latest(frame_of(rising), s)
         self.assertTrue(passed)
         self.assertFalse(unknown)
         self.assertEqual(screen.output_columns(s), ["close", "return_1", "ema_50"])
@@ -120,20 +125,20 @@ class LatestBarTests(unittest.TestCase):
         # Above its EMA for most of history but not on the last bar: no match.
         dipped = rising.copy()
         dipped.iloc[-1] = 120.0
-        self.assertFalse(screen.latest(feat.Features(frame_of(dipped)), s)[0])
+        self.assertFalse(latest(frame_of(dipped), s)[0])
 
     def test_a_cross_means_it_crossed_on_the_latest_bar(self):
         s = screen.normalize_screen(spec(filters=[{"left": "close", "op": "crosses_above", "right": 150}]))
         closes = pd.Series(100.0, index=DAYS[:60])
         closes.iloc[-1] = 160.0
-        self.assertTrue(screen.latest(feat.Features(frame_of(closes)), s)[0])
+        self.assertTrue(latest(frame_of(closes), s)[0])
         closes.iloc[-2] = 160.0  # crossed the day before: not today's news
-        self.assertFalse(screen.latest(feat.Features(frame_of(closes)), s)[0])
+        self.assertFalse(latest(frame_of(closes), s)[0])
 
     def test_too_little_history_is_no_match_and_is_said(self):
         s = screen.normalize_screen(spec(filters=[{"left": "close", "op": ">", "right": "sma_200"}]))
         short = pd.Series(np.linspace(100, 200, 50), index=DAYS[:50])
-        passed, unknown, values = screen.latest(feat.Features(frame_of(short)), s)
+        passed, unknown, values = latest(frame_of(short), s)
         self.assertFalse(passed)
         self.assertTrue(unknown)
         self.assertIsNone(values[screen.output_columns(s).index("sma_200")])
@@ -161,6 +166,10 @@ def bars_route(query):
     return 200, body(query["symbol"], closes)
 
 
+def sync_route(payload):
+    return 200, {"results": [{"symbol": s, "status": "current", "reason": None} for s in payload["symbols"]]}
+
+
 class RunTests(Case):
     routes = {
         "/v1/ping": lambda q: (200, {"ok": True, "api": 1, "app": "9.9.9"}),
@@ -173,7 +182,7 @@ class RunTests(Case):
         ),
         "/v1/bars": bars_route,
     }
-    posts = {"/v1/results": lambda payload: (200, {"ok": True})}
+    posts = {"/v1/results": lambda payload: (200, {"ok": True}), "/v1/bars/sync": sync_route}
     run_id = "run-7"
 
     def test_a_screen_file_runs_and_posts_its_matches_sorted(self):
@@ -187,7 +196,7 @@ class RunTests(Case):
         self.assertEqual(code, 0)
         self.assertIn("[progress] 100% Complete", out.getvalue())
         self.assertIn(f"[engine] protrade screen {screen.ENGINE_VERSION} ({screen.engine_build()})", out.getvalue())
-        posted = self.stub.posted()
+        posted = self.stub.posted("/v1/results")
         self.assertEqual(len(posted), 1)
         self.assertEqual((posted[0]["runId"], posted[0]["kind"], posted[0]["title"]), ("run-7", "screen", "Above the 50 EMA"))
         data = posted[0]["data"]
@@ -207,6 +216,41 @@ class RunTests(Case):
         # A bond on the equity list is never fetched.
         fetched = {r["query"]["symbol"] for r in self.stub.requests if r["path"] == "/v1/bars"}
         self.assertNotIn("zerodha:NSE:SGBAUG28V-GB", fetched)
+
+    def test_the_universe_is_offered_for_a_quote_top_up_before_the_historical_fetch(self):
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            screen.Screen(spec()).run(today=TODAY)
+        synced = self.stub.posted("/v1/bars/sync")
+        self.assertEqual(len(synced), 1)
+        self.assertEqual(set(synced[0]["symbols"]), set(SERIES) | {"zerodha:NSE:GONE"}, "the bond is never offered either")
+        self.assertEqual(synced[0]["interval"], "D")
+        self.assertIn("already up to date", out.getvalue())
+
+    def test_symbols_the_market_data_store_holds_are_read_in_one_go_with_the_same_result(self):
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            before = screen.Screen(spec()).run(today=TODAY)
+        self.stub.requests.clear()
+        held = {s for s in SERIES if s != "zerodha:NSE:DOWN"}
+        self.stub.posts["/v1/panel"] = lambda p: (
+            200,
+            panel_bytes([(s, body(s, SERIES[s]) if s in held else None, s in held) for s in p["symbols"]]),
+        )
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            after = screen.Screen(spec()).run(today=TODAY)
+        fetched = {r["query"]["symbol"] for r in self.stub.requests if r["path"] == "/v1/bars"}
+        self.assertEqual(fetched, {"zerodha:NSE:DOWN", "zerodha:NSE:GONE"}, "only what the store lacks")
+        self.assertEqual(set(self.stub.posted("/v1/bars/sync")[0]["symbols"]), {"zerodha:NSE:DOWN", "zerodha:NSE:GONE"})
+        for key in ("rows", "columns", "warnings"):
+            self.assertEqual(after[key], before[key], key)
+        for key in ("symbols_requested", "symbols_loaded", "symbols_failed", "symbols_stale", "matched", "as_of"):
+            self.assertEqual(after["meta"][key], before["meta"][key], key)
+
+    def test_a_missing_or_broken_sync_route_does_not_stop_the_run(self):
+        del self.stub.posts["/v1/bars/sync"]  # as an app build without the route would 404
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            data = screen.Screen(spec()).run(today=TODAY)
+        self.assertEqual(data["meta"]["matched"], 2, "the ordinary per-symbol fetch still ran")
 
     def test_matches_past_the_cap_are_cut_after_sorting(self):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):

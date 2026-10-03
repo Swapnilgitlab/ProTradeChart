@@ -9,26 +9,32 @@
  *  Pure. */
 
 import { measureLine } from './measures';
-import { canonicalFeature, describeCondition, featureLabel, needsBenchmark, windowLabel } from './metrics';
+import { canonicalFeature, describeCondition, featureInterval, featureLabel, needsBenchmark, windowLabel } from './metrics';
 
 export const SPEC_VERSION = 1;
 
 export type UniverseSource = 'instruments' | 'watchlist' | 'symbols';
-export type StudyProvider = 'zerodha' | 'dhan';
+export type StudyProvider = 'zerodha';
+/** Dhan is no longer a data source. A Study or screen saved with it lists the same NSE and BSE
+ *  shares from Zerodha's instrument list, which its Broker field then shows, rather than
+ *  refusing to open. `protrade/study.py`'s `RETIRED_PROVIDERS` does the same. */
+export const currentProvider = (provider: unknown): unknown => (provider === 'dhan' ? 'zerodha' : provider);
 export type Exchange = 'NSE' | 'BSE';
 /** Which listings count as stocks: ordinary shares, the trade-for-trade series (BE/BZ) and the SME
  *  platforms. Bonds, SGBs, G-secs, T-bills and funds on an exchange's "equity" list never do. The
  *  engine's `listing_series` applies it. */
 export const SERIES = ['EQ', 'BE', 'SME'] as const;
 export type Series = (typeof SERIES)[number];
-export const OPS = ['>', '>=', '<', '<=', 'crosses_above', 'crosses_below'] as const;
+export const OPS = ['>', '>=', '<', '<=', 'crosses_above', 'crosses_below', 'between', 'outside'] as const;
 export type Op = (typeof OPS)[number];
+/** Operators whose right side is a range, `[low, high]`; `between` includes both ends. */
+export const RANGE_OPS: readonly Op[] = ['between', 'outside'];
 
 export interface Condition {
   left: string;
   op: Op;
-  /** A number, or another feature's name. */
-  right: number | string;
+  /** A number, another feature's name, or `[low, high]` for `between` and `outside`. */
+  right: number | string | [number, number];
   label?: string;
 }
 
@@ -183,7 +189,7 @@ function windows(value: unknown, field: string): number[] {
   return [...new Set(value.map((v) => int(v, field, 1, LIMITS.window)))].sort((a, b) => a - b);
 }
 
-const CONDITION_TEXT = /^\s*([A-Za-z0-9_]+)\s*(>=|<=|>|<|crosses_above|crosses_below)\s*(\S+)\s*$/;
+const CONDITION_TEXT = /^\s*([A-Za-z0-9_@]+)\s*(>=|<=|>|<|crosses_above|crosses_below)\s*(\S+)\s*$/;
 
 /** A condition from `{left, op, right}` or from text such as `return_252 crosses_above 1.0`. */
 export function parseCondition(value: unknown, field = 'condition'): Condition {
@@ -198,8 +204,15 @@ export function parseCondition(value: unknown, field = 'condition'): Condition {
   const left = typeof raw.left === 'string' ? canonicalFeature(raw.left) : null;
   if (!left) throw new SpecError(`${field}: unknown feature ${JSON.stringify(raw.left)}.`);
   if (!(OPS as readonly unknown[]).includes(raw.op)) throw new SpecError(`${field}: the operator must be one of ${OPS.join(', ')}.`);
-  let right: number | string;
-  if (typeof raw.right === 'number' && Number.isFinite(raw.right)) right = raw.right;
+  let right: Condition['right'];
+  if (RANGE_OPS.includes(raw.op as Op)) {
+    const range = raw.right;
+    if (!Array.isArray(range) || range.length !== 2 || !range.every((v) => typeof v === 'number' && Number.isFinite(v))) {
+      throw new SpecError(`${field}: ${String(raw.op)} needs a range: [low, high], two numbers.`);
+    }
+    if (range[0] > range[1]) throw new SpecError(`${field}: the low end of the range is above the high end.`);
+    right = [range[0], range[1]];
+  } else if (typeof raw.right === 'number' && Number.isFinite(raw.right)) right = raw.right;
   else if (typeof raw.right === 'string' && canonicalFeature(raw.right)) right = canonicalFeature(raw.right)!;
   else throw new SpecError(`${field}: the right side must be a number or a feature.`);
   const out: Condition = { left, op: raw.op as Op, right };
@@ -322,9 +335,22 @@ export function measureReach(m: Measure): number {
 
 export { describeCondition };
 
+/** `c` with operator `op`, its right side reshaped to fit: a range op takes `[low, high]` (from the
+ *  number it had, or 0), and any other op the range's low end. */
+export function withOp<T extends Condition>(c: T, op: Op): T {
+  const range = RANGE_OPS.includes(op);
+  if (range && !Array.isArray(c.right)) {
+    const v = typeof c.right === 'number' && Number.isFinite(c.right) ? c.right : 0;
+    return { ...c, op, right: [v, v] };
+  }
+  if (!range && Array.isArray(c.right)) return { ...c, op, right: c.right[0] };
+  return { ...c, op };
+}
+
 /** The engine's own wording, used as a label when none is given: `return_252 >= 1`. */
 export function conditionText(c: Condition): string {
-  return `${c.left} ${c.op} ${typeof c.right === 'number' ? String(c.right) : c.right}`;
+  const right = Array.isArray(c.right) ? `${c.right[0]} and ${c.right[1]}` : String(c.right);
+  return `${c.left} ${c.op} ${right}`;
 }
 
 /** The spec checked and completed, with every feature name in its canonical spelling. Throws
@@ -340,8 +366,8 @@ export function normalizeSpec(input: unknown): StudySpec {
   const u = isRecord(input.universe) ? input.universe : {};
   const source = (u.source ?? 'instruments') as UniverseSource;
   if (!['instruments', 'watchlist', 'symbols'].includes(source)) throw new SpecError('universe.source must be instruments, watchlist or symbols.');
-  const provider = (u.provider ?? 'zerodha') as StudyProvider;
-  if (provider !== 'zerodha' && provider !== 'dhan') throw new SpecError('universe.provider must be zerodha or dhan.');
+  const provider = currentProvider(u.provider ?? 'zerodha') as StudyProvider;
+  if (provider !== 'zerodha') throw new SpecError('universe.provider must be zerodha.');
   const exchanges = u.exchanges ?? ['NSE'];
   if (!Array.isArray(exchanges) || exchanges.length === 0 || exchanges.some((e) => e !== 'NSE' && e !== 'BSE')) {
     throw new SpecError('universe.exchanges must list one or more of NSE, BSE.');
@@ -451,6 +477,9 @@ export function normalizeSpec(input: unknown): StudySpec {
     },
     output: { max_events: int(output.max_events, 'output.max_events', 1, LIMITS.maxEvents, 5000) },
   };
+  // On a past day, that week's or month's bar includes the days after it: a look-ahead.
+  const periodic = requiredFeatures(spec).filter((n) => featureInterval(n) !== 'D');
+  if (periodic.length) throw new SpecError(`${periodic.join(', ')}: weekly and monthly features are for the Screener; a Study reads daily bars.`);
   if (!spec.benchmark) {
     const needing = requiredFeatures(spec).filter(needsBenchmark);
     if (needing.length) throw new SpecError(`${needing.join(', ')} compare against an index: set a benchmark (e.g. zerodha:NSE:NIFTY_500).`);
@@ -507,7 +536,7 @@ export function interpret(spec: StudySpec): Interpretation[] {
   const universe =
     u.source === 'instruments'
       ? [
-          `${u.exchanges.join(' + ')} listed ${u.series.length === 1 ? 'ordinary shares' : `shares (${u.series.join(', ')} series)`} (${u.provider === 'zerodha' ? 'Zerodha' : 'Dhan'} instrument list; bonds, SGBs and funds left out)`,
+          `${u.exchanges.join(' + ')} listed ${u.series.length === 1 ? 'ordinary shares' : `shares (${u.series.join(', ')} series)`} (Zerodha instrument list; bonds, SGBs and funds left out)`,
         ]
       : u.source === 'watchlist'
         ? [`The watchlist "${u.watchlist}"`]

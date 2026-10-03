@@ -171,7 +171,11 @@ export const listWatchlists = () => invoke<WatchlistSummary[]>('list_watchlists'
 export const getWatchlist = (id: number) => invoke<WatchlistDetail>('get_watchlist', { id });
 
 /** Makes the Indices watchlist (broad market, sectors, themes) from a broker's instrument list. */
-export const createIndicesWatchlist = (provider: 'zerodha' | 'dhan') => invoke<WatchlistDetail>('create_indices_watchlist', { provider });
+export const createIndicesWatchlist = (provider: 'zerodha') => invoke<WatchlistDetail>('create_indices_watchlist', { provider });
+
+/** Every NSE equity a broker's instrument list has (~2,000 symbols) — feeds Vela's own symbol
+ *  index (`data/providers/zerodha.ts`'s `listSymbols`), not the app's own search box. */
+export const listNseEquities = (provider: 'zerodha') => invoke<SymbolMatch[]>('list_nse_equities', { provider });
 
 /** A symbol's drawings (Vela's document, as JSON), or null when none were ever stored for it. */
 export const getSymbolDrawings = (symbol: string) => invoke<string | null>('get_symbol_drawings', { symbol });
@@ -290,21 +294,6 @@ export interface FeedStatus {
   message: string | null;
 }
 
-export interface DhanStatus {
-  instrumentCount: number;
-  instrumentsUpdatedAt: number | null;
-  tokenExpiresAt: number | null;
-  feed: FeedStatus;
-}
-
-export interface DhanTick {
-  segment: number;
-  securityId: number;
-  ltp: number;
-  ltt: number | null;
-  volume: number | null;
-}
-
 export interface ZerodhaStatus {
   instrumentCount: number;
   instrumentsUpdatedAt: number | null;
@@ -354,25 +343,6 @@ export const setProviderEnabled = (provider: string, enabled: boolean) =>
   invoke<void>('set_provider_enabled', { provider, enabled });
 
 export const testProvider = (provider: string) => invoke<TestResult>('test_provider', { provider });
-
-export const dhanStatus = () => invoke<DhanStatus>('dhan_status');
-
-export const dhanUpdateInstruments = () => invoke<{ count: number; updatedAt: number }>('dhan_update_instruments');
-
-export const dhanRenewToken = () => invoke<{ tokenExpiresAt: number | null }>('dhan_renew_token');
-
-export const dhanSearchInstruments = (query: string, limit = 8) =>
-  invoke<SymbolMatch[]>('dhan_search_instruments', { query, limit });
-
-export const dhanFetchBars = (ticker: string, interval: string, fromMs?: number, toMs?: number) =>
-  invoke<BarsResponse>('dhan_fetch_bars', { ticker, interval, fromMs, toMs });
-
-export const dhanQuotes = (tickers: string[]) => invoke<Quote[]>('dhan_quotes', { tickers });
-
-export const dhanSubscribe = (ticker: string) =>
-  invoke<{ segment: number; securityId: number }>('dhan_subscribe', { ticker });
-
-export const dhanUnsubscribe = (ticker: string) => invoke<void>('dhan_unsubscribe', { ticker });
 
 export const zerodhaStatus = () => invoke<ZerodhaStatus>('zerodha_status');
 
@@ -598,8 +568,12 @@ export interface StudyEstimate {
   symbols: number;
   /** Already held back far enough: at most a top-up. */
   stored: number;
-  /** Broker requests expected, and roughly how long they take at the broker's pace. */
+  /** Historical-endpoint requests expected: new symbols, or ones not held back far enough. */
   requests: number;
+  /** Batched quote calls the daily top-up needs instead, for stored symbols that only need
+   *  their newest bar — usually 0 or 1, never one per symbol. */
+  quoteRequests: number;
+  /** Roughly how long `requests` and `quoteRequests` together take, at each endpoint's pace. */
   seconds: number;
   /** Listings left out as not stocks, or as a company's second listing. */
   listingsSkipped: number;
@@ -685,6 +659,55 @@ export const getScreenerResult = (id: string) => invoke<string | null>('get_scre
 
 /** Starts the Python engine on a screen. Its progress, result and exit arrive as `python-*` events for `runId`. */
 export const runScreen = (specJson: string, runId: string) => invoke<void>('screen_run', { specJson, runId });
+
+// ---- Market data (the local store of every NSE stock's daily history) ---------------
+
+export type MarketDataTrigger = 'download' | 'update' | 'automatic';
+export type MarketDataPhase = 'history' | 'prices' | 'corrections';
+
+export interface MarketDataProgress {
+  phase: MarketDataPhase;
+  done: number;
+  total: number;
+}
+
+export interface MarketDataSummary {
+  listed: number;
+  newListings: number;
+  downloaded: number;
+  updated: number;
+  refetched: number;
+  failed: number;
+  holiday: boolean;
+}
+
+export interface MarketDataStatus {
+  /** The broker the history comes from; null until the download has been started. */
+  provider: 'zerodha' | null;
+  autoUpdate: boolean;
+  running: { trigger: MarketDataTrigger; startedAt: number; progress: MarketDataProgress | null } | null;
+  lastUpdate: number | null;
+  lastFailure: number | null;
+  lastError: string | null;
+  holdings: { symbols: number; series: number; fromMs: number | null; toMs: number | null };
+}
+
+export interface MarketDataFinished {
+  trigger: MarketDataTrigger;
+  summary: MarketDataSummary | null;
+  error: string | null;
+}
+
+export const marketDataStatus = () => invoke<MarketDataStatus>('market_data_status');
+
+/** Starts (or resumes) the five-year download. Only its button calls this. */
+export const marketDataDownload = () => invoke<void>('market_data_download');
+
+export const marketDataUpdateNow = () => invoke<void>('market_data_update_now');
+
+export const marketDataStop = () => invoke<void>('market_data_stop');
+
+export const marketDataSetAuto = (on: boolean) => invoke<void>('market_data_set_auto', { on });
 
 // ---- Research Notebooks -------------------------------------------------------
 

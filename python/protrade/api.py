@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 import warnings
@@ -10,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 
 from . import client, frames
+from . import panels as _panel
 
 
 class DataLimitWarning(UserWarning):
@@ -30,7 +32,7 @@ def instruments(provider: str, exchange: str | None = None, kind: str | None = N
                 q: str | None = None, limit: int | None = None) -> pd.DataFrame:
     """A broker's instrument list, to build a universe from.
 
-    ``provider`` is ``"zerodha"`` or ``"dhan"``. ``exchange`` is ``"NSE"``, ``"BSE"``,
+    ``provider`` is ``"zerodha"``. ``exchange`` is ``"NSE"``, ``"BSE"``,
     ``"NFO"``, ``"MCX"``...; ``kind`` is ``"EQUITY"``, ``"INDEX"`` or ``"FUT"``; ``q`` matches
     the symbol or name. The ``symbol`` column can be passed straight to :func:`bars`.
     """
@@ -47,7 +49,7 @@ def watchlist(which: str | int, providers: tuple[str, ...] | list[str] | None = 
     """The symbols on one of the app's watchlists, by name or id.
 
     Symbols from sources a script can't read (the crypto exchanges) are easy to have on a
-    list; pass ``providers=("zerodha", "dhan")`` to keep only the ones that can be.
+    list; pass ``providers=("zerodha",)`` to keep only the ones that can be.
     """
     key = "id" if isinstance(which, int) and not isinstance(which, bool) else "name"
     symbols = [row["symbol"] for row in client.get("/v1/watchlist", **{key: which})["symbols"]]
@@ -69,7 +71,7 @@ class Universe(list):
         self.source = source
 
 
-def universe(name: str | None = None, providers: tuple[str, ...] | list[str] = ("zerodha", "dhan")) -> Universe:
+def universe(name: str | None = None, providers: tuple[str, ...] | list[str] = ("zerodha",)) -> Universe:
     """The symbols to work on, so a script runs the first time with nothing set up.
 
     With a ``name``, that watchlist (`NotFoundError` if there is none, or nothing on it comes from
@@ -90,7 +92,7 @@ def universe(name: str | None = None, providers: tuple[str, ...] | list[str] = (
     broker = next((p for p in wanted if p in usable), None)
     if broker is None:
         raise client.NotConfiguredError(
-            "No broker is set up yet. Open Data providers, add Zerodha or Dhan, log in, and switch it on."
+            "No broker is set up yet. Open Data providers, add Zerodha, log in, and switch it on."
         )
     return Universe([f"{broker}:NSE:{ticker}" for ticker in SAMPLE_TICKERS], "a sample of large NSE stocks")
 
@@ -101,8 +103,8 @@ def bars(symbol: str, interval: str = "D", start=None, end=None, limit: int | No
 
     ``symbol`` is ``provider:EXCHANGE:TICKER``, like ``"zerodha:NSE:RELIANCE"``, or
     ``"csv:NAME"`` for a file imported in the app. ``interval`` is ``"D"`` or minutes
-    (``"1"``, ``"5"``, ``"15"``, ``"60"``); Zerodha serves 1, 3, 5, 10, 15, 30, 60 and D,
-    Dhan 1, 5, 15, 25, 60 and D. For anything else fetch a finer interval and use
+    (``"1"``, ``"5"``, ``"15"``, ``"60"``); Zerodha serves 1, 3, 5, 10, 15, 30, 60 and D.
+    For anything else fetch a finer interval and use
     :func:`resample`.
 
     ``start`` and ``end`` are dates or times (``"2020-01-01"``, a ``datetime``, a pandas
@@ -139,6 +141,49 @@ def bars(symbol: str, interval: str = "D", start=None, end=None, limit: int | No
     return frame
 
 
+def panel(symbols, start=None, end=None, bars: int | None = None) -> _panel.Panel:
+    """Daily bars for many symbols at once, from the app's market-data store.
+
+    The store holds five years of every NSE stock and index once its market data has been
+    downloaded (Data providers → Market data), so this answers a whole market in about a second
+    and never waits on the broker. ``start``/``end`` limit the dates; ``bars`` keeps the newest
+    that many per symbol. A symbol the store doesn't hold up to the latest session is listed in
+    ``result.missing`` (read those with :func:`bars`); :func:`bars_many` does that for you.
+
+    ``result.frame(symbol)`` is one symbol's DataFrame, as :func:`bars` gives it;
+    ``result.wide("close")`` is a dates × symbols table.
+    """
+    symbols = list(dict.fromkeys(symbols))
+    if bars is not None and (isinstance(bars, bool) or not isinstance(bars, int) or bars < 1):
+        raise ValueError("bars must be a whole number of bars, at least 1")
+    start_ms, end_ms = frames.to_millis(start), frames.to_millis(end, end=True)
+    return _panel.combine(
+        [
+            _panel.fetch(symbols[i : i + _PANEL_BATCH], start_ms, end_ms, bars)
+            for i in range(0, max(len(symbols), 1), _PANEL_BATCH)
+        ]
+    )
+
+
+# Keep at or below the app's own cap (`MAX_PANEL_SYMBOLS`, src-tauri/src/pyapi/routes.rs).
+_PANEL_BATCH = 5_000
+
+
+def _from_panel(symbols, start, end, limit, tz=None, naive=False) -> tuple[dict, list]:
+    """The daily frames the store already holds, and the symbols it doesn't. An app without the
+    store (or a store that can't be read) answers nothing, and every symbol is fetched as before."""
+    if not symbols:
+        return {}, []
+    try:
+        stored = panel(symbols, start=start, end=end, bars=limit)
+    except client.FATAL:
+        raise
+    except client.ProTradeError:
+        return {}, list(symbols)
+    held = stored.held
+    return {s: stored.frame(s, tz=tz, naive=naive) for s in held}, stored.missing
+
+
 class BarsMap(dict):
     """The result of :func:`bars_many`: ``{symbol: DataFrame}``, plus ``.errors`` for the
     symbols that failed when ``errors="skip"``."""
@@ -173,19 +218,24 @@ def bars_many(symbols, interval: str = "D", start=None, end=None, limit: int | N
               tz: str | None = None, naive: bool = False) -> BarsMap:
     """:func:`bars` for many symbols, in parallel, in the order given.
 
-    The app paces the broker itself, so extra ``workers`` only overlap waiting; the first
-    run over a few hundred symbols takes minutes at the brokers' rate limits, later runs
-    fetch only what is new. ``errors="raise"`` stops at the first failure; ``"skip"`` leaves
-    a failed symbol out of the result and records it in ``result.errors`` (a problem that
-    would hit every symbol, like an expired token, still stops the run). The progress line
-    shows the rate and the time left, and says so once when the run will take minutes.
+    Daily bars come from the app's market-data store in one read (see :func:`panel`) for every
+    symbol it holds; only the rest are fetched one by one. The app paces the broker itself, so
+    extra ``workers`` only overlap waiting; a first run over a few hundred symbols the store
+    doesn't hold takes minutes at the brokers' rate limits, later runs fetch only what is new.
+    ``errors="raise"`` stops at the first failure; ``"skip"`` leaves a failed symbol out of the
+    result and records it in ``result.errors`` (a problem that would hit every symbol, like an
+    expired token, still stops the run). The progress line shows the rate and the time left,
+    and says so once when the run will take minutes.
     """
     if errors not in ("raise", "skip"):
         raise ValueError('errors must be "raise" or "skip"')
     symbols = list(dict.fromkeys(symbols))  # no repeats, order kept
     result = BarsMap()
-    total, done = len(symbols), 0
     fetched: dict[str, pd.DataFrame] = {}
+    remaining = symbols
+    if str(interval) == "D":
+        fetched, remaining = _from_panel(symbols, start, end, limit, tz, naive)
+    total, done = len(remaining), 0
     started, warned, shown = time.monotonic(), False, 0
 
     def one(symbol: str) -> pd.DataFrame:
@@ -193,7 +243,7 @@ def bars_many(symbols, interval: str = "D", start=None, end=None, limit: int | N
 
     pool = ThreadPoolExecutor(max_workers=max(1, workers))
     try:
-        futures = {pool.submit(one, s): s for s in symbols}
+        futures = {pool.submit(one, s): s for s in remaining}
         for future in as_completed(futures):
             symbol = futures[future]
             try:
@@ -229,10 +279,47 @@ def bars_many(symbols, interval: str = "D", start=None, end=None, limit: int | N
             result[symbol] = fetched[symbol]
     if result.errors:
         warnings.warn(
-            f"{len(result.errors)} of {total} symbols could not be fetched; see result.errors.",
+            f"{len(result.errors)} of {len(symbols)} symbols could not be fetched; see result.errors.",
             stacklevel=2,
         )
     return result
+
+
+# Keep at or below the app's own cap (`MAX_SYNC_SYMBOLS`, src-tauri/src/pyapi/routes.rs).
+_SYNC_BATCH = 5_000
+
+
+def _top_up(symbols, interval: str = "D", start=None, end=None, limit: int | None = None) -> dict | None:
+    """Best-effort: brings many symbols' daily coverage up to date from a batched broker quote
+    (``POST /v1/bars/sync``), ahead of the per-symbol :func:`bars` calls that follow it (as
+    :func:`protrade.screen.Screen.run` does). A symbol this helps needs no broker call at all
+    when :func:`bars` reaches it next; everything else is untouched and falls through to the
+    ordinary fetch, exactly as before this existed.
+
+    Never raises: an older app build with no such route, a broker outage, or any other
+    `ProTradeError` just means the fast lane is skipped for (the rest of) this call — never that
+    the run fails. Returns counts by status (``current``, ``updated``, ``fetch``, ``skipped``),
+    or ``None`` when it didn't run at all (too few symbols, a non-daily interval, or
+    ``PROTRADE_NO_TOPUP`` set) or didn't finish. Partial progress before a failure is still
+    saved in the app; only the count this call returns is lost.
+    """
+    symbols = list(dict.fromkeys(symbols))
+    if str(interval) != "D" or len(symbols) < 2 or os.environ.get(client.NO_TOPUP_ENV):
+        return None
+    body_from, body_to = frames.to_millis(start), frames.to_millis(end, end=True)
+    counts = {"current": 0, "updated": 0, "fetch": 0, "skipped": 0}
+    try:
+        for i in range(0, len(symbols), _SYNC_BATCH):
+            batch = symbols[i : i + _SYNC_BATCH]
+            answer = client.post(
+                "/v1/bars/sync",
+                {"symbols": batch, "interval": "D", "from": body_from, "to": body_to, "limit": limit},
+            )
+            for row in answer.get("results", []):
+                counts[row["status"]] = counts.get(row["status"], 0) + 1
+    except client.ProTradeError:
+        return None
+    return counts
 
 
 resample = frames.resample

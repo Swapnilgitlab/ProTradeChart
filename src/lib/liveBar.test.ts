@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bucketFor, LiveBarBuilder, resolveTickTime, sessionOpenForExchange, sessionOpenMinutes } from './liveBar';
+import { bucketFor, LiveBarBuilder, resolveTickTime, sessionOpenForExchange } from './liveBar';
 import { localMidnight } from './timeframes';
 
 const MIN = 60_000;
@@ -8,19 +8,7 @@ const OPEN_0915 = Date.parse('2024-01-02T03:45:00Z');
 const at = (minutesAfterOpen: number, seconds = 0) => OPEN_0915 + minutesAfterOpen * MIN + seconds * 1000;
 const tick = (ltp: number, volume: number | null = null) => ({ ltp, ltt: null, volume });
 const M5 = { kind: 'minutes', minutes: 5 } as const;
-const OPEN = sessionOpenMinutes(1);
-
-describe('sessionOpenMinutes', () => {
-  it('opens equities and derivatives at 09:15 and currency and commodities at 09:00', () => {
-    expect(sessionOpenMinutes(1)).toBe(555);
-    expect(sessionOpenMinutes(2)).toBe(555);
-    expect(sessionOpenMinutes(4)).toBe(555);
-    expect(sessionOpenMinutes(0)).toBe(555);
-    expect(sessionOpenMinutes(3)).toBe(540);
-    expect(sessionOpenMinutes(5)).toBe(540);
-    expect(sessionOpenMinutes(7)).toBe(540);
-  });
-});
+const OPEN = sessionOpenForExchange('NSE');
 
 describe('resolveTickTime', () => {
   const now = Date.parse('2027-01-15T06:00:00Z');
@@ -166,11 +154,5 @@ describe('sessionOpenForExchange', () => {
 
   it('opens currency and commodity markets at 09:00 IST', () => {
     for (const exchange of ['CDS', 'BCD', 'MCX']) expect(sessionOpenForExchange(exchange)).toBe(540);
-  });
-
-  it('agrees with the Dhan segment table for the same markets', () => {
-    expect(sessionOpenForExchange('NSE')).toBe(sessionOpenMinutes(1));
-    expect(sessionOpenForExchange('MCX')).toBe(sessionOpenMinutes(5));
-    expect(sessionOpenForExchange('CDS')).toBe(sessionOpenMinutes(3));
   });
 });

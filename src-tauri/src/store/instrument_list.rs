@@ -7,14 +7,12 @@ use rusqlite::{params, Connection};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
     Zerodha,
-    Dhan,
 }
 
 impl Source {
     pub fn parse(provider: &str) -> Option<Source> {
         match provider {
             "zerodha" => Some(Source::Zerodha),
-            "dhan" => Some(Source::Dhan),
             _ => None,
         }
     }
@@ -23,7 +21,6 @@ impl Source {
     fn table(self) -> &'static str {
         match self {
             Source::Zerodha => "zerodha_instruments",
-            Source::Dhan => "dhan_instruments",
         }
     }
 }
@@ -33,7 +30,7 @@ pub struct Listed {
     /// `NSE:RELIANCE`, without the provider.
     pub ticker: String,
     pub exchange: String,
-    /// The broker's own type: `EQUITY`, `INDEX`, `FUT` (Zerodha), `FUTSTK`, `FUTIDX`… (Dhan).
+    /// The broker's own type: `EQUITY`, `INDEX` or `FUT`.
     pub instrument: String,
     pub name: Option<String>,
     pub expiry: Option<String>,
@@ -108,18 +105,6 @@ mod tests {
             )
             .unwrap();
         }
-        for (ticker, exchange, instrument) in [
-            ("NSE:INFY", "NSE", "EQUITY"),
-            ("NFO:BANKNIFTY26SEPFUT", "NFO", "FUTIDX"),
-            ("NFO:TCS26SEPFUT", "NFO", "FUTSTK"),
-        ] {
-            conn.execute(
-                "INSERT INTO dhan_instruments (ticker, exchange, segment, security_id, instrument, symbol, name, expiry)
-                 VALUES (?1, ?2, 1, 1, ?3, ?1, NULL, NULL)",
-                params![ticker, exchange, instrument],
-            )
-            .unwrap();
-        }
     }
 
     fn tickers(rows: Vec<Listed>) -> Vec<String> {
@@ -131,9 +116,9 @@ mod tests {
     }
 
     #[test]
-    fn only_the_two_brokers_are_sources() {
+    fn only_zerodha_is_a_source() {
         assert_eq!(Source::parse("zerodha"), Some(Source::Zerodha));
-        assert_eq!(Source::parse("dhan"), Some(Source::Dhan));
+        assert_eq!(Source::parse("dhan"), None, "Dhan was removed");
         assert_eq!(Source::parse("binance"), None);
         assert_eq!(Source::parse("csv"), None);
     }
@@ -180,12 +165,7 @@ mod tests {
             kind: Some("FUT".into()),
             ..Filter::default()
         };
-        assert_eq!(all(&conn, Source::Zerodha, futures.clone()), ["NFO:NIFTY26SEPFUT"]);
-        assert_eq!(
-            all(&conn, Source::Dhan, futures),
-            ["NFO:BANKNIFTY26SEPFUT", "NFO:TCS26SEPFUT"],
-            "Dhan's FUTIDX and FUTSTK both count"
-        );
+        assert_eq!(all(&conn, Source::Zerodha, futures), ["NFO:NIFTY26SEPFUT"]);
     }
 
     #[test]

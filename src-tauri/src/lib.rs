@@ -3,8 +3,9 @@ mod ai_commands;
 mod alert_commands;
 mod commands;
 mod db;
-mod dhan;
 mod market;
+mod marketdata;
+mod marketdata_commands;
 mod models;
 mod provider_commands;
 mod providers;
@@ -27,9 +28,7 @@ use std::sync::Arc;
 
 use tauri::{Emitter, Manager};
 
-use crate::db::Database;
-use crate::dhan::client::DhanClient;
-use crate::dhan::feed::{Feed, FeedConfig};
+use crate::db::{Database, ResearchDb};
 use crate::secrets::Secrets;
 use crate::zerodha::client::ZerodhaClient;
 use crate::zerodha::feed::{Feed as ZerodhaFeed, FeedConfig as ZerodhaFeedConfig};
@@ -70,15 +69,19 @@ pub fn run() {
 
             let data_dir = app.path().app_local_data_dir()?;
             let db = Database::open(&data_dir)?;
+            let secrets = Secrets::os();
             {
                 let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
                 store::watchlists::seed_starter_list_once(&mut conn)?;
                 store::retired::purge_yahoo_leftovers_once(&mut conn)?;
+                store::retired::purge_dhan_leftovers_once(&mut conn, &secrets)?;
             }
             log::info!("database ready at {}", data_dir.display());
 
             app.manage(db);
-            app.manage(Secrets::os());
+            app.manage(ResearchDb::open(&data_dir)?);
+            app.manage(marketdata::MarketData::default());
+            app.manage(secrets);
             // The Python runs and the local data API they use, which starts with the first script.
             app.manage(python::PythonState::default());
 
@@ -86,7 +89,6 @@ pub fn run() {
                 .timeout(std::time::Duration::from_secs(30))
                 .user_agent(concat!("protradechart/", env!("CARGO_PKG_VERSION")))
                 .build()?;
-            app.manage(DhanClient::new(broker_http.clone()));
             app.manage(ZerodhaClient::new(broker_http));
             // AI's own clients: their requests set their own, longer, timeouts.
             let ai_http = reqwest::Client::builder()
@@ -95,26 +97,8 @@ pub fn run() {
             app.manage(ai::claude::ClaudeClient::new(ai_http.clone()));
             app.manage(ai::openai::OpenAiClient::new(ai_http));
 
-            // One live-feed connection for the whole app; ticks and status go
-            // to every window as events. Credentials are read at each connect.
-            let (creds_handle, tick_handle, status_handle) =
-                (app.handle().clone(), app.handle().clone(), app.handle().clone());
-            app.manage(Feed::start(FeedConfig::production(
-                Arc::new(move || {
-                    let db = creds_handle.state::<Database>();
-                    let secrets = creds_handle.state::<Secrets>();
-                    let conn = db.conn.lock().ok()?;
-                    provider_commands::dhan_credentials(&conn, &secrets).ok()
-                }),
-                Arc::new(move |tick| {
-                    let _ = tick_handle.emit("dhan-tick", tick);
-                }),
-                Arc::new(move |status| {
-                    let _ = status_handle.emit("dhan-status", status);
-                }),
-            )));
-
-            // Zerodha's feed works the same way, on its own connection and events.
+            // One live-feed connection for the whole app; ticks and status go to every window as
+            // events. Credentials are read at each connect.
             let (creds_handle, tick_handle, status_handle) =
                 (app.handle().clone(), app.handle().clone(), app.handle().clone());
             app.manage(ZerodhaFeed::start(ZerodhaFeedConfig::production(
@@ -134,16 +118,23 @@ pub fn run() {
 
             // Scripts the user scheduled. Only ever started here, once.
             scheduler::engine::start(app.handle().clone());
+            // The market-data store's daily update; idle until the user has started the download,
+            // and its first look is minutes after launch.
+            marketdata::start_engine(app.handle().clone());
 
-            // Keep the brokers' instrument lists fresh in the background.
+            // Keep the broker's instrument list fresh in the background.
             let refresh_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let db = refresh_handle.state::<Database>();
                 let secrets = refresh_handle.state::<Secrets>();
-                let client = refresh_handle.state::<DhanClient>();
-                provider_commands::refresh_instruments_if_stale(&db, &secrets, &client).await;
                 let zerodha = refresh_handle.state::<ZerodhaClient>();
-                zerodha_commands::refresh_instruments_if_stale(&db, &secrets, &zerodha).await;
+                zerodha_commands::refresh_instruments_if_stale(
+                    &db,
+                    &secrets,
+                    &zerodha,
+                    zerodha_commands::INSTRUMENTS_MAX_AGE_MS,
+                )
+                .await;
             });
             Ok(())
         })
@@ -162,6 +153,7 @@ pub fn run() {
             commands::get_watchlist,
             commands::create_watchlist,
             commands::create_indices_watchlist,
+            commands::list_nse_equities,
             commands::list_watchlist_members,
             commands::get_symbol_drawings,
             commands::save_symbol_drawings,
@@ -186,14 +178,6 @@ pub fn run() {
             provider_commands::clear_provider_config,
             provider_commands::set_provider_enabled,
             provider_commands::test_provider,
-            provider_commands::dhan_status,
-            provider_commands::dhan_update_instruments,
-            provider_commands::dhan_renew_token,
-            provider_commands::dhan_search_instruments,
-            provider_commands::dhan_fetch_bars,
-            provider_commands::dhan_quotes,
-            provider_commands::dhan_subscribe,
-            provider_commands::dhan_unsubscribe,
             zerodha_commands::zerodha_status,
             zerodha_commands::zerodha_login_url,
             zerodha_commands::zerodha_complete_login,
@@ -245,6 +229,11 @@ pub fn run() {
             screener_commands::save_screener_result,
             screener_commands::get_screener_result,
             screener_commands::screen_run,
+            marketdata_commands::market_data_status,
+            marketdata_commands::market_data_download,
+            marketdata_commands::market_data_update_now,
+            marketdata_commands::market_data_stop,
+            marketdata_commands::market_data_set_auto,
             schedule_commands::list_schedules,
             schedule_commands::save_schedule,
             schedule_commands::delete_schedule,

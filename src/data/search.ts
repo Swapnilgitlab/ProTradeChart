@@ -1,5 +1,5 @@
 import type { DataProvider, SymbolDescriptor } from '@luxalgo/vela';
-import { dhanSearchInstruments, listDatasets, zerodhaSearchInstruments } from '../lib/ipc';
+import { listDatasets, zerodhaSearchInstruments } from '../lib/ipc';
 import { joinSymbol, type ProviderId } from '../lib/symbols';
 import { getProvider } from './providers';
 import { ensureProvidersLoaded, isProviderUsable } from './providerStatus';
@@ -19,7 +19,6 @@ export type SearchScope = 'all' | ProviderId;
 
 const CRYPTO_PROVIDERS: ProviderId[] = ['binance', 'coinbase', 'hyperliquid'];
 const CRYPTO_RESULTS_PER_PROVIDER = 4;
-const DHAN_RESULTS = 8;
 const ZERODHA_RESULTS = 8;
 const IMPORTED_RESULTS = 4;
 /** With a single source picked there's room to show more of it. */
@@ -50,17 +49,6 @@ export function rankSymbols(query: string, symbols: SymbolDescriptor[], limit: n
   }
   scored.sort((a, b) => a.score - b.score || a.dollar - b.dollar || a.symbol.ticker.length - b.symbol.ticker.length);
   return scored.slice(0, limit).map((s) => s.symbol);
-}
-
-async function dhanResults(query: string, limit: number): Promise<SymbolResult[]> {
-  const matches = await dhanSearchInstruments(query, limit);
-  return matches.map((m) => ({
-    symbol: joinSymbol('dhan', m.symbol),
-    ticker: m.symbol,
-    provider: 'dhan',
-    name: m.name ?? undefined,
-    tag: m.kind === 'EQUITY' ? m.exchange ?? undefined : (m.kind ?? m.exchange ?? undefined),
-  }));
 }
 
 async function zerodhaResults(query: string, limit: number): Promise<SymbolResult[]> {
@@ -112,8 +100,7 @@ export async function searchSymbols(query: string, scope: SearchScope = 'all'): 
 
   const jobs: Promise<SymbolResult[]>[] = [];
   if (wants('csv')) jobs.push(importedResults(q, size(IMPORTED_RESULTS)));
-  // Brokers first: someone who has set up their own account wants it ahead of the crypto lists.
-  if (wants('dhan')) jobs.push(dhanResults(q, size(DHAN_RESULTS)));
+  // The broker first: someone who has set up their own account wants it ahead of the crypto lists.
   if (wants('zerodha')) jobs.push(zerodhaResults(q, size(ZERODHA_RESULTS)));
   for (const p of CRYPTO_PROVIDERS) if (wants(p)) jobs.push(enumerableResults(p, q, size(CRYPTO_RESULTS_PER_PROVIDER)));
 

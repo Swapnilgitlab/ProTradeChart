@@ -68,16 +68,16 @@ describe('quoteFromBars', () => {
 describe('quoteRefreshMs', () => {
   const many = (provider: string, n: number) => Array.from({ length: n }, (_, i) => `${provider}:S${i}`);
 
-  it('refreshes every 20 seconds however long a Dhan or imported list is', () => {
+  it('refreshes every 20 seconds however long a Zerodha or imported list is', () => {
     expect(quoteRefreshMs([])).toBe(20_000);
-    expect(quoteRefreshMs(many('dhan', 500))).toBe(20_000);
-    expect(quoteRefreshMs([...many('dhan', 300), ...many('csv', 50)])).toBe(20_000);
+    expect(quoteRefreshMs(many('zerodha', 500))).toBe(20_000);
+    expect(quoteRefreshMs([...many('zerodha', 300), ...many('csv', 50)])).toBe(20_000);
   });
 
   it('stretches for symbols that cost one request each', () => {
     expect(quoteRefreshMs(many('binance', 10))).toBe(20_000);
     expect(quoteRefreshMs(many('binance', 100))).toBe(70_000);
-    expect(quoteRefreshMs([...many('dhan', 100), ...many('coinbase', 100)])).toBe(70_000);
+    expect(quoteRefreshMs([...many('zerodha', 100), ...many('coinbase', 100)])).toBe(70_000);
   });
 });
 

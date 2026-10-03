@@ -17,13 +17,13 @@ writes a copy that matches the running app next to its virtual environment and p
 
 | | |
 | --- | --- |
-| `pt.bars(symbol, interval="D", start=None, end=None, limit=None, tz=None, naive=False)` | OHLCV as a DataFrame (`open high low close volume`) on a time index. `symbol` is `provider:EXCHANGE:TICKER` (`zerodha:NSE:RELIANCE`, `dhan:NSE:TCS`) or `csv:NAME`. Without `start` you get the newest `limit` bars (500). |
+| `pt.bars(symbol, interval="D", start=None, end=None, limit=None, tz=None, naive=False)` | OHLCV as a DataFrame (`open high low close volume`) on a time index. `symbol` is `provider:EXCHANGE:TICKER` (`zerodha:NSE:RELIANCE`) or `csv:NAME`. Without `start` you get the newest `limit` bars (500). |
 | `pt.bars_many(symbols, interval="D", start=None, end=None, limit=None, workers=4, errors="raise", progress=True)` | `{symbol: DataFrame}` for many symbols, in order. `errors="skip"` leaves failed symbols out and lists them in `result.errors`. |
 | `pt.instruments(provider, exchange=None, kind=None, q=None, limit=None)` | A broker's instruments, to build a universe from. `kind` is `EQUITY`, `INDEX` or `FUT`. |
 | `pt.watchlists()` / `pt.watchlist(name_or_id, providers=None)` | The app's watchlists; the symbols on one, optionally only from some sources. |
 | `pt.providers()` | Which sources are set up (`usable`). |
 | `pt.resample(bars, rule, session_open="09:15")` | Coarser bars from finer ones. Intraday rules (`"15min"`, `"4h"`) restart at each day's session open. |
-| `pt.universe(name=None, providers=("zerodha", "dhan"))` | The symbols to work on, so a script runs with nothing set up: that watchlist, else your first with readable symbols, else ten large NSE stocks. `.source` says which. |
+| `pt.universe(name=None, providers=("zerodha",))` | The symbols to work on, so a script runs with nothing set up: that watchlist, else your first with readable symbols, else ten large NSE stocks. `.source` says which. |
 | `pt.status()` | The app's version; a quick connection check. |
 
 ## Showing results
@@ -39,11 +39,10 @@ Run outside the app — a terminal, a notebook — these print instead, so the s
 - **Times.** `start` and `end` are dates or times, read in IST when they have no zone; a bare `end` date includes that day.
   Numbers are refused (epoch units are ambiguous). The index is timezone-aware, in the exchange's zone; a daily bar is at
   midnight of its date. `naive=True` drops the zone.
-- **Intervals.** `"D"` and minutes. Kite serves 1, 3, 5, 10, 15, 30, 60 and D; Dhan 1, 5, 15, 25, 60 and D. For anything else,
+- **Intervals.** `"D"` and minutes. Kite serves 1, 3, 5, 10, 15, 30, 60 and D. For anything else,
   fetch finer and `resample`.
 - **Volume** is NaN for an index.
-- **A broker that won't go back far enough** (Kite: 60 days per call at one minute, capped in total; Dhan: five years of
-  intraday) gives you what it has and a `DataLimitWarning`; `df.attrs["limited_from"]` says where the data really starts.
+- **A broker that won't go back far enough** (Kite: 60 days per call at one minute, capped in total) gives you what it has and a `DataLimitWarning`; `df.attrs["limited_from"]` says where the data really starts.
 
 ## Keeping a watchlist up to date
 
@@ -118,7 +117,7 @@ Every failure is a `ProTradeError`:
 | --- | --- |
 | `AuthError` | The broker rejected its credentials. Kite tokens expire every morning: log in again in the app. |
 | `NotConfiguredError` | The broker isn't set up, or is switched off, under Data providers. |
-| `NoAccessError` | The broker's plan doesn't include this data (Kite Connect's paid plan; Dhan's Data API). |
+| `NoAccessError` | The broker's plan doesn't include this data (Kite Connect's paid plan). |
 | `RateLimitedError` | The broker is rate limiting. |
 | `NotFoundError` | No such instrument, watchlist or dataset (also a `LookupError`). |
 | `BadRequestError` | The request was wrong (also a `ValueError`). |

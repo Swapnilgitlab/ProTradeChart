@@ -23,7 +23,7 @@ interface Props {
 export function WatchlistBrowserDialog({ lists, activeId, onOpen, onChanged, onClose, say }: Props) {
   const pins = useQuickLists();
   const { providers } = useProviderState();
-  const brokers = providers.filter((p) => (p.id === 'zerodha' || p.id === 'dhan') && p.enabled && p.configured).map((p) => p.id as 'zerodha' | 'dhan');
+  const brokers = providers.filter((p) => p.id === 'zerodha' && p.enabled && p.configured).map(() => 'zerodha' as const);
   const [query, setQuery] = useState('');
   const [renaming, setRenaming] = useState<{ id: number; name: string } | null>(null);
   const [newName, setNewName] = useState<string | null>(null);
@@ -75,7 +75,7 @@ export function WatchlistBrowserDialog({ lists, activeId, onOpen, onChanged, onC
     });
   };
 
-  const createIndices = (provider: 'zerodha' | 'dhan') =>
+  const createIndices = (provider: 'zerodha') =>
     void run(async () => {
       const made = await createIndicesWatchlist(provider);
       say(`Made “${made.name}”: ${made.items.length} indices in ${made.sections.length} sections.`, 'success');
@@ -126,7 +126,7 @@ export function WatchlistBrowserDialog({ lists, activeId, onOpen, onChanged, onC
               title="The broad market, sector and thematic indices, grouped in sections, from your broker's instrument list"
             >
               <LineChart size={14} />
-              Create Indices watchlist{brokers.length > 1 ? ` (${b === 'zerodha' ? 'Zerodha' : 'Dhan'})` : ''}
+              Create Indices watchlist
             </button>
           ))}
           <div className="grow" />
@@ -145,7 +145,7 @@ export function WatchlistBrowserDialog({ lists, activeId, onOpen, onChanged, onC
       />
       <p className="muted small wl-browser-hint">
         Star up to {MAX_QUICK_LISTS} watchlists for quick access: they appear at the top of the watchlist panel, and first in a chart’s right-click “Add to watchlist” list.
-        {brokers.length === 0 && ' Connect Zerodha or Dhan (Data providers) to make an Indices watchlist.'}
+        {brokers.length === 0 && ' Connect Zerodha (Data providers) to make an Indices watchlist.'}
       </p>
       <ul className="wl-browser-list">
         {shown.length === 0 && <li className="muted small">{lists.length === 0 ? 'No watchlists yet.' : `No watchlist matches “${query.trim()}”.`}</li>}

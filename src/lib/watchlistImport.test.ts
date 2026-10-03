@@ -24,12 +24,12 @@ describe('mapSymbol', () => {
   it('passes through already-qualified provider symbols', () => {
     expect(mapSymbol('binance:ETHUSDT')).toBe('binance:ETHUSDT');
     expect(mapSymbol('csv:mydata')).toBe('csv:MYDATA');
-    expect(mapSymbol('dhan:NSE:INFY')).toBe('dhan:NSE:INFY');
   });
 
-  it('skips a symbol from a source that no longer exists, such as an old export\'s yahoo: entries', () => {
+  it('skips a symbol from a source that no longer exists, such as an old export\'s yahoo: or dhan: entries', () => {
     expect(mapSymbol('yahoo:AAPL')).toBeNull();
     expect(mapSymbol('yahoo:RELIANCE.NS')).toBeNull();
+    expect(mapSymbol('dhan:NSE:INFY')).toBeNull();
   });
 
   it('sends a bare ticker to the default provider, or the one given', () => {
@@ -81,32 +81,6 @@ describe('parseWatchlistFile', () => {
   it('returns nothing for an empty file', () => {
     expect(parseWatchlistFile('').items).toEqual([]);
     expect(parseWatchlistFile('﻿\n\n').items).toEqual([]);
-  });
-});
-
-describe('importing into Dhan', () => {
-  const dhan = { indianProvider: 'dhan' } as const;
-
-  it('sends NSE and BSE symbols to the Dhan provider', () => {
-    expect(mapSymbol('NSE:RELIANCE', dhan)).toBe('dhan:NSE:RELIANCE');
-    expect(mapSymbol('BSE:TCS', dhan)).toBe('dhan:BSE:TCS');
-  });
-
-  it('maps TradingView index shorthands onto Dhan index tickers', () => {
-    expect(mapSymbol('NSE:NIFTY', dhan)).toBe('dhan:IDX:NIFTY');
-    expect(mapSymbol('NSE:BANKNIFTY', dhan)).toBe('dhan:IDX:NIFTY_BANK');
-    expect(mapSymbol('BSE:SENSEX', dhan)).toBe('dhan:IDX:SENSEX');
-  });
-
-  it('leaves the crypto exchanges where they were, and still skips what has no source', () => {
-    expect(mapSymbol('BINANCE:BTCUSDT', dhan)).toBe('binance:BTCUSDT');
-    expect(mapSymbol('NASDAQ:AAPL', dhan)).toBeNull();
-  });
-
-  it('applies to a whole file', () => {
-    const r = parseWatchlistFile('NSE:TCS,NSE:INFY,NASDAQ:AAPL', dhan);
-    expect(r.items.map((i) => i.symbol)).toEqual(['dhan:NSE:TCS', 'dhan:NSE:INFY']);
-    expect(r.skipped).toEqual(['NASDAQ:AAPL']);
   });
 });
 

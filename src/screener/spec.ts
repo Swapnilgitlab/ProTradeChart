@@ -5,8 +5,8 @@
  *  It is written in the Studies' feature grammar (`studies/metrics.ts`), so the numbers match a
  *  Study's. Field names are snake_case because the document is shared with Python. Pure. */
 
-import { canonicalFeature, needsBenchmark } from '../studies/metrics';
-import { parseCondition, SERIES, SpecError, type Condition, type Exchange, type Series, type StudyProvider, type UniverseSource } from '../studies/spec';
+import { BARS_PER_INTERVAL, canonicalFeature, featureInterval, needsBenchmark } from '../studies/metrics';
+import { currentProvider, parseCondition, SERIES, SpecError, type Condition, type Exchange, type Series, type StudyProvider, type UniverseSource } from '../studies/spec';
 
 export const SCREEN_VERSION = 1;
 
@@ -68,8 +68,8 @@ export function normalizeScreen(input: unknown): ScreenSpec {
   const u = isRecord(input.universe) ? input.universe : {};
   const source = (u.source ?? 'instruments') as UniverseSource;
   if (!['instruments', 'watchlist', 'symbols'].includes(source)) throw new ScreenError('universe.source must be instruments, watchlist or symbols.');
-  const provider = (u.provider ?? 'zerodha') as StudyProvider;
-  if (provider !== 'zerodha' && provider !== 'dhan') throw new ScreenError('universe.provider must be zerodha or dhan.');
+  const provider = currentProvider(u.provider ?? 'zerodha') as StudyProvider;
+  if (provider !== 'zerodha') throw new ScreenError('universe.provider must be zerodha.');
   const exchanges = u.exchanges ?? ['NSE'];
   if (!Array.isArray(exchanges) || exchanges.length === 0 || exchanges.some((e) => e !== 'NSE' && e !== 'BSE')) {
     throw new ScreenError('universe.exchanges must list one or more of NSE, BSE.');
@@ -169,14 +169,19 @@ export function loadFrom(spec: ScreenSpec, today: Date): string {
   return new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate() - days)).toISOString().slice(0, 10);
 }
 
-/** Mirrors the engine's `history_bars`, from `features.warmup`. */
+/** Mirrors the engine's `history_bars`, from `features.warmup`: at most what the market-data store
+ *  holds (`MAX_HISTORY_BARS`), so a weekly or monthly column reads the store, not the broker. */
 export function historyBars(spec: ScreenSpec): number {
   const deepest = Math.max(1, ...outputColumns(spec).map(warmup));
-  return Math.max(260, 2 * deepest + 10);
+  return Math.min(1200, Math.max(260, 2 * deepest + 10));
 }
 
 function warmup(name: string): number {
-  const key = canonicalFeature(name) ?? name;
+  return baseWarmup(name) * BARS_PER_INTERVAL[featureInterval(name)];
+}
+
+function baseWarmup(name: string): number {
+  const key = (canonicalFeature(name) ?? name).split('@')[0];
   if (key.startsWith('macd')) return 35;
   const m = /^([a-z_]+?)_(\d+)$/.exec(key);
   if (!m) return 1;

@@ -81,7 +81,7 @@ mod tests {
     fn a_symbol_splits_at_its_first_colon_only() {
         assert_eq!(split_symbol("zerodha:NSE:RELIANCE"), Some(("zerodha", "NSE:RELIANCE")));
         assert_eq!(split_symbol("csv:MY_DATA"), Some(("csv", "MY_DATA")));
-        assert_eq!(split_symbol(" dhan : NSE:TCS "), Some(("dhan", "NSE:TCS")));
+        assert_eq!(split_symbol(" zerodha : NSE:TCS "), Some(("zerodha", "NSE:TCS")));
     }
 
     #[test]

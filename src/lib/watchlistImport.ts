@@ -14,21 +14,12 @@ export interface WatchlistImportResult {
 const PASS_THROUGH_PROVIDERS = new Set<string>(Object.keys(PROVIDER_LABELS));
 
 export interface MapOptions {
-  /** Where NSE and BSE symbols go: one of the user's own broker accounts
-   *  (`dhan:NSE:RELIANCE`, `zerodha:NSE:RELIANCE`). With none, they can't be charted
-   *  and are skipped. */
-  indianProvider?: 'dhan' | 'zerodha';
+  /** Where NSE and BSE symbols go: the user's own broker account
+   *  (`zerodha:NSE:RELIANCE`). With none, they can't be charted and are skipped. */
+  indianProvider?: 'zerodha';
   /** Where an entry with no exchange goes (default: the app's default provider). */
   defaultProvider?: ProviderId;
 }
-
-/** TradingView's index shorthands → the ticker Dhan's instrument list uses. */
-const DHAN_INDEX: Record<string, string> = {
-  NIFTY: 'NIFTY',
-  NIFTY50: 'NIFTY',
-  BANKNIFTY: 'NIFTY_BANK',
-  SENSEX: 'SENSEX',
-};
 
 /** TradingView's NSE index shorthands → the ticker Zerodha's instrument list
  *  uses (its index names have spaces, which tickers write as underscores). */
@@ -76,10 +67,6 @@ export function mapSymbol(entry: string, options: MapOptions = {}): string | nul
   if (exchange === 'HYPERLIQUID') return joinSymbol('hyperliquid', upper);
 
   if (exchange === 'NSE' || exchange === 'BSE') {
-    if (options.indianProvider === 'dhan') {
-      const index = DHAN_INDEX[upper];
-      return joinSymbol('dhan', index ? `IDX:${index}` : `${exchange}:${upper}`);
-    }
     if (options.indianProvider === 'zerodha') {
       return joinSymbol('zerodha', `${exchange}:${(exchange === 'NSE' && ZERODHA_INDEX[upper]) || upper}`);
     }

@@ -1,5 +1,12 @@
-import type { BarRange, DataProvider, OHLCV, ProviderInfo as VelaProviderInfo } from '@luxalgo/vela';
-import { errorMessage, zerodhaFetchBars, zerodhaSubscribe, zerodhaUnsubscribe, type BarsResponse } from '../../lib/ipc';
+import type { BarRange, DataProvider, OHLCV, ProviderInfo as VelaProviderInfo, SymbolDescriptor } from '@luxalgo/vela';
+import {
+  errorMessage,
+  listNseEquities,
+  zerodhaFetchBars,
+  zerodhaSubscribe,
+  zerodhaUnsubscribe,
+  type BarsResponse,
+} from '../../lib/ipc';
 import { LiveBarBuilder, sessionOpenForExchange, type Tick } from '../../lib/liveBar';
 import { parseTimeframe, timeframeToString, toKitePlan, type KitePlan, type Timeframe } from '../../lib/timeframes';
 import { notify } from '../events';
@@ -37,8 +44,24 @@ export class ZerodhaProvider implements DataProvider {
       displayName: 'Zerodha',
       requiresApiKey: true,
       supportedTimeframes: SUPPORTED_TIMEFRAMES,
-      capabilities: { enumerate: false, stream: true, symbolInfo: false },
+      capabilities: { enumerate: true, stream: true, symbolInfo: false },
     };
+  }
+
+  /** NSE equities only (~2,000 symbols) — this is what lets Vela's OWN symbol search (bare-typing,
+   *  or clicking a chart's symbol name) find an NSE stock at all; without it that search has
+   *  nothing indexed for this provider and comes back empty. The app's own search box doesn't use
+   *  this — it searches everything live, including BSE, F&O and indices. Read once, when Vela
+   *  registers this provider; a broker connected mid-session needs a restart to be indexed. */
+  async listSymbols(): Promise<SymbolDescriptor[]> {
+    await ensureProvidersLoaded();
+    if (!isProviderUsable('zerodha')) return [];
+    try {
+      const rows = await listNseEquities('zerodha');
+      return rows.map((r) => ({ ticker: r.symbol, description: r.name ?? undefined, type: 'stock' }));
+    } catch {
+      return [];
+    }
   }
 
   async getBars(ticker: string, timeframe: string, range: BarRange): Promise<OHLCV[]> {

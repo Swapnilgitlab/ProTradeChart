@@ -90,10 +90,10 @@ with, sponsored by, endorsed by, or in any way officially associated with Tradin
 | [rusqlite](https://github.com/rusqlite/rusqlite) (bundles SQLite) | MIT (SQLite is public domain) | Local database |
 | [reqwest](https://github.com/seanmonstar/reqwest) | MIT OR Apache-2.0 | HTTP client for market data |
 | [serde](https://serde.rs), [futures](https://github.com/rust-lang/futures-rs) | MIT OR Apache-2.0 | Serialization, async utilities |
-| [tokio](https://tokio.rs), [tokio-tungstenite](https://github.com/snapview/tokio-tungstenite) | MIT | Async runtime, the Dhan and Zerodha live-feed WebSockets |
+| [tokio](https://tokio.rs), [tokio-tungstenite](https://github.com/snapview/tokio-tungstenite) | MIT | Async runtime, the Zerodha live-feed WebSocket |
 | [keyring](https://github.com/hwchen/keyring-rs) | MIT OR Apache-2.0 | Access to the operating system's credential store |
 | [sha2](https://github.com/RustCrypto/hashes) | MIT OR Apache-2.0 | Signing Zerodha's login (a SHA-256 checksum, computed locally) |
-| [csv](https://github.com/BurntSushi/rust-csv), [base64](https://github.com/marshallpierce/rust-base64) | MIT OR Unlicense, MIT OR Apache-2.0 | Parsing the brokers' instrument lists, reading token expiry |
+| [csv](https://github.com/BurntSushi/rust-csv) | MIT OR Unlicense | Parsing the broker's instrument list |
 | Microsoft Edge WebView2 SDK loader (through `webview2-com-sys`) | BSD-style, Microsoft | Starting the system web view (Windows builds) |
 
 Their own dependencies bring in many more (MIT, Apache-2.0, BSD, ISC, Zlib,
@@ -108,13 +108,13 @@ are used to build and test the project and are not distributed in the app.
 ## Market data
 
 Price data is fetched at runtime, directly from the user's computer, from
-third-party services: Binance, Coinbase and Hyperliquid; and Dhan or Zerodha, with
+third-party services: Binance, Coinbase and Hyperliquid; and Zerodha, with
 the user's own account and credentials, only if they connect one. No market
 data is bundled with the app or passes through any server of this project, and
 each service's terms apply to how its data is used. See the data-source notes in
 the [README](README.md#data-sources).
 
-Binance, Coinbase, Hyperliquid, Dhan, Zerodha and Kite
+Binance, Coinbase, Hyperliquid, Zerodha and Kite
 Connect are trademarks of their respective owners. ProTradeChart is not
 affiliated with, endorsed by or sponsored by any of them; their names are used
 only to say where data comes from.

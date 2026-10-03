@@ -191,6 +191,27 @@ a {
   flex-shrink: 0;
 }
 
+/* The window has no native title bar (`decorations: false` — see WindowControls.tsx): this bar is
+   it, and doubles as the drag handle. The brand mark and the spacer below are what's draggable, not
+   the whole row, so tabs and buttons keep working normally. */
+.tab-brand {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 0 4px 4px 6px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.tab-brand img {
+  width: 18px;
+  height: 18px;
+}
+.tab-bar-drag {
+  flex: 1;
+  min-width: 8px;
+  align-self: stretch;
+}
+
 /* The tabs and their arrows. It doesn't grow, so the + button sits right after the last tab, and it
    shrinks to the room left beside the actions. */
 .tab-strip {
@@ -242,10 +263,6 @@ a {
 .tab-new {
   flex-shrink: 0;
   margin: 0 4px 4px;
-}
-/* The strip no longer fills the bar, so the actions keep to the right edge themselves. */
-.tab-bar-actions {
-  margin-left: auto;
 }
 
 .tab-chip {
@@ -359,6 +376,22 @@ a {
   gap: 4px;
   padding-bottom: 4px;
   flex-shrink: 0;
+}
+
+/* The window's minimize/maximize/close, since it has no native title bar to draw them (WindowControls.tsx). */
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: 4px;
+  padding-left: 6px;
+  padding-bottom: 4px;
+  border-left: 1px solid var(--border);
+}
+.window-close:hover:not(:disabled) {
+  background: #e81123;
+  color: #ffffff;
 }
 
 .tab-bar-divider {
@@ -1316,15 +1349,6 @@ code {
 }
 
 
-/* ---- Search scope -------------------------------------------------------- */
-
-.search-scope {
-  width: 118px;
-  margin-right: 6px;
-  padding: 0 6px;
-  color: var(--text-secondary);
-}
-
 /* ---- Data providers dialog ----------------------------------------------- */
 
 .prov-layout {
@@ -1477,6 +1501,30 @@ code {
   font-size: 11px;
   color: var(--text-muted);
 }
+/* The market-data store, below the provider list in the Data providers dialog. */
+.market-data {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.market-data h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+}
+.market-data .prov-status-row .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.market-data-auto {
+  cursor: pointer;
+}
+.market-data-auto > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 /* A step-by-step block inside the status panel (Zerodha's daily login). */
 .prov-login {
   padding: 10px 12px;
@@ -1503,9 +1551,6 @@ code {
 
 /* ---- Price alerts ---------------------------------------------------------- */
 
-.bell-button {
-  position: relative;
-}
 .icon-badge {
   position: absolute;
   top: -3px;

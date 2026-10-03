@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalFeature, featureLabel, featureUnit, formatRupees, formatValue, needsBenchmark, offsetLabel, parseFeature, SUGGESTED_METRICS, windowLabel } from './metrics';
+import {
+  canonicalFeature,
+  describeCondition,
+  featureInterval,
+  featureLabel,
+  featureUnit,
+  formatRupees,
+  formatValue,
+  needsBenchmark,
+  offsetLabel,
+  parseFeature,
+  SUGGESTED_METRICS,
+  windowLabel,
+  withInterval,
+} from './metrics';
 
 describe('the feature grammar', () => {
   it('matches the engine: canonical names, aliases and window limits', () => {
@@ -12,10 +26,32 @@ describe('the feature grammar', () => {
   });
 
   it('splits a name into its family and window', () => {
-    expect(parseFeature('dist_sma_50')).toEqual({ family: 'dist_sma', window: 50 });
-    expect(parseFeature('close')).toEqual({ family: 'close', window: null });
+    expect(parseFeature('dist_sma_50')).toEqual({ family: 'dist_sma', window: 50, interval: 'D' });
+    expect(parseFeature('close')).toEqual({ family: 'close', window: null, interval: 'D' });
     expect(needsBenchmark('rs_126')).toBe(true);
     expect(needsBenchmark('return_126')).toBe(false);
+  });
+
+  it('a feature can be on weekly or monthly bars, and daily is the bare name', () => {
+    expect(canonicalFeature('RSI_14@w')).toBe('rsi_14@W');
+    expect(canonicalFeature('ema_50@D')).toBe('ema_50');
+    expect(canonicalFeature('close@M')).toBe('close@M');
+    expect(canonicalFeature('rsi_14@H')).toBeNull();
+    expect(canonicalFeature('rsi_14@W@M')).toBeNull();
+    expect(parseFeature('sma_200@W')).toEqual({ family: 'sma', window: 200, interval: 'W' });
+    expect(featureInterval('ema_50@M')).toBe('M');
+    expect(withInterval('rsi_14@W', 'D')).toBe('rsi_14');
+    expect(featureLabel('rsi_14@W')).toBe('RSI 14 · weekly');
+  });
+
+  it('knows price change and the gaps', () => {
+    expect(canonicalFeature('change_1')).toBe('change_1');
+    expect(featureUnit('change_5')).toBe('price');
+    for (const g of ['gap', 'gap_up', 'gap_down']) expect(featureUnit(g)).toBe('percent');
+  });
+
+  it('describes a range condition', () => {
+    expect(describeCondition({ left: 'rsi_14', op: 'between', right: [40, 60] })).toBe('RSI 14 between 40 and 60');
   });
 
   it('every suggested metric is grammatical', () => {

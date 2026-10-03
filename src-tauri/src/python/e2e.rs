@@ -130,10 +130,11 @@ async fn the_example_scripts_that_ship_with_the_app_run_against_the_real_api() {
         assert!(ran.stderr.is_empty(), "{name} wrote to stderr:\n{}", ran.stderr);
         assert!(!ran.stdout.trim().is_empty(), "{name} printed nothing");
 
-        // Every example but the greeting shows something in the app.
+        // Every example but the greeting shows something in the app — that one is a pure side
+        // effect (a connection check), not analysis.
         let shown = h.backend.results.lock().unwrap().clone();
         if *name == "hello.py" {
-            assert!(shown.is_empty(), "hello.py should only print");
+            assert!(shown.is_empty(), "{name} should only print");
             continue;
         }
         assert_eq!(shown.len(), 1, "{name} showed {} results", shown.len());

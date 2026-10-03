@@ -21,9 +21,9 @@ subscription.
   annotations and more); 70+ built-in indicators; multiple panes; a WebGL2 renderer with a canvas fallback.
   Drawn by [Vela](https://luxalgo.com/vela).
 - **Crypto out of the box, stocks through your own broker.** Live-streaming crypto from Binance, Coinbase and Hyperliquid
-  works right away, with no account. For Indian equities, indices, futures and commodities, connect your own Dhan or
-  Zerodha account, or chart your own files (see [Data sources](#data-sources)).
-- **Bring your own broker.** Connect a [Dhan](#connecting-dhan) or [Zerodha](#connecting-zerodha) account for
+  works right away, with no account. For Indian equities, indices, futures and commodities, connect your own Zerodha
+  account, or chart your own files (see [Data sources](#data-sources)).
+- **Bring your own broker.** Connect a [Zerodha](#connecting-zerodha) account for
   exchange-grade Indian market data — intraday history and a live tick feed. Credentials go in your operating system's
   keychain. More brokers plug into the same system.
 - **Price alerts.** Set an alert from a chart (right-click → *Add alert here…*, the **Alert** button, or `Alt+A`) and get a
@@ -45,7 +45,7 @@ subscription.
   [PineTS](https://github.com/LuxAlgo/PineTS). Backtests are approximate and can differ from TradingView's. Pine Script is a
   trademark of TradingView, Inc.; ProTradeChart is not affiliated with TradingView.
 - **Python for screening and research.** A Python tab (`Ctrl+Shift+Y`) beside your charts runs your own scripts against your
-  Zerodha or Dhan data: screen a watchlist, backtest with pandas or any library you install, keep the scripts as plain `.py`
+  Zerodha data: screen a watchlist, backtest with pandas or any library you install, keep the scripts as plain `.py`
   files. It uses your own Python, and your broker credentials stay in the app. See [Python](#python).
 - **Studies: historical market research.** Ask what stocks looked like around past events — *which NSE stocks doubled in
   twelve months, and what were their returns, trend, 52-week range and volume 12, 6, 3 and 1 months before?* Build the Study
@@ -60,7 +60,7 @@ subscription.
   Each update is verified against a signing key built into the app before it runs, and the daily check can be switched off.
 
 <p align="center">
-  <img src="docs/images/data-providers.png" alt="The Data providers screen, with Dhan awaiting setup" width="440">
+  <img src="docs/images/data-providers.png" alt="The Data providers screen" width="440">
   <img src="docs/images/import-data.png" alt="Importing a CSV file" width="440">
 </p>
 
@@ -108,11 +108,11 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib    # backend unit tests
 | Set a price alert | Right-click the chart → **Add alert here…** (it starts at the price under the cursor), or the **Alert** button in the chart toolbar, or `Alt+A`. The **Alerts** panel (the bell on the right-hand rail) lists your alerts and shows how many have fired since you last looked. |
 | Open another chart | `Ctrl+T`, or the **+** in the tab bar. Middle-click or `Ctrl+W` closes a tab. |
 | Show several charts at once | The **Layout** button in the chart's toolbar (next to the timeframe and style buttons): choose a grid from 1×1 to 4×4. New charts start on the same symbol; click one to make it the active chart (it gets a white outline), then search or click a watchlist symbol to change just that chart — the tab label follows it. The sync switches in the same dropdown link symbol, interval, crosshair and style. |
-| Write an indicator or backtest a strategy | The **</>** icon on the right-hand rail, or `Ctrl+E`, opens the Script Editor. Pick an example from **Open**, edit it, then **Add to chart** (`Ctrl+Enter`); **Save** (`Ctrl+S`) keeps it in your script library. A strategy opens the **Strategy Tester**. The pencil on a script's legend row reopens its code. Scripts on a chart are saved with the layout. |
+| Write an indicator or backtest a strategy | The **</>** icon on the right-hand rail, or `Ctrl+E`, opens the Script Editor in a tab of its own. Press **+ Indicator** or **+ Strategy** (or pick an example) in the list on the left, write it, then **Add to chart** (`Ctrl+Enter`) — it goes on the chart you last looked at, named in the toolbar; **Save** (`Ctrl+S`) keeps it in your script library. A strategy opens the **Strategy Tester** under its chart (`Ctrl+Shift+E` shows or hides it). The pencil on a script's legend row reopens its code. Scripts on a chart are saved with the layout. |
 | Change timeframe / style / indicators | The toolbar at the top of the chart. On the chart itself, press `?` for Vela's own shortcut list. |
 | Save your setup | **Layout** menu → *Save as new layout…*. *Set as default* makes it the starting session (and the template for new tabs). |
 | Track symbols | The watchlist on the right (`Alt+W` shows or hides it). Click a row to chart it; `↑`/`↓` step through the list. Right-click a row to flag it, add an alert, open it in a new tab or add a section above it; drag rows to reorder, or click a section's name to fold it. |
-| Switch the side panel | The icons at the top of the right-hand rail: **Watchlist** and **Alerts**. Press the one that is showing to fold the panel away; the choice is remembered. Below them are the **Script Editor** and **Python** buttons, and the **Data providers** plug sits at the bottom. |
+| Switch the side panel | The icons at the top of the right-hand rail: **Watchlist** and **Alerts**. Press the one that is showing to fold the panel away; the choice is remembered. Below them are the **Script Editor**, **Strategy Tester** and **Python** buttons, and the **Data providers** plug sits at the bottom. |
 | Import a watchlist | Watchlist **⋯** menu → *Import from file…* (a TradingView export or a CSV with a `Symbol` column). |
 | Chart your own data | The database icon in the tab bar → *Choose CSV file…* |
 | Choose and configure data sources | The plug icon at the bottom of the right-hand rail → *Data providers*. |
@@ -129,7 +129,7 @@ the default under *Data providers*.
 | `binance:` | `binance:BTCUSDT`, `binance:ETHUSDT.P` (perpetual futures) |
 | `coinbase:` | `coinbase:BTC-USD` |
 | `hyperliquid:` | `hyperliquid:BTC` |
-| `dhan:` | `dhan:NSE:RELIANCE`, `dhan:BSE:TCS`, `dhan:IDX:NIFTY`, `dhan:NFO:BANKNIFTY-OCT2026-FUT`, `dhan:MCX:GOLD-05OCT2026-FUT` — `EXCHANGE:SYMBOL`, so a bare `RELIANCE` means NSE |
+| `zerodha:` | `zerodha:NSE:RELIANCE`, `zerodha:BSE:TCS`, `zerodha:NSE:NIFTY_50`, `zerodha:NFO:BANKNIFTY26OCTFUT` — `EXCHANGE:SYMBOL`, so a bare `RELIANCE` means NSE |
 | `csv:` | `csv:MY_DATA` (your imported files) |
 
 ### CSV format
@@ -159,12 +159,15 @@ time,open,high,low,close,volume
 | **Binance** | Spot and perpetual crypto | 1 minute to monthly | Live stream |
 | **Coinbase** | Spot crypto | 1 minute to monthly | Live stream |
 | **Hyperliquid** | Perpetual and spot crypto | 1 minute to monthly | Live stream |
-| **Dhan** *(your account)* | Indian equities, indices, futures, commodities | 1, 5, 15, 25, 60 minutes and daily natively; 2h/4h, weekly, monthly and others built from those | Live tick feed |
 | **Zerodha** *(your account)* | Indian equities, indices, futures, commodities | 1, 3, 5, 10, 15, 30, 60 minutes and daily natively; 2h/4h, weekly, monthly and others built from those | Live tick feed |
 | **Imported CSV** | Anything you bring | Your file's bar size and coarser | No |
 
 A few things worth knowing:
 
+- **Dhan is no longer a data source.** It was removed; Indian markets come through Zerodha. Symbols saved as `dhan:…`
+  stay in your watchlists, layouts and alerts but can't be loaded, and a layout that holds one opens on Bitcoin instead,
+  as below. The app deletes the Dhan credentials, instrument list and cached bars it kept, once. A screen or Study saved
+  with Dhan as its broker opens with Zerodha.
 - **Yahoo Finance is no longer a data source.** It was removed, and with it the app's only source for US and most world
   stocks, ETFs, FX and indices. To chart those, import your own OHLCV file (*Import data*). Symbols saved earlier as
   `yahoo:…` stay in your watchlists and layouts but can't be loaded; opening a layout that holds one moves that tab to
@@ -176,40 +179,10 @@ A few things worth knowing:
   ([Binance](https://www.binance.com/en/terms), [Coinbase](https://www.coinbase.com/legal/market_data),
   [Hyperliquid](https://app.hyperliquid.xyz/terms)). The app only reads prices — it never trades. Where binance.com is
   blocked it uses Binance.US; some sources simply aren't available in some countries, and the app doesn't work around that.
-- **Broker data is yours alone.** Data from a Dhan or Zerodha account is licensed to you for your own use under your
+- **Broker data is yours alone.** Data from a Zerodha account is licensed to you for your own use under your
   broker's and the exchanges' rules: don't rebroadcast it (on a public stream or website, say). The app only reads market
   data from your account; it never places orders.
 - This software is for information only and is **not financial advice**.
-
-## Connecting Dhan
-
-[Dhan](https://dhan.co) is an Indian broker with an API for exchange data. Connecting it gives charts up to five years of
-intraday history and a live feed for NSE and BSE equities, indices, futures and MCX commodities.
-
-1. **You need Dhan's Data API access.** Dhan's *trading* APIs are free, but market data is a separate paid plan; without it
-   the app will say so (`Data APIs not subscribed`).
-2. On [web.dhan.co](https://web.dhan.co) open your profile → **Access DhanHQ APIs** and generate an **access token**. Note
-   your **client ID** too.
-3. In the app, open **Data providers → Dhan**, enter both, and press **Save**. Dhan switches on, downloads its instrument
-   list (about 26 MB, refreshed weekly), and **Test connection** confirms everything works.
-4. Search as usual (Dhan's results are listed first), or type `NSE:RELIANCE`. Use **Make default** if you'd rather type a bare
-   `RELIANCE`.
-
-Things worth knowing:
-
-- **Tokens last 24 hours.** The dialog shows how long yours has left. **Renew** extends a web-generated token by another
-  24 hours; otherwise paste a fresh one. When a token expires, charts say so and how to fix it.
-- **Your credentials stay out of the database.** The access token is kept in your operating system's keychain (Windows
-  Credential Manager, macOS Keychain, or the Linux Secret Service) and is only ever used by the app's Rust backend — the
-  web view never sees it. Where no keychain exists, it falls back to the app's database and *tells you that it is unencrypted*.
-- **One live connection, shared.** Dhan allows five feed connections per user. The app opens one and shares it between every
-  chart, tab and window, and connects only while a chart needs it.
-- **Options aren't listed** (there are ~150,000; they'd bury every search). Futures are.
-
-> **Status.** Dhan support was built from Dhan's public documentation and checked against the live service's real error
-> responses, its instrument list, and a local simulator of its feed. It hasn't yet been exercised with a funded Data API
-> account, so treat it as new: if a chart's dates look shifted or a live candle misbehaves, please
-> [open an issue](../../issues) with the symbol and timeframe.
 
 ## Connecting Zerodha
 
@@ -258,7 +231,7 @@ Things worth knowing:
 ## Python
 
 Press `Ctrl+Shift+Y` (or the terminal button on the right-hand rail) to open **Python** as a tab beside your charts: a list of
-scripts, an editor, a console and the results. Scripts read your Zerodha or Dhan data through the `protrade` package, and
+scripts, an editor, a console and the results. Scripts read your Zerodha data through the `protrade` package, and
 can use anything you install beside it — pandas, numpy, scipy, vectorbt, `backtesting.py`.
 
 ```python
@@ -283,11 +256,11 @@ screens (200-day average, RSI, 52-week highs) and a moving-average crossover bac
   environment of your own instead (conda, uv), give its interpreter in the panel's settings (the gear).
 - **Your credentials stay in the app.** The app never hands a script a broker key or token. A script asks the app for bars over a
   local connection (`127.0.0.1`, protected by a one-off token that only scripts the app starts receive); the app fetches, paces
-  and keeps them. Only Zerodha, Dhan and your imported CSV files are available to scripts, and only for reading.
+  and keeps them. Only Zerodha and your imported CSV files are available to scripts, and only for reading.
 - **Quick the second time.** The app keeps what it fetched, so the first screen over a few hundred symbols takes minutes at the
   brokers' rate limits (Kite allows three history requests a second), and later runs fetch only what is new: outside market
   hours, nothing at all, because a finished day's bar never changes. The settings show how much is kept and can forget it.
-- **Timeframes.** Kite serves 1, 3, 5, 10, 15, 30 and 60 minutes and daily; Dhan 1, 5, 15, 25, 60 and daily. `pt.resample` builds
+- **Timeframes.** Kite serves 1, 3, 5, 10, 15, 30 and 60 minutes and daily. `pt.resample` builds
   the rest, starting each bucket at the session open like the charts do. Daily bars are on a timezone-aware IST index.
 - **Your scripts are plain files** in the app's data folder (**Open folder** in the panel): edit them anywhere and keep them in
   git. A script runs only when you press Run, and Stop ends it with everything it started.
@@ -298,8 +271,8 @@ screens (200-day average, RSI, 52-week highs) and a moving-average crossover bac
   and alerts need one. Layouts save charts, not the Python tab.
 - **It is not a sandbox.** A script has your own permissions, exactly as if you ran it from a terminal. Run code you trust.
 - **It is for research, not trading.** Nothing here places an order.
-- **Data plans still apply.** Zerodha's historical data needs the paid Kite Connect plan, and Dhan's needs its Data API
-  subscription — the same as for charts. Kite tokens still expire every morning; a script then stops with a clear message.
+- **Data plans still apply.** Zerodha's historical data needs the paid Kite Connect plan — the same as
+  for charts. Kite tokens still expire every morning; a script then stops with a clear message.
 
 `python/README.md` lists the functions and the connection details.
 
@@ -317,15 +290,16 @@ A Study measures what stocks looked like around historical events. Open **Studie
    ADX, Bollinger, stochastics, 52-week high/low distances, relative volume, traded value, volatility, drawdowns, relative
    strength against an index) and yes/no **characteristics** to count.
 3. **Check the data.** The builder reads the Study back in plain words and lists what it needs: price and volume (from
-   Zerodha or Dhan), index data, and what isn't available. **Market cap, sectors and point-in-time universes are not available
+   Zerodha), index data, and what isn't available. **Market cap, sectors and point-in-time universes are not available
    from these sources**: a market-cap filter can't run, and the builder offers a traded-value floor instead (only if you pick
    it); results warn about survivorship bias.
 4. **Run Study.** Python does the work (the same setup as the Python tab), with a progress bar and the time left. The data
    check says beforehand how many stocks will be loaded, how many are already stored and roughly how long the rest take:
-   the first run over a whole exchange fetches every stock's history at your broker's rate limit (Zerodha: about three stocks
-   a second, so NSE's ~2,000 shares take ~12 minutes; adding BSE takes several times longer). It is kept, so reruns are quick.
-   Bonds, gold bonds, T-bills and funds on an exchange's list are left out; tick *Trade-for-trade* or *SME* to include those
-   series. *Try it on the first 100 symbols* makes a quick trial.
+   the very first run over a whole exchange fetches every stock's history at your broker's rate limit (Zerodha: about three
+   stocks a second, so NSE's ~2,000 shares take ~12 minutes; adding BSE takes several times longer). After that, a quick
+   batched quote check brings each stock's latest bar up to date instead of fetching it again, so reruns — including a new
+   trading day's first — take seconds. Bonds, gold bonds, T-bills and funds on an exchange's list are left out; tick
+   *Trade-for-trade* or *SME* to include those series. *Try it on the first 100 symbols* makes a quick trial.
 5. **Read the results.** A summary, the table of every event (click the chart icon to open that stock framed around the
    event, with a mark on it), the typical price path through the event, distributions of each metric at each observation
    point, before vs after, results by liquidity, the events against a **control group** of random non-event dates (or, with
@@ -398,7 +372,7 @@ src-tauri/               Rust backend
   src/store/             SQLite persistence (layouts, watchlists, datasets, Pine scripts, bar cache)
   src/providers.rs       The catalogue of data providers and their settings
   src/secrets.rs         Credentials: OS keychain, with an explicit fallback
-  src/dhan/              Dhan: protocol, instrument list, HTTP client, live feed
+  src/zerodha/           Zerodha (Kite Connect): protocol, instrument list, HTTP client, live feed, login
   src/commands.rs        Tauri commands exposed to the frontend
   src/pyapi/             The local data API Python scripts use (read-only, loopback, token-protected)
   src/python/            Finding Python, running and stopping scripts, the scripts folder

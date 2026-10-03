@@ -14,18 +14,18 @@ are drawn by [Vela](https://luxalgo.com/vela).
    (Binance / Coinbase /       │                                              │ │
     Hyperliquid, over HTTPS    ▼                                              ▼ ▼
     and WebSocket)        ┌──────────── Rust backend (src-tauri) ────────────────────┐
-                          │ commands.rs ─ dhan/ ─ zerodha/      ── broker APIs        │
+                          │ commands.rs ─ zerodha/              ── broker API         │
                           │      └────── store/* ── SQLite (charting.db)             │
                           └───────────────────────────────────────────────────────────┘
 ```
 
-Dhan and Zerodha sit behind Rust: their commands live in `provider_commands.rs` / `dhan/` and `zerodha_commands.rs` /
-`zerodha/`, and each live feed is a single WebSocket owned by Rust that pushes `dhan-tick` / `dhan-status` (and
-`zerodha-tick` / `zerodha-status`) events to every window.
+Zerodha sits behind Rust: its commands live in `zerodha_commands.rs` / `zerodha/` (the provider settings in
+`provider_commands.rs`), and its live feed is a single WebSocket owned by Rust that pushes `zerodha-tick` /
+`zerodha-status` events to every window.
 
 ## Symbols and providers
 
-A chart symbol is always `provider:TICKER` (`binance:BTCUSDT`, `dhan:NSE:RELIANCE`, `csv:MY_DATA`). The prefix is what
+A chart symbol is always `provider:TICKER` (`binance:BTCUSDT`, `zerodha:NSE:RELIANCE`, `csv:MY_DATA`). The prefix is what
 selects the data source: it's Vela's own routing rule, and `lib/symbols.ts` holds the helpers for it.
 
 A provider is a Vela [`DataProvider`](../node_modules/@luxalgo/vela/dist/DataProvider-DLeFs1gE.d.ts): an object with
@@ -35,8 +35,7 @@ so search and watchlist quotes use the same instance the charts do.
 
 | Provider | Where | Notes |
 | --- | --- | --- |
-| `dhan` | `data/providers/dhan.ts` + `src-tauri/src/dhan/` | The user's own Dhan account. All calls go through Rust, which holds the credentials. |
-| `zerodha` | `data/providers/zerodha.ts` + `src-tauri/src/zerodha/` | The user's own Kite Connect account, the same shape as Dhan. |
+| `zerodha` | `data/providers/zerodha.ts` + `src-tauri/src/zerodha/` | The user's own Kite Connect account. All calls go through Rust, which holds the credentials. |
 | `csv` | `data/providers/csv.ts` + `src-tauri/src/store/datasets.rs` | User-imported files, served from SQLite. |
 | `binance`, `coinbase`, `hyperliquid` | Vela's bundled providers | Fetched directly from the webview; they also stream live. |
 
@@ -70,7 +69,7 @@ world stocks, ETFs, FX or indices**; those need an imported CSV. What it left be
   clicking such a watchlist row says the source is gone; their quotes and alerts stay empty. Saving the layout again
   drops the old symbols.
 - **Stored cache and settings.** `store/retired.rs` runs once at startup and deletes what Yahoo put in SQLite: every
-  `bars_cache` row whose key isn't a broker's (`dhan:…` / `zerodha:…`), the `symbol_meta` and `symbol_names` tables, its
+  `bars_cache` row whose key isn't a broker's (`zerodha:…`, or `dhan:…` before Dhan went too), the `symbol_meta` and `symbol_names` tables, its
   `provider_settings` and the preferences only it used. Nothing the user wrote is touched.
 - **Defaults.** A bare ticker means Binance (`DEFAULT_PROVIDER`), which needs no account; a brand-new chart and the
   starter watchlist are crypto. The TradingView watchlist importer maps the crypto exchanges and, with a broker set up,
@@ -80,6 +79,23 @@ world stocks, ETFs, FX or indices**; those need an imported CSV. What it left be
 
 Don't bring back a source that reads an unofficial endpoint, and keep `yahoo` out of every provider list
 (`providers::spec("yahoo")` is tested to be absent).
+
+### Dhan was removed
+
+Dhan was the first broker; it was removed at the owner's request, leaving Zerodha as the only one. Its provider, the
+`dhan/` client, instrument list and feed, its commands, the Data providers panel and `toDhanPlan` went with it. What it
+left behind is handled like Yahoo's:
+
+- **Saved symbols** (`dhan:…`) stay in watchlists, layouts and alerts; `isSupportedSymbol` is false for them, so a layout
+  moves them off on open. `BROKERS` in `lib/symbols.ts` still lists `dhan`, only so such a row reads `RELIANCE`, not
+  `NSE:RELIANCE`.
+- **Stored data.** `store::retired::purge_dhan_leftovers_once` runs once at startup (preference `dhanLeftoversPurged`): it
+  deletes Dhan's keychain secrets through `Secrets::delete`, its `provider_settings` and fallback secrets, its rows in
+  `bars_cache`, `research_bars`, `research_coverage` and `market_symbols`, and the `dhan_instruments` table; it clears a
+  `default_provider` of Dhan, and the market-data store's provider and last-run preferences when the store came from Dhan,
+  so the next download starts from Zerodha (the user's auto-update switch stays).
+- **Saved screens and Studies** with `universe.provider: "dhan"` normalise to `"zerodha"` on both sides (`currentProvider`,
+  `RETIRED_PROVIDERS`) and say so in their Broker field, rather than refusing to open.
 
 ### History on demand
 
@@ -186,56 +202,38 @@ a new provider appears there with no UI work.
 
 ### Adding a broker
 
-Dhan and Zerodha are the two worked examples: `dhan/` and `zerodha/` have the same layers, and where they differ (Dhan
-renews a 24-hour token and silently drops the socket on a bad one; Zerodha needs a login every morning and refuses a bad
-key at the WebSocket handshake) each says so in its module docs. Two things are shared: `throttle.rs` (request pacing)
-and, on the webview side, `data/feedHub.ts` (fans one Rust socket's ticks out to the charts that want them). The two
-feed actors (`dhan/feed.rs`, `zerodha/feed.rs`) are near copies with different protocols; a third streaming broker would
-be the moment to extract the shared connect/backoff/refcount loop into one.
+Zerodha is the worked example: `zerodha/` has the layers a broker needs, and its module docs say where Kite is unusual (a
+login every morning, a bad key refused at the WebSocket handshake). Two things are meant to be shared: `throttle.rs`
+(request pacing) and, on the webview side, `data/feedHub.ts` (fans one Rust socket's ticks out to the charts that want
+them). A second streaming broker would be the moment to extract `zerodha/feed.rs`'s connect/backoff/refcount loop. (Dhan
+was the other example until it was removed; its code is in git history.)
 
 1. **Spec.** Add a `ProviderSpec` to `PROVIDERS` in `providers.rs`: fields (say `apiKey` non-secret, `accessToken` secret),
    `category: "broker"`, and its capabilities. The settings screen now shows it.
-2. **Backend.** Add `src-tauri/src/<broker>/` beside `dhan/`. Keep the layers the same: a pure `protocol.rs` (request
+2. **Backend.** Add `src-tauri/src/<broker>/` beside `zerodha/`. Keep the layers the same: a pure `protocol.rs` (request
    bodies, response parsing, error classification, all unit-tested), an `instruments.rs` if the broker needs a symbol →
    id table, a `client.rs` for HTTP (paced, with retry on rate limits, tested against a local mock server), and a
    `feed.rs` if it streams. Read credentials with `providers::credential`; never accept them from the frontend per call.
 3. **Commands.** Expose `<broker>_fetch_bars`, `_search_instruments`, `_quotes` and `_subscribe`/`_unsubscribe` in
-   `provider_commands.rs` (or a sibling file), register them in `lib.rs`, and add typed wrappers to `lib/ipc.ts`.
-4. **Symbols.** Use `provider:EXCHANGE:SYMBOL` (`zerodha:NSE:RELIANCE`) — the same exchange codes `Segment::exchange()` uses
-   for Dhan — so tickers stay consistent across Indian brokers. Add the id to `ProviderId` and `PROVIDER_LABELS` in
+   a `<broker>_commands.rs` beside `zerodha_commands.rs`, register them in `lib.rs`, and add typed wrappers to `lib/ipc.ts`.
+4. **Symbols.** Use `provider:EXCHANGE:SYMBOL` (`zerodha:NSE:RELIANCE`), with the exchange codes Zerodha uses, so tickers
+   stay consistent across Indian brokers. Add the id to `ProviderId` and `PROVIDER_LABELS` in
    `lib/symbols.ts`.
 5. **Provider.** Add `data/providers/<broker>.ts` (a Vela `DataProvider`). Reuse `data/providers/common.ts` for range
-   sizing and bar conversion, `lib/timeframes.ts` for resampling (add a `to<Broker>Plan` next to `toDhanPlan`), and
+   sizing and bar conversion, `lib/timeframes.ts` for resampling (add a `to<Broker>Plan` next to `toKitePlan`), and
    `lib/liveBar.ts` if the broker streams ticks rather than candles. Register it in `data/providers/index.ts`.
 6. **Search and quotes.** Add a results function to `data/search.ts` and a batch to `data/quotes.ts`, both gated on
    `isProviderUsable`.
 7. **Verify against the real service** with deliberately fake credentials: real error responses are the cheapest way to
    catch wrong endpoints, header names and error shapes. (That is how Dhan's "accept the socket, then drop it" behaviour
-   on a bad token was found.)
-
-## Dhan
-
-- **Symbols** are `dhan:EXCHANGE:SYMBOL`. Dhan identifies instruments by a numeric `SecurityId`, so the backend downloads
-  Dhan's public instrument master (~26 MB, ~207k rows), keeps the ~11k rows that can be charted (stocks and ETFs, indices,
-  futures — not options), and resolves tickers from SQLite. Search runs against the same table.
-- **History** is `POST /charts/historical` (daily) and `/charts/intraday` (1/5/15/25/60 minutes, 90 days per request). The
-  client splits long intraday ranges, paces requests, and retries on rate limits. Other timeframes are built from those by
-  the resampling in `lib/timeframes.ts`, anchored to the session open.
-- **Timestamps are checked, not trusted.** Dhan's docs say only "epoch". `detect_timestamp_shift` (Rust) compares the returned
-  times with the requested window — and, for intraday, with trading hours — to catch a 1980-based epoch or an IST clock
-  written as UTC. The live feed's times get the same treatment in `lib/liveBar.ts`, against the local clock.
-- **The live feed** (`dhan/feed.rs`) is one WebSocket shared across the app, reference-counted per instrument, connecting only
-  while something is subscribed. It reconnects with backoff, and it recognises that a wrong token isn't refused with a message
-  — the socket opens and is dropped at once — by stopping after three such drops and telling the user. Ticks reach every
-  window as `dhan-tick` events; `data/dhanLive.ts` fans them out to charts, and `LiveBarBuilder` turns them into the forming
-  candle.
+   on a bad token was found, when it was a source.)
 
 ## Timeframes and resampling
 
 Vela speaks canonical timeframes — minutes as bare digits (`"5"`, `"60"`), and `D` / `W` / `M`. `lib/timeframes.ts`:
 
 - parses them, and maps one to what a broker serves natively plus, when it doesn't serve it, a group size
-  (`toDhanPlan`, `toKitePlan`: 4h = four 60m bars);
+  (`toKitePlan`: 4h = four 60m bars);
 - builds coarser bars from finer ones. Intraday grouping **restarts at every session open** (a 4h chart on a US stock
   is 09:30–13:30 then 13:30–close, not a fixed clock split), and uses the exchange's timezone offset to decide where
   a day begins.
@@ -256,12 +254,11 @@ The watchlist and Ask AI panels stay **mounted** while another panel shows (`dis
 prices; Ask AI keeps its conversation), so they're as you left them when either comes back; the alerts panel mounts when shown.
 To add a panel: add its id to `RAIL_PANELS`, a button to `railPanels` in `Workspace.tsx`, and render it in `app-body`.
 
-Below the panel buttons the rail also holds **actions** (`RailAction`): the Script Editor and Python buttons (`railTools`) and,
-pinned to the bottom, the Data providers plug and the AI providers key icon (`railFooter`). They open something elsewhere — the
-Pine dock, the Python tab, a dialog — rather than a side panel. An action that is either showing or not is lit while it shows
-(`pressed`): the Python button when the Python tab is the active one, and the Script Editor button while the dock is open, which
-`PineDock` reports through `onOpenChange` since it owns that state (and isn't mounted, so isn't showing, while the Python tab
-is).
+Below the panel buttons the rail also holds **actions** (`RailAction`): the Script Editor, Strategy Tester and Python buttons
+(`railTools`) and, pinned to the bottom, the Data providers plug and the AI providers key icon (`railFooter`). They open something
+elsewhere — a tab, the Strategy Tester dock, a dialog — rather than a side panel. An action that is either showing or not is lit
+while it shows (`pressed`): the Script Editor or Python button when its tab is the active one, and the Strategy Tester button while
+the dock is open on a chart tab, which `PineDock` reports through `onOpenChange` since it owns that state.
 
 ### Watchlists
 
@@ -297,8 +294,7 @@ is).
   not) that opens the same swatches as the row's right-click menu (`FlagSwatches`).
 - **Browsing** (`WatchlistBrowserDialog.tsx`): every list, searchable, with star, open, rename and delete.
 - **The Indices list** (`store/index_catalog.rs`): a curated catalogue of ~55 NSE/BSE indices in three sections (Broad market,
-  Sectors, Themes), each with its Zerodha and its Dhan ticker, since the brokers spell them differently (`NSE:NIFTY_BANK`,
-  `IDX:BANKNIFTY`). `create_indices_watchlist` keeps only what the broker's instrument list has and builds the list with its
+  Sectors, Themes), each with its Zerodha ticker (`NSE:NIFTY_BANK`). `create_indices_watchlist` keeps only what the broker's instrument list has and builds the list with its
   sections. Strategy, factor and bond indices are left out. There are no sector *stock* lists: no source the app uses publishes
   index constituents (the owner chose not to add one).
 - **Panel width** (`features/rail/panelWidth.ts`, pure; `PanelResizer.tsx`): the three side panels share
@@ -317,7 +313,11 @@ wrapped by the tap**, or its tabs fall back to the poll.
 
 ## Persistence
 
-One SQLite file (`charting.db`, in the OS's per-user app data folder), opened by `src-tauri/src/db.rs`.
+One SQLite file (`charting.db`, in the OS's per-user app data folder), opened by `src-tauri/src/db.rs`. The UI's commands share
+one connection (`Database`); the research store has two more of its own to the same file (`ResearchDb`: a writer, and a
+`query_only` reader), so a bulk download or a whole-market read never waits on, or holds up, the UI's lock. WAL lets the reader
+run beside a write, and every connection waits up to 5 s (`busy_timeout`) for another's transaction, which the research writer
+keeps to one symbol at a time.
 
 | Table | Holds |
 | --- | --- |
@@ -326,8 +326,9 @@ One SQLite file (`charting.db`, in the OS's per-user app data folder), opened by
 | `pine_scripts` | The user's Pine Script library: name, kind (`indicator` / `strategy`) and source |
 | `watchlists`, `watchlist_items`, `watchlist_sections` | Lists, their symbols (with a colour flag) and their section headings; see "Watchlists" |
 | `datasets`, `dataset_bars` | Imported CSV data |
-| `bars_cache` | Offline fallback for the brokers' bars (keys start `dhan:` / `zerodha:`) |
-| `research_bars`, `research_coverage` | The Python API's store of the brokers' bars, and which span of each series is complete (see "Python") |
+| `bars_cache` | Offline fallback for the broker's bars (keys start `zerodha:`) |
+| `research_bars`, `research_coverage` | The research store of the brokers' bars, and which span of each series is complete (see "Python" and "Market data store") |
+| `market_symbols` | Every symbol the market-data store keeps, with when it was first and last listed (see "Market data store") |
 | `studies`, `study_results` | Saved Study Specifications and completed Study runs (see "Studies") |
 | `notebooks`, `notebook_items` | Research Notebooks: Studies and runs grouped with the user's notes |
 | `screeners` | Saved screens and the last run of each (see "Screener") |
@@ -335,7 +336,6 @@ One SQLite file (`charting.db`, in the OS's per-user app data folder), opened by
 | `script_schedules`, `schedule_runs` | Scheduled Python scripts and what happened each time one came due (see "Scheduled scripts") |
 | `provider_settings` | Per-provider `enabled` flag and non-secret configuration |
 | `provider_secrets_fallback` | Credentials, **only** when no OS keychain exists (unencrypted; the UI says so) |
-| `dhan_instruments` | Dhan's instrument list, for symbol search and `SecurityId` lookup |
 
 `src-tauri/src/store/*` are plain functions over a `&Connection` with unit tests against an in-memory database.
 `commands.rs` is a thin wrapper that locks the connection, calls into the store, and flattens errors to strings.
@@ -347,7 +347,7 @@ Schema changes: `CREATE TABLE IF NOT EXISTS` won't alter an existing table, so a
 A tab is a chart or a workspace — Python or Studies (`features/workspace/tabs.ts`, pure and tested; at most one of
 each, opened from the rail, Python also by `Ctrl+Shift+Y`). A workspace tab has no symbol and no chart, so:
 
-- the chrome that needs a chart — the watchlist's highlight, the Pine dock, a new alert's symbol, and where
+- the chrome that needs a chart — the watchlist's highlight, the Strategy Tester, the chart the Script Editor adds to, a new alert's symbol, and where
   a picked symbol loads — follows `activeChartTab`, which is the active tab when that is a chart and otherwise
   the chart last looked at, so opening Python doesn't move the watchlist off the symbol you were on;
 - picking a symbol anywhere (the search box, the watchlist, a script's results) loads it into that chart **and
@@ -439,7 +439,7 @@ script.
 | Ids | `pine/ids.ts` | An indicator this app adds is `<libraryScriptId>~<suffix>`, so a legend row leads back to its library script, and one Vela added itself (a bundled script) can be told apart |
 | Bundled scripts | `pine/indicators/**/*.pine`, `pine/bundled.ts` | Scripts that ship with the app. Vite inlines them (`import.meta.glob(…, '?raw')`), and they are handed to Vela as its indicator **manifest** with `enabled: false`, so they appear in the chart's Indicators dialog (grouped by folder) without being added to every chart. Vela saves a manifest indicator in layouts **by name**, so a script's declared title is its identity; `persistence.ts` skips them so they aren't restored twice. `bundled.engine.test.ts` compiles and runs every one on the real engine. Editing a `.pine` file reloads the dev app (`reloadOnPineChange` in `vite.config.ts`: a hot-swapped module would leave the live chart on the old script). See `pine/README.md` |
 | Backtest report | `pine/tester.ts` | Pure. The engine reports fills and account state, not P&L, commission or an equity history, so trades, net P&L, run-up, drawdown, the equity curve and the summary are derived from fills + bars + the strategy's commission setting. Tests hold the numbers to PineTS's own ledger (`tester.engine.test.ts`) |
-| UI | `features/pine/` | A bottom dock (`PineDock`) with the Script Editor (CodeMirror 6, `pineLanguage.ts`) and the Strategy Tester. Opened from the right rail, `Ctrl+E`, or the "Edit script" button registered on every script's legend row (`pine/hostActions.ts`) |
+| UI | `features/pine/` | The Script Editor is a workspace tab (`kind: 'pine'`, `PineEditor`: a script library beside CodeMirror 6, `pineLanguage.ts`), opened from the right rail, `Ctrl+E`, Home, or the "Edit script" button registered on every script's legend row (`pine/hostActions.ts`, through `dockBus` to `Workspace`). It adds scripts to `activeChartTab` — the chart last looked at — and names it in its toolbar. The Strategy Tester stays in a dock under the charts (`PineDock`, `Ctrl+Shift+E`), mounted on that same chart while a workspace tab shows (only hidden), because a strategy reports its results as it runs and a late listener would miss them |
 
 - **The backtest covers the bars the chart has loaded**, so a longer test means scrolling the chart back (see "History on
   demand"). `script:run` events drive the tester; strategies removed from the chart are pruned.
@@ -463,7 +463,7 @@ use), keeps them, and answers. It is for research — screening, backtesting, an
       ▲                        │  stdout/stderr                       │
       └────── events ◀─────────┘                                      │ HTTP, Authorization: Bearer <token>
                                 pyapi/ (127.0.0.1) ◀──────────────────┘
-                                   │  research store  ── Zerodha / Dhan clients (paced) ──▶ brokers
+                                   │  research store  ── Zerodha client (paced) ──▶ broker
 ```
 
 | Piece | Where | Notes |
@@ -472,7 +472,7 @@ use), keeps them, and answers. It is for research — screening, backtesting, an
 | Runner | `python/runner.rs` | Starts `python -u script.py` with no stdin (so `input()` fails instead of waiting), streams each line as a `python-output` event, and on Stop ends the whole process tree (`taskkill /T`, or a process group), because a script may use `multiprocessing`. A lone `\r` marks a progress-bar line the console overwrites. Output past 4 MB is dropped with a notice. It knows nothing of Tauri (output goes to a callback), so it is tested against a real Python. |
 | Scripts | `python/scripts.rs` | Plain `.py` files in `<app data>/python/scripts`, so any editor and `git` work on them. The frontend names a script and never sends a path; `validate_name` refuses anything that could leave the folder, a Windows device name, and a name that would shadow a library (`pandas.py` beside a script replaces pandas for it). Examples (`python/examples/`) are copied in and kept current: the app records a hash of what it wrote (`.examples-seeded`), refreshes an example nobody has touched when a newer one ships, and leaves alone one the user edited or deleted. They must work with no setup (a test runs them for a user with no watchlists). |
 | Client | `python/protrade/` | Standard library plus pandas. It is embedded in the app (`python/client_files.rs`), written to `<app data>/python/lib` at each run and put on the child's `PYTHONPATH`, so it is never `pip install`ed and always matches the running app. A debug build (`tauri:dev`) writes the repository's current copy instead of the embedded one, because the dev watcher doesn't rebuild for changes outside `src-tauri/`: a `git pull` of Python takes effect on the next run. A Study prints and records which engine ran (`[engine] protrade 1.0 (<hash>)`, `meta.engine_build`). A test fails if a module is added to the folder without being listed in `FILES`. |
-| Local API | `pyapi/` | `data.rs` (bars: store reads plus broker fetches), `routes.rs` (auth and routing, against a `Backend` trait), `server.rs` (hyper), `backend.rs` (the real `Backend`, plus the error mapping), `wire.rs` (JSON). Read-only `GET`s: `/v1/bars`, `/v1/instruments`, `/v1/watchlists`, `/v1/watchlist`, `/v1/providers`, `/v1/ping`; plus `POST /v1/results` (which, for kind `watchlist`, writes a watchlist: see "Scripts writing watchlists"). |
+| Local API | `pyapi/` | `data.rs` (bars: store reads plus broker fetches; also `sync_daily`, the quote top-up), `routes.rs` (auth and routing, against a `Backend` trait), `server.rs` (hyper), `backend.rs` (the real `Backend`, plus the error mapping), `wire.rs` (JSON, and the panel's binary columns). Read-only `GET`s: `/v1/bars`, `/v1/instruments`, `/v1/watchlists`, `/v1/watchlist`, `/v1/providers`, `/v1/ping`; and `POST /v1/panel`, a read posted only because a market's symbol list doesn't fit a URL (see "Market data store"). `POST /v1/results` (which, for kind `watchlist`, writes a watchlist: see "Scripts writing watchlists") and `POST /v1/bars/sync` (brings many symbols' daily coverage up to date from a batched broker quote and answers a per-symbol status, never bars — see "Screener") are the two writes. |
 | Results | `pyapi` `POST /v1/results` → `python-result` → `python/results.ts` → `features/python/Results*.tsx` | What a script shows: `pt.show` (a table), `pt.report` (a backtest) and `pt.plot` (a matplotlib PNG); a Study's result is kind `study` (see "Studies"), and one sent by a script in the Python tab is stored with the Studies' results. Rust checks only what makes forwarding safe — the run id, the kind, a title's length, and that a figure's bytes really start like a PNG — and the webview validates the shape before drawing. The report reuses the Strategy Tester's `EquityChart`. |
 | Research store | `store/research_bars.rs` | Bars kept for the API, with a *coverage* per series. See below. |
 | UI | `features/python/`, `python/` (TS) | **A tab of its own**, beside the charts (`features/workspace/tabs.ts`), holding the script list, the editor, the console and the results. `python/console.ts`, `format.ts` and `results.ts` are pure and tested. It loads nothing until the tab is first shown: no Python is probed and no example is written for someone who never opens it. |
@@ -503,20 +503,24 @@ use), keeps them, and answers. It is for research — screening, backtesting, an
   empty check, after which coverage reaches past it. MCX trades to 23:30, so its daily bar is taken as final early until the next
   refresh corrects it.
 - **The first run is bound by the broker, and a script can't change that.** Kite allows three history requests a second and has no
-  batch endpoint, and every caller (charts, backfill, scripts) shares one client whose `Throttle` releases a request every 350 ms
-  however many are waiting, so `bars_many`'s workers only overlap the waiting: 984 symbols is about six minutes, once. A daily
-  request's span is rounded up to 90-day blocks (`lookback_ms`) so two screens asking for 250 and 257 bars start on the same date;
-  otherwise each symbol needs a second request for the few days between them, which doubled the run. *Not built:* Kite's
-  `/quote/ohlc` returns today's bar for 200+ symbols a call, the only way past the first run of each trading day, but its
-  `ohlc.close` is the previous close (today's is `last_price`) and volume needs the fuller `/quote`.
+  batch endpoint for history, and every caller (charts, backfill, scripts) shares one client whose `Throttle` releases a request
+  every 350 ms however many are waiting, so `bars_many`'s workers only overlap the waiting: 984 symbols is about six minutes, once.
+  A daily request's span is rounded up to 90-day blocks (`lookback_ms`) so two screens asking for 250 and 257 bars start on the
+  same date; otherwise each symbol needs a second request for the few days between them, which doubled the run. **Every run after
+  that first one is fast**: `store::day_topup` and `pyapi::data::sync_daily` bring a symbol's coverage up to date from one batched
+  quote instead (`POST /v1/bars/sync`, called by `api._top_up` ahead of the Screener's and a Study's own fetch loop) — `GET /quote`,
+  up to 200 symbols a call, not Kite's `/quote/ohlc`, whose `ohlc.close` is the *previous* close (today's is `last_price`) and which
+  carries no volume. A quote is trusted only when its previous close matches what is already stored; a mismatch (a corporate
+  action, a missed session) falls back to the historical endpoint instead, which re-fetches and self-corrects, and a series that
+  has volume is never silently given a blank one.
 - **Record what was fetched, not what was asked.** The brokers' clients answer a range longer than one call may span with only its
-  newest part (`MAX_CHUNKS`), and Dhan's intraday history stops at five years. `Fetcher::fetch` returns where the fetch *really began*,
+  newest part (`MAX_CHUNKS`). `Fetcher::fetch` returns where the fetch *really began*,
   the store records that, and `limitedFrom` tells the script the data starts later than it asked (a `DataLimitWarning` in Python).
 - **Daily bars belong to an IST calendar date.** They are put on midnight IST whichever instant the broker stamped them with, a
   daily range selects whole dates (an `end` date includes that day), and the client returns them on a timezone-aware IST index.
   Intraday bars keep their real instant. Only the brokers' native intervals are served (Kite 1, 3, 5, 10, 15, 30, 60 minutes and
-  daily; Dhan 1, 5, 15, 25, 60 and daily); `pt.resample` builds the rest, restarting each bucket at the session open like the charts.
-- **Sources.** Zerodha, Dhan and imported CSV datasets. The crypto sources are fetched by the webview, not Rust, and are not offered.
+  daily); `pt.resample` builds the rest, restarting each bucket at the session open like the charts.
+- **Sources.** Zerodha and imported CSV datasets. The crypto sources are fetched by the webview, not Rust, and are not offered.
   Errors carry a stable `code` (`auth`, `not_configured`, `no_access`, `rate_limited`, `not_found`, `bad_request`, `upstream`) that the
   client turns into an exception class; `auth` and its kin are *fatal* to a batch, since every later symbol would fail the same way.
 - **Python is not a sandbox.** A script has the user's own privileges, as from a terminal, so it could read `charting.db` or the
@@ -554,6 +558,27 @@ names from the instrument lists; section headings are untouched. The script is a
 prints. `watchlists-changed` tells every window, and `watchlistBus` relays it to the panel. It is the only write the local API
 makes besides showing a result.
 
+## Market data store
+
+Five years of daily bars for every NSE stock (EQ series, one listing per company by the Studies' own rule) and every NSE index,
+kept in the research store so the Screener, Studies and scripts read a whole market from disk instead of a request per symbol.
+
+| Piece | Where | Notes |
+| --- | --- | --- |
+| Rules | `marketdata/plan.rs` | Pure: the universe (`study_universe::pick_listings` over the instrument list), how far back (`HISTORY_DAYS`), when the daily update is due (once per settled session, `market::last_settled_ms`; an hour's wait after a failure), how a corporate action shows (`disagrees`: a stored close on an already-settled day that the broker's differs from) and how a holiday shows (`was_holiday`). |
+| Job | `marketdata/job.rs` | One update over the listing, tested against a fake broker: record the listing (`market_symbols`; a new row is a new listing), download any history the store lacks through `pyapi::data::load_bars`, then top up every series with the batched quote (`sync_daily`). A quote rejected for `PreviousCloseMismatch` refetches the symbol's whole span (`research_bars::replace`); any other rejection reads the tail from a week back and refetches in full if the overlap disagrees. Quotes that last traded before the session trigger one probe (NIFTY 50): on a holiday every current series is marked current through it, and nothing else is read. |
+| Engine, commands | `marketdata/mod.rs`, `marketdata_commands.rs` | One job at a time (`MarketData` state), stoppable, `market-data-progress` / `market-data-finished` events. The daily loop starts in `lib.rs`, first looks two minutes after launch, and does nothing until the user has started the download (which remembers the provider). |
+| Broker lanes | `throttle.rs` | Every job runs inside `throttle::in_background`: its broker requests wait while any interactive one (a chart, a script) is queued, at the same gap, so the broker's limit holds and a chart waits at most one gap. The lane is a task-local, so it must wrap each spawned task. |
+| Panel | `pyapi/data.rs` `read_panel`, `wire.rs` `panel_body`, `protrade/panels.py` | Many symbols' stored daily bars in one answer, from the store alone (never a broker call), each marked `current` when a `/v1/bars` read of the same span would fetch nothing. Binary columns (a JSON header, then `ts` i64 and `o h l c v` f64, every series back to back): a market's history is millions of numbers. `pt.panel`, and `pt.bars_many` for daily bars, read it first and fetch only what isn't current. |
+| Wide features | `protrade/wide.py` | `WideFeatures` computes a feature for many symbols at once on a table with a column per symbol, **aligned on bar position** (each symbol's bars fill the bottom of its column), so rolling windows, `ewm` and `shift` count that symbol's own bars and the numbers equal `Features`'. `features.py` is written to work on a Series and a DataFrame alike; `tests/test_wide.py` checks every family. The Screener judges all symbols with it; a Study computes detection's features per batch with it. |
+| Charts | `marketdata::chart_daily` | A daily (so weekly and monthly) chart of a stored symbol is answered from the store, with what it lacks read through `load_bars` on the interactive lane and kept. Intraday is unchanged. |
+
+- **These are Rust jobs, not scripts.** Nothing here starts Python, so the rule that a script runs only on a press or a
+  user-made schedule is untouched. The update runs only while the app is open, never during startup, and never makes up a
+  run: coverage decides what is fetched.
+- **Corporate actions.** The store keeps what the broker served. When the broker's history stops agreeing with it (a split,
+  a bonus), the whole series is fetched again rather than mixed.
+
 ## Screener
 
 The Screener tab answers "which stocks meet these conditions **today**?". It shares the Studies' engine plumbing and feature
@@ -562,13 +587,18 @@ grammar, so an RSI in a screen is the same number a Study measures.
 | Piece | Where | Notes |
 | --- | --- | --- |
 | Screen | `src/screener/spec.ts`, `protrade/screen.py` `normalize_screen` | Universe (the Study universe's shape, without the size filters), `filters` (Study conditions, all must hold), `columns` (features), `sort` and `benchmark`. The two validators run `src/screener/fixtures/screen-cases.json`. A result's columns are the chosen ones plus every feature a filter reads (`outputColumns` / `output_columns`). |
-| Engine | `protrade/screen.py`, `protrade/run_screen.py`, `screener_commands.rs` | `screen_run` writes the screen to a file and starts `python -m protrade.run_screen`. It loads daily bars through the local API (`LOAD_WORKERS` in flight, as a Study) far enough back for every column to settle (`history_bars`: twice the slowest warm-up, at least 260 bars) and judges each symbol on its **latest bar**: `crosses_above` means it crossed on that bar. A symbol whose last bar is a week older than the universe's is left out as stale; one with too little history for a filter doesn't match, and both are counted in warnings. Matches are sorted and capped at 5,000. |
+| Engine | `protrade/screen.py`, `protrade/run_screen.py`, `screener_commands.rs` | `screen_run` writes the screen to a file and starts `python -m protrade.run_screen`. It reads every symbol the market-data store holds in one `POST /v1/panel`; only the rest are offered for the quote top-up (`POST /v1/bars/sync`) and loaded through `/v1/bars` (`LOAD_WORKERS` in flight, as a Study). Bars reach back far enough for every column to settle (`history_bars`: twice the slowest warm-up, at least 260 bars) and judges every symbol together (`judge`, on `wide.WideFeatures`) on its **latest bar**: `crosses_above` means it crossed on that bar. A symbol whose last bar is a week older than the universe's is left out as stale; one with too little history for a filter doesn't match, and both are counted in warnings. Matches are sorted and capped at 5,000. |
 | Result | `src/screener/result.ts` | Posted as kind `screen`; untrusted, so checked whole (spec through `normalizeScreen`, columns equal to the spec's, every row's shape) and drawn as text. `fixtures/engine-result.json` is real engine output; `python/tests/test_screen.py` fails when the engine's output drifts from it. |
 | Storage | `store/screeners.rs`; `screeners` | Saved screens, each with only its **last** run — a screen asks what qualifies now, so older runs aren't kept. A run of an unsaved screen is shown, not stored. |
 | UI | `features/screener/` | A workspace tab like Studies (`WORKSPACE_LABELS` in `tabs.ts`), opened from the rail. Filters (`ConditionList`, shared with Studies) and columns on the left; name, universe and the pre-run readiness (`screener/readiness.ts`, using `study_estimate` for the cost) on the right; the results table below (sortable, a row opens its chart, add all to a watchlist, CSV). Eight presets (`screener/presets.ts`). |
 
-The first screen of a trading day over a whole exchange fetches every symbol once at the broker's pace (about 12 minutes for
-NSE on Kite); what is fetched is kept, so later screens that day, and Studies, reuse it.
+With the market data downloaded, a whole-NSE screen is one panel read and one wide computation: seconds. Without it, the very
+first screen over a whole exchange fetches every symbol's full history at the broker's pace (about 12 minutes for NSE on Kite);
+what is fetched is kept. After that, each symbol's daily coverage is brought current with one batched broker
+quote instead of a rate-limited history call each (`POST /v1/bars/sync`, `store/day_topup.rs`), so a new trading day's first
+screen — and Study, which shares the same top-up — finishes in seconds rather than minutes. A symbol the quote can't vouch
+for (its previous close doesn't match what's stored, or it's missing volume a series normally has) falls back to the
+historical endpoint automatically, never a wrong bar.
 
 ## Studies
 
@@ -591,7 +621,7 @@ aggregation → result** — and every part of it is described by the **Study Sp
 | Specification | `src/studies/spec.ts`, `protrade/study.py` `normalize_spec` | A JSON document (snake_case, because Python reads it and it is exported). The two sides apply the same rules and defaults — **keep them in step**; both run the cases in `src/studies/fixtures/spec-cases.json`. Versioned (`version: 1`). `question` is the Study's question, shown above its answer; `measures` are read over windows (see "Three lenses" below). |
 | Features | `protrade/features.py`, `src/studies/metrics.ts` | One grammar of names: a family and a window in bars (`return_252`, `ema_200`, `rsi_14`, `dist_high_252`, `rvol_20`, `rs_126`…) plus aliases (`return_12m`, `distance_from_52w_high`). Python computes them; TypeScript accepts the same names and labels them. Returns and distances are fractions. A rolling feature is NaN until its window is full. |
 | Conditions | both of the above | `{left, op, right}` with `>`, `>=`, `<`, `<=`, `crosses_above`, `crosses_below`; `right` is a number or a feature. Events, pre-event filters and characteristics are all conditions. |
-| Engine | `protrade/study.py` (`ResearchStudy`), `protrade/measures.py` | Universe (instrument list, watchlist or symbols) → `load` (daily bars through the local API, in chunks so progress can be reported) → `detect_events` → `measure` (snapshots, measures, forward returns) → `control_group` or `split_by_outcome` → `analyze`. Each step is callable on its own; "Generate Python" writes a script that calls them one by one. `engine_build()` hashes every module the numbers depend on. |
+| Engine | `protrade/study.py` (`ResearchStudy`), `protrade/measures.py` | Universe (instrument list, watchlist or symbols) → `load` (offers the universe for the quote top-up, same as the Screener, then daily bars through the local API, in chunks so progress can be reported) → `detect_events` → `measure` (snapshots, measures, forward returns) → `control_group` or `split_by_outcome` → `analyze`. Each step is callable on its own; "Generate Python" writes a script that calls them one by one. `engine_build()` hashes every module the numbers depend on. |
 | Runner | `protrade/run_study.py`, `study_commands.rs` | `python -m protrade.run_study spec.json`, started through the same `start_python` as a script (same environment, token and events), and only by the Run Study button. It is a module of its own because `-m protrade.study` would import the module twice. |
 | Result | `studies/result.ts` | Posted as result kind `study`. Untrusted like any script output: re-validated (the spec included) and drawn as text and SVG only. `fixtures/engine-result.json` is real engine output (`python/tests/make_study_fixture.py`); a Python test fails when the engine's output shape drifts from it. |
 | Storage | `store/studies.rs`; `studies`, `study_results` tables | Saved Studies (spec JSON, opaque to Rust) and completed runs (the whole result, so a run reopens without running again). The last 20 runs of each Study are kept. A run of a script's Study is stored under a `script:` id. |
@@ -779,7 +809,7 @@ state" in "Security model" for the approval rule; this is the shape that rule ta
   the proposal is dropped silently — never shown as a broken card. Nothing runs until the card's Approve is pressed; Reject or
   leaving it alone calls nothing.
 - **A symbol argument is resolved the same way the search box would type it** (`resolveTypedSymbol`): a bare ticker gets the
-  default provider, a known `provider:` prefix is honoured, and Zerodha/Dhan tickers get `NSE:` where they need an exchange.
+  default provider, a known `provider:` prefix is honoured, and Zerodha tickers get `NSE:` where they need an exchange.
 - **Single-turn.** A proposed action's result isn't fed back to the model automatically — simpler, and keeps every action fully
   human-gated; a user who wants the assistant to react to what happened asks a plain follow-up, the same as they would a person.
 

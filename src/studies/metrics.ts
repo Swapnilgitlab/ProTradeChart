@@ -6,10 +6,11 @@
 
 import type { Condition } from './spec';
 
-export const PLAIN = ['open', 'high', 'low', 'close', 'volume', 'macd', 'macd_signal', 'macd_hist'] as const;
+export const PLAIN = ['open', 'high', 'low', 'close', 'volume', 'macd', 'macd_signal', 'macd_hist', 'gap', 'gap_up', 'gap_down'] as const;
 
 export const FAMILIES = [
   'return',
+  'change',
   'gain_from_low',
   'sma',
   'ema',
@@ -63,12 +64,21 @@ export const ALIASES: Record<string, string> = {
 
 export const MAX_WINDOW = 1000;
 
+/** The bars a feature is computed on: daily (a bare name), weekly (`rsi_14@W`) or monthly (`@M`),
+ *  the latter two built from the daily ones, weeks ending Friday. The Screener only: a Study refuses
+ *  them (`normalizeSpec`), since a past day's week includes the days after it. */
+export const INTERVALS = ['D', 'W', 'M'] as const;
+export type Interval = (typeof INTERVALS)[number];
+export const BARS_PER_INTERVAL: Record<Interval, number> = { D: 1, W: 5, M: 21 };
+export const INTERVAL_LABELS: Record<Interval, string> = { D: '1 day', W: '1 week', M: '1 month' };
+
 /** How a feature's value reads: a fraction shown as a percentage, a price, a plain number, a
  *  multiple (relative volume), shares, or rupees traded. */
 export type Unit = 'percent' | 'price' | 'number' | 'multiple' | 'volume' | 'money';
 
 const FAMILY_UNIT: Record<Family, Unit> = {
   return: 'percent',
+  change: 'price',
   gain_from_low: 'percent',
   sma: 'price',
   ema: 'price',
@@ -109,10 +119,14 @@ const PLAIN_UNIT: Record<(typeof PLAIN)[number], Unit> = {
   macd: 'percent',
   macd_signal: 'percent',
   macd_hist: 'percent',
+  gap: 'percent',
+  gap_up: 'percent',
+  gap_down: 'percent',
 };
 
 const FAMILY_LABEL: Record<Family, string> = {
   return: 'return',
+  change: 'price change',
   gain_from_low: 'gain from low',
   sma: 'SMA',
   ema: 'EMA',
@@ -153,13 +167,15 @@ const PLAIN_LABEL: Record<(typeof PLAIN)[number], string> = {
   macd: 'MACD (% of price)',
   macd_signal: 'MACD signal (% of price)',
   macd_hist: 'MACD histogram (% of price)',
+  gap: 'Gap',
+  gap_up: 'Gap up',
+  gap_down: 'Gap down',
 };
 
 const NAME = /^([a-z_]+?)_(\d+)$/;
 
-/** The canonical spelling of a feature name, or null when the grammar doesn't know it. */
-export function canonicalFeature(name: string): string | null {
-  const key = ALIASES[name.trim().toLowerCase()] ?? name.trim().toLowerCase();
+function canonicalBase(name: string): string | null {
+  const key = ALIASES[name] ?? name;
   if ((PLAIN as readonly string[]).includes(key)) return key;
   const match = NAME.exec(key);
   if (!match || !(FAMILIES as readonly string[]).includes(match[1])) return null;
@@ -167,17 +183,43 @@ export function canonicalFeature(name: string): string | null {
   return n >= 1 && n <= MAX_WINDOW ? `${match[1]}_${n}` : null;
 }
 
+/** The canonical spelling of a feature name, or null when the grammar doesn't know it. */
+export function canonicalFeature(name: string): string | null {
+  const [raw, tf = '', ...rest] = name.trim().toLowerCase().split('@');
+  if (rest.length) return null;
+  const key = canonicalBase(raw.trim());
+  const interval = tf.trim().toUpperCase() || 'D';
+  if (key === null || !(INTERVALS as readonly string[]).includes(interval)) return null;
+  return interval === 'D' ? key : `${key}@${interval}`;
+}
+
+/** `D`, `W` or `M`; daily for a name the grammar doesn't know. */
+export function featureInterval(name: string): Interval {
+  const key = canonicalFeature(name);
+  return ((key?.split('@')[1] as Interval | undefined) ?? 'D');
+}
+
+/** The same feature on another interval: `withInterval('rsi_14', 'W')` is `rsi_14@W`. */
+export function withInterval(name: string, interval: Interval): string {
+  const key = canonicalFeature(name) ?? name;
+  const base = key.split('@')[0];
+  return interval === 'D' ? base : `${base}@${interval}`;
+}
+
 export interface ParsedFeature {
   family: Family | (typeof PLAIN)[number];
   window: number | null;
+  interval: Interval;
 }
 
 export function parseFeature(name: string): ParsedFeature | null {
   const key = canonicalFeature(name);
   if (key === null) return null;
-  if ((PLAIN as readonly string[]).includes(key)) return { family: key as (typeof PLAIN)[number], window: null };
-  const i = key.lastIndexOf('_');
-  return { family: key.slice(0, i) as Family, window: Number(key.slice(i + 1)) };
+  const [base, tf] = key.split('@');
+  const interval = (tf as Interval | undefined) ?? 'D';
+  if ((PLAIN as readonly string[]).includes(base)) return { family: base as (typeof PLAIN)[number], window: null, interval };
+  const i = base.lastIndexOf('_');
+  return { family: base.slice(0, i) as Family, window: Number(base.slice(i + 1)), interval };
 }
 
 export const needsBenchmark = (name: string) => parseFeature(name)?.family === 'rs';
@@ -205,6 +247,11 @@ export function offsetLabel(offset: number): string {
 export function featureLabel(name: string): string {
   const parsed = parseFeature(name);
   if (!parsed) return name;
+  const label = dailyLabel(parsed);
+  return parsed.interval === 'D' ? label : `${label} · ${parsed.interval === 'W' ? 'weekly' : 'monthly'}`;
+}
+
+function dailyLabel(parsed: ParsedFeature): string {
   if (parsed.window === null) return PLAIN_LABEL[parsed.family as (typeof PLAIN)[number]];
   const n = parsed.window;
   const family = parsed.family as Family;
@@ -230,22 +277,27 @@ export function featureLabel(name: string): string {
       return `Distance from ${w === '12M' ? '52W' : w} ${family === 'dist_high' ? 'high' : 'low'}`;
     case 'rvol':
       return `Relative volume (${n}D)`;
+    case 'change':
+      return `${w} price change`;
     default:
       return `${w} ${FAMILY_LABEL[family]}`;
   }
 }
 
-/** `return_252 crosses_above 1` as a person reads it: "12M return crosses above +100%". */
+/** `return_252 crosses_above 1` as a person reads it: "12M return crosses above +100%"; a range
+ *  condition as "RSI 14 between 40 and 60". */
 export function describeCondition(c: Condition): string {
   const op = c.op.replace('_', ' ');
-  const right = typeof c.right === 'string' ? featureLabel(c.right) : formatThreshold(c.left, c.right);
+  const right = Array.isArray(c.right)
+    ? `${formatThreshold(c.left, c.right[0])} and ${formatThreshold(c.left, c.right[1])}`
+    : typeof c.right === 'string'
+      ? featureLabel(c.right)
+      : formatThreshold(c.left, c.right);
   return `${featureLabel(c.left)} ${op} ${right}`;
 }
 
 function formatThreshold(feature: string, value: number): string {
-  const f = canonicalFeature(feature) ?? feature;
-  const percentLike = /^(return|gain_from_low|dist_|slope_|atr_pct|range|volatility|drawdown|max_drawdown|rs|bb_width|macd)/.test(f);
-  return percentLike ? `${value > 0 ? '+' : ''}${Math.round(value * 1000) / 10}%` : String(value);
+  return featureUnit(feature) === 'percent' ? `${value > 0 ? '+' : ''}${Math.round(value * 1000) / 10}%` : String(value);
 }
 
 /** A value of a feature as text. Fractions become percentages; rupee amounts are shortened to

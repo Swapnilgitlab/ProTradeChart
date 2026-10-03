@@ -121,6 +121,39 @@ if value > exitLevel
   },
 ];
 
+/** What **New indicator** and **New strategy** open: the least a script of each kind needs to run,
+ *  to write your own from. Run on the real engine with the examples (`source.engine.test.ts`). */
+export const BLANKS: readonly ScriptTemplate[] = [
+  {
+    id: 'new-indicator',
+    label: 'New indicator',
+    kind: 'indicator',
+    source: `//@version=6
+indicator("My indicator", overlay=true)
+
+length = input.int(14, "Length", minval=1)
+
+plot(ta.sma(close, length), "Average")
+`,
+  },
+  {
+    id: 'new-strategy',
+    label: 'New strategy',
+    kind: 'strategy',
+    source: `//@version=6
+strategy("My strategy", overlay=true)
+
+length = input.int(20, "Length", minval=1)
+average = ta.sma(close, length)
+
+if ta.crossover(close, average)
+    strategy.entry("Long", strategy.long)
+if ta.crossunder(close, average)
+    strategy.close("Long")
+`,
+  },
+];
+
 export function templateById(id: string): ScriptTemplate | undefined {
-  return TEMPLATES.find((t) => t.id === id);
+  return [...TEMPLATES, ...BLANKS].find((t) => t.id === id);
 }

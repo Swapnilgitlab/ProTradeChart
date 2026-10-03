@@ -161,7 +161,7 @@ describe('withoutUnsupportedSymbols', () => {
   const symbolsOf = (state: WorkspaceState) => state.charts.map((c) => c.symbol);
 
   it('leaves a layout of supported symbols exactly as it is', () => {
-    const supported: LayoutDocument = { version: 1, tabs: [{ symbol: 'dhan:NSE:TCS' }, { symbol: 'csv:MY_DATA' }], activeTabIndex: 0 };
+    const supported: LayoutDocument = { version: 1, tabs: [{ symbol: 'zerodha:NSE:TCS' }, { symbol: 'csv:MY_DATA' }], activeTabIndex: 0 };
     const out = withoutUnsupportedSymbols(supported, FALLBACK);
     expect(out.replaced).toBe(0);
     expect(out.doc).toEqual(supported);
@@ -169,11 +169,11 @@ describe('withoutUnsupportedSymbols', () => {
 
   it('moves a tab whose symbol comes from a removed source, and counts it', () => {
     const out = withoutUnsupportedSymbols(
-      { version: 1, tabs: [{ symbol: 'yahoo:QPOWER.NS' }, { symbol: 'binance:ETHUSDT' }], activeTabIndex: 0 },
+      { version: 1, tabs: [{ symbol: 'yahoo:QPOWER.NS' }, { symbol: 'binance:ETHUSDT' }, { symbol: 'dhan:NSE:TCS' }], activeTabIndex: 0 },
       FALLBACK,
     );
-    expect(out.replaced).toBe(1);
-    expect(out.doc.tabs.map((t) => t.symbol)).toEqual([FALLBACK, 'binance:ETHUSDT']);
+    expect(out.replaced).toBe(2);
+    expect(out.doc.tabs.map((t) => t.symbol)).toEqual([FALLBACK, 'binance:ETHUSDT', FALLBACK]);
   });
 
   it('also moves the charts of a grid, one by one, and counts the tab once', () => {
@@ -220,8 +220,8 @@ describe('withChartSymbols', () => {
   });
 
   it('keeps everything else about a chart', () => {
-    const out = withChartSymbols(state('dhan:NSE:INFY'));
-    expect(out.charts[0]).toMatchObject({ id: '0', provider: 'dhan', symbol: 'dhan:INFY' });
+    const out = withChartSymbols(state('zerodha:NSE:INFY'));
+    expect(out.charts[0]).toMatchObject({ id: '0', provider: 'zerodha', symbol: 'zerodha:INFY' });
   });
 
   it('returns the state itself when nothing needs changing, and never edits its input', () => {

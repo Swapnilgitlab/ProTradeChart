@@ -33,6 +33,12 @@ export interface StudiesTab {
   id: string;
 }
 
+/** The Script Editor: write Pine Script and add it to the last chart shown. At most one is open. */
+export interface PineTab {
+  kind: 'pine';
+  id: string;
+}
+
 /** The Screener workspace: build, save and run screens. At most one is open. */
 export interface ScreenerTab {
   kind: 'screener';
@@ -40,11 +46,12 @@ export interface ScreenerTab {
 }
 
 /** A tab that isn't a chart: a workspace with no symbol of its own. */
-export type WorkspaceTab = HomeTab | PythonTab | StudiesTab | ScreenerTab;
+export type WorkspaceTab = HomeTab | PineTab | PythonTab | StudiesTab | ScreenerTab;
 
 /** What a workspace tab is called, in the tab bar and wherever else it is named. */
 export const WORKSPACE_LABELS: Record<WorkspaceTab['kind'], string> = {
   home: 'Home',
+  pine: 'Script Editor',
   python: 'Python',
   studies: 'Studies',
   screener: 'Screener',
@@ -58,6 +65,8 @@ export const chartTabs = (tabs: readonly Tab[]): ChartTab[] => tabs.filter(isCha
 
 export const homeTab = (tabs: readonly Tab[]): HomeTab | undefined =>
   tabs.find((t): t is HomeTab => t.kind === 'home');
+
+export const pineTab = (tabs: readonly Tab[]): PineTab | undefined => tabs.find((t): t is PineTab => t.kind === 'pine');
 
 export const pythonTab = (tabs: readonly Tab[]): PythonTab | undefined =>
   tabs.find((t): t is PythonTab => t.kind === 'python');

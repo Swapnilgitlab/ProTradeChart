@@ -6,8 +6,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use super::instruments::Instrument;
-use crate::dhan::protocol::ist_datetime;
-use crate::models::{Bar, Quote};
+use crate::market::ist_datetime;
+use crate::models::{Bar, DaySnapshot, Quote};
 
 pub const BASE_URL: &str = "https://api.kite.trade";
 pub const FEED_URL: &str = "wss://ws.kite.trade";
@@ -377,6 +377,58 @@ pub fn parse_quotes(status: u16, body: &Value, requested: &[Instrument]) -> Resu
                 currency: Some("INR".to_string()),
                 error,
             }
+        })
+        .collect())
+}
+
+/// Epoch milliseconds of a quote's trade time, `"YYYY-MM-DD HH:MM:SS"` — always IST, since unlike
+/// a candle's timestamp this field carries no zone marker of its own. Anything that isn't exactly
+/// that shape is refused rather than guessed at: a day-topup snapshot with no trade time falls
+/// back to the historical endpoint (`store::day_topup`), which is always safe.
+fn parse_ist_naive(text: &str) -> Option<i64> {
+    if text.trim().len() != 19 {
+        return None;
+    }
+    parse_candle_time(&format!("{}+0530", text.trim()))
+}
+
+/// Builds day snapshots from a `GET /quote` response — the fuller endpoint than `/quote/ohlc`,
+/// also carrying `volume` and `last_trade_time` (the same `ohlc` block as `/quote/ohlc`, whose
+/// `close` is still the *previous* session's, not today's — see [`parse_quotes`]). One snapshot
+/// per requested instrument, `None` for one Kite has no quote for, or no price for yet.
+pub fn parse_day_snapshots(
+    status: u16,
+    body: &Value,
+    requested: &[Instrument],
+) -> Result<Vec<Option<DaySnapshot>>, ZerodhaError> {
+    check(status, body)?;
+    let data = body.get("data").and_then(Value::as_object);
+    Ok(requested
+        .iter()
+        .map(|inst| {
+            let entry = data.and_then(|d| d.get(&inst.quote_key()))?;
+            let last = entry.get("last_price").and_then(Value::as_f64).filter(|p| *p > 0.0)?;
+            let open = entry.pointer("/ohlc/open").and_then(Value::as_f64)?;
+            let high = entry.pointer("/ohlc/high").and_then(Value::as_f64)?;
+            let low = entry.pointer("/ohlc/low").and_then(Value::as_f64)?;
+            let previous_close = entry
+                .pointer("/ohlc/close")
+                .and_then(Value::as_f64)
+                .filter(|p| *p > 0.0);
+            let volume = entry.get("volume").and_then(Value::as_f64).filter(|v| *v > 0.0);
+            let traded_at_ms = entry
+                .get("last_trade_time")
+                .and_then(Value::as_str)
+                .and_then(parse_ist_naive);
+            Some(DaySnapshot {
+                open,
+                high,
+                low,
+                last,
+                previous_close,
+                volume,
+                traded_at_ms,
+            })
         })
         .collect())
 }
@@ -803,6 +855,90 @@ mod tests {
             json!({"status":"error","message":"Incorrect `api_key` or `access_token`.","error_type":"TokenException"});
         assert_eq!(
             parse_quotes(403, &body, &requested).unwrap_err().kind,
+            ZerodhaErrorKind::Token
+        );
+    }
+
+    // ---- day snapshots (the Screener's quote top-up) ----
+    //
+    // The exact field names here (`volume`, `last_trade_time`) are built from Kite's published
+    // `GET /quote` shape, not yet confirmed against a real response — see the `day_topup` plan's
+    // Task 0. A field that turns out to be named or shaped differently just means `traded_at_ms`
+    // or `volume` comes back `None`, which `store::day_topup::snapshot_bar` already treats as a
+    // safe reason to fall back to the historical endpoint, never a wrong bar.
+
+    #[test]
+    fn a_full_quote_becomes_a_day_snapshot() {
+        let requested = [inst("NSE", "EQUITY", "INFY")];
+        let body = json!({"status":"success","data":{
+            "NSE:INFY":{
+                "instrument_token":408065,"last_price":1075,"volume":123456,
+                "last_trade_time":"2026-01-05 15:29:58",
+                "ohlc":{"open":1060,"high":1080,"low":1055,"close":1050}
+            }
+        }});
+        let got = parse_day_snapshots(200, &body, &requested).unwrap();
+        let snap = got[0].unwrap();
+        assert_eq!(
+            (snap.open, snap.high, snap.low, snap.last),
+            (1060.0, 1080.0, 1055.0, 1075.0)
+        );
+        assert_eq!(
+            snap.previous_close,
+            Some(1050.0),
+            "ohlc.close is the PREVIOUS session's"
+        );
+        assert_eq!(snap.volume, Some(123456.0));
+        // 2026-01-05 00:00 IST is the same Monday `market.rs`/`day_topup.rs`'s tests anchor on.
+        assert_eq!(
+            snap.traded_at_ms,
+            Some(1_767_551_400_000 + 15 * 3_600_000 + 29 * 60_000 + 58_000)
+        );
+    }
+
+    #[test]
+    fn an_index_has_no_volume_and_is_still_a_snapshot() {
+        let requested = [inst("NSE", "INDEX", "NIFTY 50")];
+        let body = json!({"status":"success","data":{
+            "NSE:NIFTY 50":{
+                "last_price":25000,"last_trade_time":"2026-01-05 15:29:58",
+                "ohlc":{"open":24900,"high":25100,"low":24850,"close":24950}
+            }
+        }});
+        let got = parse_day_snapshots(200, &body, &requested).unwrap();
+        assert_eq!(got[0].unwrap().volume, None);
+    }
+
+    #[test]
+    fn a_missing_trade_time_or_an_unreadable_one_leaves_it_blank_not_the_whole_snapshot() {
+        let requested = [inst("NSE", "EQUITY", "INFY"), inst("NSE", "EQUITY", "TCS")];
+        let body = json!({"status":"success","data":{
+            "NSE:INFY":{"last_price":1075,"ohlc":{"open":1060,"high":1080,"low":1055,"close":1050}},
+            "NSE:TCS":{"last_price":3500,"last_trade_time":"not a time","ohlc":{"open":3490,"high":3510,"low":3480,"close":3480}}
+        }});
+        let got = parse_day_snapshots(200, &body, &requested).unwrap();
+        assert_eq!(got[0].unwrap().traded_at_ms, None, "field absent");
+        assert_eq!(got[1].unwrap().traded_at_ms, None, "field unreadable");
+    }
+
+    #[test]
+    fn an_instrument_with_no_quote_or_no_price_yet_is_none() {
+        let requested = [inst("NSE", "EQUITY", "GONE"), inst("NSE", "EQUITY", "INFY")];
+        let body = json!({"status":"success","data":{
+            "NSE:INFY":{"last_price":0,"ohlc":{"open":1060,"high":1080,"low":1055,"close":1050}}
+        }});
+        let got = parse_day_snapshots(200, &body, &requested).unwrap();
+        assert_eq!(got[0], None, "no entry at all");
+        assert_eq!(got[1], None, "no trade yet (price 0)");
+    }
+
+    #[test]
+    fn a_rejected_snapshot_request_is_an_error_for_the_whole_call() {
+        let requested = [inst("NSE", "EQUITY", "INFY")];
+        let body =
+            json!({"status":"error","message":"Incorrect `api_key` or `access_token`.","error_type":"TokenException"});
+        assert_eq!(
+            parse_day_snapshots(403, &body, &requested).unwrap_err().kind,
             ZerodhaErrorKind::Token
         );
     }

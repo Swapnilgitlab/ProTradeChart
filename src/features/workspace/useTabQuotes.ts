@@ -7,7 +7,7 @@ const FOCUS_REFRESH_MIN_GAP_MS = 10_000;
 
 /** Polled quotes for the symbols the tabs are showing, so each tab can wear a price and the day's change.
  *
- *  It only asks for those few symbols (one per tab — Dhan and Zerodha quote them in a single request),
+ *  It only asks for those few symbols (one per tab — Zerodha quotes them in a single request),
  *  every 20 seconds at most, and not at all while the window is hidden. A streaming chart's own ticks are
  *  layered on top of this in the tab (see `lib/tabQuote.ts`); the poll is what gives the change from the
  *  previous close, and the price of a tab whose chart isn't streaming (a background tab that was never

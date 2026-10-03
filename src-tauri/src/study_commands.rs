@@ -145,6 +145,9 @@ pub struct StudyEstimate {
     pub symbols: usize,
     pub stored: usize,
     pub requests: usize,
+    /// Batched quote calls the daily top-up needs for stored symbols that only need their newest
+    /// bar — usually 0 or 1, never one per symbol (`store::day_topup`, `study_universe::estimate`).
+    pub quote_requests: usize,
     pub seconds: f64,
     /// Listings left out as not stocks (bonds, SGBs, funds…) or as a second listing of a company.
     pub listings_skipped: usize,
@@ -164,7 +167,7 @@ pub fn study_estimate(request: EstimateRequest, db: State<Database>) -> Result<S
             )
         }
         None => {
-            let source = Source::parse(&request.provider).ok_or("Studies read Zerodha or Dhan data only.")?;
+            let source = Source::parse(&request.provider).ok_or("Studies read Zerodha data only.")?;
             let mut rows = Vec::new();
             for exchange in &request.exchanges {
                 let filter = Filter {
@@ -184,13 +187,13 @@ pub fn study_estimate(request: EstimateRequest, db: State<Database>) -> Result<S
     if let Some(max) = request.max_symbols {
         symbols.truncate(max);
     }
-    // Kite serves up to 2000 days of daily bars a call; Dhan's daily history is one call.
-    let all_dhan = symbols.iter().all(|s| s.starts_with("dhan:")) && !symbols.is_empty();
-    let (window_days, gap) = if all_dhan {
-        (100_000, crate::dhan::client::Pacing::default().data_gap)
-    } else {
-        (2_000, crate::zerodha::client::Pacing::default().data_gap)
-    };
+    // Kite serves up to 2000 days of daily bars a call.
+    let (window_days, gap, quote_batch, quote_gap) = (
+        2_000,
+        crate::zerodha::client::Pacing::default().data_gap,
+        crate::zerodha::client::QUOTE_BATCH,
+        crate::zerodha::client::Pacing::default().quote_gap,
+    );
     let e = study_universe::estimate(
         &conn,
         &symbols,
@@ -198,12 +201,15 @@ pub fn study_estimate(request: EstimateRequest, db: State<Database>) -> Result<S
         crate::db::now_ms(),
         window_days,
         gap.as_millis() as u64,
+        quote_batch,
+        quote_gap.as_millis() as u64,
     )
     .map_err(|e| e.to_string())?;
     Ok(StudyEstimate {
         symbols: e.symbols,
         stored: e.stored,
         requests: e.requests,
+        quote_requests: e.quote_requests,
         seconds: e.seconds,
         listings_skipped: skipped,
     })

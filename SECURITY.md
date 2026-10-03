@@ -12,8 +12,8 @@ volunteer project, so please allow some time.
 ## What the app does and doesn't do
 
 - It has **no accounts, no telemetry and no server of its own.** Nothing you do is sent anywhere except the market-data
-  requests needed to draw charts (Binance, Coinbase and Hyperliquid, and — only if you connect your own account — Dhan
-  and Zerodha): the symbol you're looking at, and what you type into the search box. The app loads no images, fonts or
+  requests needed to draw charts (Binance, Coinbase and Hyperliquid, and — only if you connect your own account —
+  Zerodha): the symbol you're looking at, and what you type into the search box. The app loads no images, fonts or
   scripts from the internet (coin logos, which Vela would fetch from Ledger's
   icon server, are switched off). The one other request is the **update check**: about once a day (and when you press
   *Check for updates*) the app asks GitHub for the latest release's manifest, which reveals your IP address to GitHub like
@@ -21,10 +21,10 @@ volunteer project, so please allow some time.
 - **Updates are signed.** An update is only installed if it verifies against a public key built into the app
   (`plugins.updater.pubkey` in `tauri.conf.json`); the matching private key is held by the maintainer and used only by the
   release workflow. This is separate from the operating-system code signing described below.
-- **Broker credentials** (such as a Dhan access token) are stored in your operating system's credential store — Windows
+- **Broker credentials** (such as a Zerodha access token) are stored in your operating system's credential store — Windows
   Credential Manager, the macOS Keychain, or the Linux Secret Service — and are used only by the app's Rust backend; the web
   view never receives them and the settings screen cannot read them back. If no credential store is available the value is
-  kept in the app's database **unencrypted**, and the app says so. Access tokens are short-lived (Dhan's last 24 hours, Zerodha's until about 6 AM the next
+  kept in the app's database **unencrypted**, and the app says so. Access tokens are short-lived (Zerodha's last until about 6 AM the next
   morning), but treat one like a password: anyone holding it can read your account's market data. Zerodha's API secret is only
   used on this computer, to sign the login; it is never sent anywhere.
 - Your layouts, watchlists, imported data and a price cache are stored **unencrypted** in a SQLite file in your user

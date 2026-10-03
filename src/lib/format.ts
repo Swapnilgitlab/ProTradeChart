@@ -42,14 +42,6 @@ export function formatSpan(seconds: number): string {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
-/** Whether and when an access token stops working, in plain words. */
-export function describeTokenExpiry(expiresAtSecs: number | null, nowMs: number): { text: string; expired: boolean; soon: boolean } {
-  if (expiresAtSecs === null) return { text: "Expiry unknown (the token isn't a standard one).", expired: false, soon: false };
-  const left = expiresAtSecs - nowMs / 1000;
-  if (left <= 0) return { text: `Expired ${formatSpan(left)} ago.`, expired: true, soon: false };
-  return { text: `Valid for another ${formatSpan(left)}.`, expired: false, soon: left < 2 * 3600 };
-}
-
 /** An estimated expiry for a Zerodha access token. Kite gives tokens no expiry
  *  of their own; they simply stop working at about 06:00 IST, so the caller
  *  passes that estimate (or `null` when it isn't known). */

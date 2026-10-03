@@ -33,6 +33,11 @@ describe('the cases shared with the engine (fixtures/spec-cases.json)', () => {
     expect(specProblem(cases.base)).toBeNull();
   });
 
+  it('reads Zerodha for a Study saved with Dhan, which is no longer a data source', () => {
+    const saved = { ...structuredClone(cases.base), universe: { provider: 'dhan' } };
+    expect(normalizeSpec(saved).universe.provider).toBe('zerodha');
+  });
+
   it('refuses each refused case, naming the problem as the engine does', () => {
     for (const c of cases.refused) expect(specProblem(patched(c.patch)), c.word).toContain(c.word);
   });

@@ -6,10 +6,13 @@ Scripts run from the app's Python tab reach market data through it::
 
     df = pt.bars("zerodha:NSE:RELIANCE", "D", start="2023-01-01")
     universe = pt.watchlist("Nifty 50", providers=("zerodha",))
-    panel = pt.bars_many(universe, "D", start="2024-01-01")
+    frames = pt.bars_many(universe, "D", start="2024-01-01")
+    closes = pt.panel(universe, bars=260).wide("close")
 
 The app fetches from the broker (it holds the credentials, and this package never sees
-them), keeps what it fetched, and answers over a local, token-protected connection.
+them), keeps what it fetched, and answers over a local, token-protected connection. Once the
+app's market data has been downloaded, daily bars for every NSE stock come from that store in
+one read (``pt.panel``) instead of one request per symbol.
 
 A script can also keep one of the app's watchlists up to date (``pt.set_watchlist``), which is
 how a scheduled script refreshes a list every evening.
@@ -25,6 +28,7 @@ from .api import (
     bars,
     bars_many,
     instruments,
+    panel,
     providers,
     resample,
     status,
@@ -65,6 +69,7 @@ __all__ = [
     "bars",
     "bars_many",
     "instruments",
+    "panel",
     "plot",
     "providers",
     "report",

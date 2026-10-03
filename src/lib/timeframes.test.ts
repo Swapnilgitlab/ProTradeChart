@@ -8,7 +8,6 @@ import {
   resampleIntraday,
   resampleTo,
   timeframeToString,
-  toDhanPlan,
   toKitePlan,
 } from './timeframes';
 
@@ -147,33 +146,6 @@ describe('localMidnight', () => {
   });
 });
 
-describe('toDhanPlan', () => {
-  const plan = (tf: string) => toDhanPlan(parseTimeframe(tf)!);
-
-  it('uses Dhan-native intervals directly', () => {
-    for (const m of ['1', '5', '15', '25', '60']) expect(plan(m)).toEqual({ interval: m });
-    expect(plan('D')).toEqual({ interval: 'D' });
-  });
-
-  it('builds everything else from the coarsest native interval that divides it', () => {
-    expect(plan('30')).toEqual({ interval: '15', groupSize: 2 });
-    expect(plan('240')).toEqual({ interval: '60', groupSize: 4 });
-    expect(plan('120')).toEqual({ interval: '60', groupSize: 2 });
-    expect(plan('50')).toEqual({ interval: '25', groupSize: 2 });
-    expect(plan('10')).toEqual({ interval: '5', groupSize: 2 });
-    expect(plan('3')).toEqual({ interval: '1', groupSize: 3 });
-  });
-
-  it('builds weeks and months from daily bars', () => {
-    expect(plan('W')).toEqual({ interval: 'D', resampleDaily: 'week' });
-    expect(plan('M')).toEqual({ interval: 'D', resampleDaily: 'month' });
-  });
-
-  it('refuses anything longer than a trading day', () => {
-    expect(plan('2880')).toBeNull();
-  });
-});
-
 describe('toKitePlan', () => {
   const plan = (tf: string) => toKitePlan(parseTimeframe(tf)!);
 
@@ -199,14 +171,5 @@ describe('toKitePlan', () => {
 
   it('refuses anything longer than a trading day', () => {
     expect(plan('2880')).toBeNull();
-  });
-
-  it('differs from Dhan where the two brokers differ', () => {
-    // Kite serves 3, 10 and 30 minute bars natively; Dhan builds them.
-    expect(toKitePlan(parseTimeframe('3')!)).toEqual({ interval: '3' });
-    expect(toDhanPlan(parseTimeframe('3')!)).toEqual({ interval: '1', groupSize: 3 });
-    // Dhan serves 25 minute bars; Kite doesn't.
-    expect(toDhanPlan(parseTimeframe('25')!)).toEqual({ interval: '25' });
-    expect(toKitePlan(parseTimeframe('25')!)).toEqual({ interval: '5', groupSize: 5 });
   });
 });

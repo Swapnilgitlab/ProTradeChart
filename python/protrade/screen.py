@@ -23,7 +23,9 @@ import pandas as pd
 
 from . import api, client, results
 from . import features as feat
-from .study import EXCHANGES, LOAD_WORKERS, PROVIDERS, SERIES, UNIVERSE_SOURCES, pick_listings
+from .study import EXCHANGES, LOAD_WORKERS, PROVIDERS, RETIRED_PROVIDERS, SERIES, UNIVERSE_SOURCES, pick_listings
+from . import wide
+from .wide import WideFeatures
 
 SCREEN_VERSION = 1
 ENGINE_VERSION = "1.0"
@@ -36,6 +38,10 @@ MAX_NAME = 120
 MAX_ROWS = 5_000
 # At least this many bars are loaded, so smoothed features (EMA, RSI, ADX) have settled.
 MIN_HISTORY_BARS = 260
+# At most this many: what the market-data store holds (five years) with room to spare, so a weekly
+# or monthly column on a long window reads the store rather than going back to the broker. Such a
+# column settles a little less than twice its warm-up, which only touches its first values.
+MAX_HISTORY_BARS = 1_200
 # A symbol whose latest bar is this many days older than the universe's is left out: it hasn't traded
 # (suspended, delisted), and judging it on an old bar would present stale news as today's.
 STALE_DAYS = 7
@@ -86,8 +92,9 @@ def normalize_screen(spec) -> dict:
     if source not in UNIVERSE_SOURCES:
         raise ScreenError("universe.source must be instruments, watchlist or symbols.")
     provider = _given(u.get("provider"), "zerodha")
+    provider = RETIRED_PROVIDERS.get(provider, provider) if isinstance(provider, str) else provider
     if provider not in PROVIDERS:
-        raise ScreenError("universe.provider must be zerodha or dhan.")
+        raise ScreenError("universe.provider must be zerodha.")
     exchanges = _given(u.get("exchanges"), ["NSE"])
     if not isinstance(exchanges, list) or not exchanges or any(e not in EXCHANGES for e in exchanges):
         raise ScreenError("universe.exchanges must list one or more of NSE, BSE.")
@@ -180,7 +187,7 @@ def output_columns(spec: dict) -> list[str]:
 def history_bars(spec: dict) -> int:
     """Bars to load so every column has settled by the latest bar."""
     deepest = max((feat.warmup(n) for n in output_columns(spec)), default=1)
-    return max(MIN_HISTORY_BARS, 2 * deepest + 10)
+    return min(MAX_HISTORY_BARS, max(MIN_HISTORY_BARS, 2 * deepest + 10))
 
 
 def fetch_start(spec: dict, today: _dt.date) -> _dt.date:
@@ -191,7 +198,7 @@ def fetch_start(spec: dict, today: _dt.date) -> _dt.date:
 def engine_build() -> str:
     """A fingerprint of the code a screen's numbers depend on."""
     digest = hashlib.sha256()
-    for module in (__file__, feat.__file__):
+    for module in (__file__, feat.__file__, wide.__file__):
         try:
             with open(module, "rb") as f:
                 digest.update(f.read().replace(b"\r\n", b"\n"))
@@ -211,17 +218,33 @@ def _number(value) -> float | None:
     return round(number, 6) if math.isfinite(number) else None
 
 
-def latest(features: feat.Features, spec: dict) -> tuple[bool, bool, list]:
-    """Whether a symbol passes the filters on its latest bar, whether any filter couldn't be judged
-    there (too little history for a feature), and its values for :func:`output_columns`."""
-    passed, unknown = True, False
+def judge(frames: dict[str, pd.DataFrame], spec: dict, benchmark: pd.Series | None = None) -> dict[str, tuple]:
+    """Every symbol with bars, judged on its own latest bar: ``(its date, whether it passes the
+    filters, whether a filter couldn't be judged there for want of history, its values for
+    :func:`output_columns`)``.
+
+    All symbols are computed together (:class:`protrade.wide.WideFeatures`), which gives exactly
+    the numbers a per-symbol :class:`protrade.features.Features` would, in a fraction of the time."""
+    frames = {s: f for s, f in frames.items() if len(f)}
+    if not frames:
+        return {}
+    w = WideFeatures(frames, benchmark)
+    passed = pd.Series(True, index=w.symbols)
+    unknown = pd.Series(False, index=w.symbols)
     for condition in spec["filters"]:
-        if not feat.evaluate(features, condition).iloc[-1]:
-            passed = False
-            if any(pd.isna(features.get(n).iloc[-1]) for n in feat.condition_features(condition)):
-                unknown = True
-    values = [_number(features.get(name).iloc[-1]) for name in output_columns(spec)]
-    return passed, unknown, values
+        holds = feat.evaluate(w, condition).iloc[-1].astype(bool)
+        blank = pd.Series(False, index=w.symbols)
+        for name in feat.condition_features(condition):
+            blank |= w.get(name).iloc[-1].isna()
+        unknown |= ~holds & blank
+        passed &= holds
+    names = output_columns(spec)
+    latest = {name: w.get(name).iloc[-1] for name in names}
+    dates = w.latest_dates()
+    return {
+        s: (dates[s], bool(passed[s]), bool(unknown[s]), [_number(latest[name][s]) for name in names])
+        for s in w.symbols
+    }
 
 
 class Screen:
@@ -259,9 +282,9 @@ class Screen:
                     if row.get("name"):
                         self.names[row["symbol"]] = row["name"]
             if len(chosen) < len(rows):
-                self.warn("watchlist_other", f"{len(rows) - len(chosen)} symbols on the watchlist aren't Zerodha or Dhan symbols and were left out.")
+                self.warn("watchlist_other", f"{len(rows) - len(chosen)} symbols on the watchlist aren't Zerodha symbols and were left out.")
             if not chosen:
-                raise client.NotFoundError(f"The watchlist {u['watchlist']!r} has no Zerodha or Dhan symbols on it.")
+                raise client.NotFoundError(f"The watchlist {u['watchlist']!r} has no Zerodha symbols on it.")
         else:
             rows = []
             for exchange in u["exchanges"]:
@@ -283,33 +306,22 @@ class Screen:
             self.warn("sampled_universe", f"Only the first {u['max_symbols']} symbols of the universe were screened.")
         return chosen
 
-    def run(self, today: _dt.date | None = None) -> dict:
-        started = time.monotonic()
-        spec = self.spec
-        today = today or _dt.date.today()
-        symbols = self.universe()
-        start = fetch_start(spec, today)
-
-        benchmark = None
-        if spec["benchmark"]:
-            try:
-                benchmark = api.bars(spec["benchmark"], "D", start=start, naive=True)["close"]
-            except client.FATAL:
-                raise
-            except client.ProTradeError as e:
-                self.warn("benchmark_missing", f"The benchmark {spec['benchmark']} couldn't be loaded ({e}); relative strength is blank.")
-
-        loaded: dict[str, tuple] = {}
+    def _fetch(self, symbols: list[str], start, started: float) -> dict[str, pd.DataFrame]:
+        """Daily bars for the symbols the store didn't hold, a request each: first the quote top-up
+        (one batched call brings an already-held symbol's latest bar up to date), then a pool kept
+        busy at the broker's pace. A failure is recorded and that symbol left out."""
+        if not symbols:
+            return {}
+        topup = api._top_up(symbols, start=start)
+        if topup:
+            ready = topup["current"] + topup["updated"]
+            if ready:
+                self.progress(2, f"{ready} of {len(symbols)} symbols already up to date")
+        out: dict[str, pd.DataFrame] = {}
         total, done, last_report = len(symbols), 0, 0.0
-
-        def fetch(symbol: str) -> pd.DataFrame:
-            return api.bars(symbol, "D", start=start, naive=True)
-
-        # One pool over the whole universe, as a Study loads: the app paces the broker, and a symbol
-        # is judged as soon as its bars arrive.
         pool = ThreadPoolExecutor(max_workers=LOAD_WORKERS)
         try:
-            futures = {pool.submit(fetch, s): s for s in symbols}
+            futures = {pool.submit(api.bars, s, "D", start=start, naive=True): s for s in symbols}
             for future in as_completed(futures):
                 symbol = futures[future]
                 done += 1
@@ -321,18 +333,46 @@ class Screen:
                     self.failed[symbol] = str(e)
                     frame = None
                 if frame is not None and len(frame):
-                    features = feat.Features(frame, benchmark)
-                    loaded[symbol] = (frame.index[-1], *latest(features, spec))
+                    out[symbol] = frame
                 now = time.monotonic()
                 if now - last_report >= 1.0 or done == total:
                     last_report = now
-                    line = f"Loading and screening ({done}/{total})"
+                    line = f"Loading ({done}/{total})"
                     pace = api._pace(done, total, now - started)
                     if pace:
                         line += f" · {pace[0]:.1f}/s, about {api._duration(pace[1])} left"
                     self.progress(2 + int(93 * done / max(total, 1)), line)
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
+        return out
+
+    def run(self, today: _dt.date | None = None) -> dict:
+        started = time.monotonic()
+        spec = self.spec
+        today = today or _dt.date.today()
+        symbols = self.universe()
+        start = fetch_start(spec, today)
+
+        # What the market-data store holds up to the latest session comes in one read; only the
+        # rest is topped up and fetched symbol by symbol, as before the store existed.
+        frames_by_symbol, missing = api._from_panel(symbols, start, None, None, naive=True)
+        if frames_by_symbol:
+            self.progress(2, f"{len(frames_by_symbol)} of {len(symbols)} symbols read from the market data on this computer")
+
+        benchmark = None
+        if spec["benchmark"]:
+            try:
+                benchmark = api.bars(spec["benchmark"], "D", start=start, naive=True)["close"]
+            except client.FATAL:
+                raise
+            except client.ProTradeError as e:
+                self.warn("benchmark_missing", f"The benchmark {spec['benchmark']} couldn't be loaded ({e}); relative strength is blank.")
+
+        total = len(symbols)
+        frames_by_symbol.update(self._fetch(missing, start, started))
+
+        self.progress(96, f"Screening {len(frames_by_symbol)} symbols")
+        loaded = judge(frames_by_symbol, spec, benchmark)
 
         if self.failed:
             self.warn("load_failed", f"{len(self.failed)} of {total} symbols couldn't be loaded and are left out.")

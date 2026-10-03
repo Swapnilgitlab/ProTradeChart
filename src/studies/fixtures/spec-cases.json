@@ -118,7 +118,14 @@
     {
       "patch": { "measures": [{ "stat": "mean", "feature": "rs_126", "window": { "start": { "offset": -63 }, "end": { "offset": 0 } } }] },
       "word": "benchmark"
-    }
+    },
+    { "patch": { "metrics": ["rsi_14@W"] }, "word": "weekly and monthly" },
+    {
+      "patch": { "event": { "conditions": [{ "left": "close", "op": "crosses_above", "right": "ema_50@M" }], "cooldown_days": 21 } },
+      "word": "weekly and monthly"
+    },
+    { "patch": { "event": { "conditions": [{ "left": "rsi_14", "op": "between", "right": [70, 30] }] } }, "word": "low end" },
+    { "patch": { "universe": { "provider": "yahoo" } }, "word": "universe.provider must be" }
   ],
   "accepted": [
     {

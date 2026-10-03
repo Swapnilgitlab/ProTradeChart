@@ -14,7 +14,7 @@ export async function estimateUniverse(
   if (u.source === 'watchlist') {
     const row = watchlists.find((w) => w.name.toLowerCase() === (u.watchlist ?? '').toLowerCase());
     if (!row) return null;
-    symbols = (await getWatchlist(row.id)).items.map((i) => i.symbol).filter((sym) => /^(zerodha|dhan):/.test(sym));
+    symbols = (await getWatchlist(row.id)).items.map((i) => i.symbol).filter((sym) => /^zerodha:/.test(sym));
   }
   return studyEstimate({
     provider: u.provider,

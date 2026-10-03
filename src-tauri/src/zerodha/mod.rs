@@ -2,7 +2,7 @@
 //! live tick feed and quotes for Indian equities, indices, futures and
 //! commodities, from the user's own Kite Connect app.
 //!
-//! It has the same shape as `dhan/`:
+//! Its parts:
 //!
 //! - `protocol` — pure: request planning, response parsing, error mapping, and
 //!   the login handshake's checksum.
@@ -10,11 +10,9 @@
 //! - `client` — HTTP: history, quotes, login, instrument downloads.
 //! - `feed` — the live WebSocket, shared by every chart and window.
 //!
-//! Two things differ from Dhan. Kite access tokens are opaque and expire every
-//! morning, so the app has a login step (`protocol::login_url`,
-//! `client::exchange_token`) instead of a renewable token. And Kite refuses bad
-//! credentials during the WebSocket handshake, where Dhan accepts the socket
-//! and silently drops it.
+//! Kite access tokens are opaque and expire every morning, so the app has a login step
+//! (`protocol::login_url`, `client::exchange_token`). Kite refuses bad credentials during the
+//! WebSocket handshake.
 
 pub mod callback;
 pub mod client;

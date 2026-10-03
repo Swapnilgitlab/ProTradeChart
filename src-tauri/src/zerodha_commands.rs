@@ -1,23 +1,23 @@
-//! Tauri commands for Zerodha. Like `provider_commands.rs` (whose Dhan half
-//! these mirror) they are thin: lock the database, call into `providers` /
-//! `zerodha`, and flatten errors to user-readable strings.
+//! Tauri commands for Zerodha. Like `provider_commands.rs` they are thin: lock the database, call
+//! into `providers` / `zerodha`, and flatten errors to user-readable strings.
 
 use std::collections::HashMap;
 use std::sync::MutexGuard;
 
 use rusqlite::Connection;
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::db::{now_ms, Database};
-use crate::dhan::protocol::ist_date;
+use crate::market::ist_date;
 use crate::models::{BarsResponse, Quote, SymbolMatch};
 use crate::provider_commands::TestResult;
 use crate::providers;
 use crate::secrets::Secrets;
 use crate::store::bars_cache;
 use crate::store::provider_settings::{self as settings, Table};
+use crate::store::research_bars::canonical_interval;
 use crate::zerodha::callback;
 use crate::zerodha::client::{Credentials, ZerodhaClient};
 use crate::zerodha::feed::{Feed, StatusEvent};
@@ -33,7 +33,7 @@ const INSTRUMENTS_UPDATED_KEY: &str = "instrumentsUpdatedAt";
 /// what "expires around 6 AM" is worked out from.
 pub const TOKEN_SAVED_KEY: &str = "accessTokenSavedAt";
 /// Refresh the instrument list when it's older than this (new listings, expiries).
-const INSTRUMENTS_MAX_AGE_MS: i64 = 7 * 86_400_000;
+pub(crate) const INSTRUMENTS_MAX_AGE_MS: i64 = 7 * 86_400_000;
 
 fn lock(db: &Database) -> Result<MutexGuard<'_, Connection>, String> {
     db.conn.lock().map_err(|e| e.to_string())
@@ -276,10 +276,10 @@ pub async fn zerodha_update_instruments(
     })
 }
 
-/// Refreshes the instrument list if it's missing or stale. Called when the app
-/// starts; failures are logged, not shown — the Data providers dialog offers a
-/// manual update.
-pub async fn refresh_instruments_if_stale(db: &Database, secrets: &Secrets, client: &ZerodhaClient) {
+/// Refreshes the instrument list if it's missing or older than `max_age_ms`. Called when the app
+/// starts and by the daily market-data update; failures are logged, not shown — the Data
+/// providers dialog offers a manual update.
+pub async fn refresh_instruments_if_stale(db: &Database, secrets: &Secrets, client: &ZerodhaClient, max_age_ms: i64) {
     let stale = {
         let Ok(conn) = db.conn.lock() else { return };
         if !providers::is_usable(&conn, secrets, ZERODHA).unwrap_or(false) {
@@ -291,7 +291,7 @@ pub async fn refresh_instruments_if_stale(db: &Database, secrets: &Secrets, clie
             .flatten()
             .and_then(|v| v.parse::<i64>().ok())
             .unwrap_or(0);
-        count == 0 || now_ms() - updated > INSTRUMENTS_MAX_AGE_MS
+        count == 0 || now_ms() - updated > max_age_ms
     };
     if stale {
         match update_instruments_inner(db, client).await {
@@ -412,10 +412,11 @@ pub async fn zerodha_fetch_bars(
     interval: String,
     from_ms: Option<i64>,
     to_ms: Option<i64>,
+    app: AppHandle,
     db: State<'_, Database>,
-    secrets: State<'_, Secrets>,
     client: State<'_, ZerodhaClient>,
 ) -> Result<BarsResponse, String> {
+    let secrets = app.state::<Secrets>();
     let interval_kind =
         Interval::parse(&interval).ok_or_else(|| format!("Zerodha doesn't serve a '{interval}' interval"))?;
     let (creds, inst) = {
@@ -432,6 +433,16 @@ pub async fn zerodha_fetch_bars(
         timezone: Some("Asia/Kolkata".into()),
         from_cache,
     };
+    // Daily (and the weekly and monthly charts made from it) comes from the market-data store
+    // when it holds the symbol; only what the store lacks is read from Kite.
+    if let (true, Some(from)) = (canonical_interval(&interval).as_deref() == Some("D"), from_ms) {
+        match crate::marketdata::chart_daily(&app, &cache_key, from, to_ms).await {
+            Some(Ok(bars)) => return Ok(response(bars, false)),
+            Some(Err((_, stored))) if !stored.is_empty() => return Ok(response(stored, true)),
+            Some(Err((message, _))) => return Err(message),
+            None => {}
+        }
+    }
     match client
         .fetch_history(&creds, &inst, interval_kind, from_ms, to_ms, now_ms())
         .await

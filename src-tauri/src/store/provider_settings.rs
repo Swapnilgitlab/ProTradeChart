@@ -58,31 +58,31 @@ mod tests {
     fn set_get_overwrite_and_delete() {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
-        assert_eq!(get(&conn, Table::Settings, "dhan", "clientId").unwrap(), None);
-        set(&conn, Table::Settings, "dhan", "clientId", "100").unwrap();
-        set(&conn, Table::Settings, "dhan", "clientId", "200").unwrap();
+        assert_eq!(get(&conn, Table::Settings, "zerodha", "apiKey").unwrap(), None);
+        set(&conn, Table::Settings, "zerodha", "apiKey", "100").unwrap();
+        set(&conn, Table::Settings, "zerodha", "apiKey", "200").unwrap();
         assert_eq!(
-            get(&conn, Table::Settings, "dhan", "clientId").unwrap().as_deref(),
+            get(&conn, Table::Settings, "zerodha", "apiKey").unwrap().as_deref(),
             Some("200")
         );
-        delete(&conn, Table::Settings, "dhan", "clientId").unwrap();
-        assert_eq!(get(&conn, Table::Settings, "dhan", "clientId").unwrap(), None);
+        delete(&conn, Table::Settings, "zerodha", "apiKey").unwrap();
+        assert_eq!(get(&conn, Table::Settings, "zerodha", "apiKey").unwrap(), None);
     }
 
     #[test]
     fn tables_and_providers_are_independent() {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
-        set(&conn, Table::Settings, "dhan", "k", "settings").unwrap();
-        set(&conn, Table::FallbackSecrets, "dhan", "k", "secret").unwrap();
+        set(&conn, Table::Settings, "zerodha", "k", "settings").unwrap();
+        set(&conn, Table::FallbackSecrets, "zerodha", "k", "secret").unwrap();
         set(&conn, Table::Settings, "kite", "k", "other").unwrap();
 
         assert_eq!(
-            get(&conn, Table::Settings, "dhan", "k").unwrap().as_deref(),
+            get(&conn, Table::Settings, "zerodha", "k").unwrap().as_deref(),
             Some("settings")
         );
         assert_eq!(
-            get(&conn, Table::FallbackSecrets, "dhan", "k").unwrap().as_deref(),
+            get(&conn, Table::FallbackSecrets, "zerodha", "k").unwrap().as_deref(),
             Some("secret")
         );
         assert_eq!(

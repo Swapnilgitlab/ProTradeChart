@@ -21,6 +21,9 @@ const CLOSE_MS: i64 = OPEN_MS + SESSION_MINUTES * MINUTE_MS;
 /// The exchange settles its closing prices a little after the bell, so a daily bar read in
 /// the first minutes after 15:30 may still move. Half an hour is comfortably past that.
 const SETTLED_MS: i64 = CLOSE_MS + 30 * MINUTE_MS;
+/// Kite shows special pre-open-session prices from 09:00; they are not a trustworthy stand-in
+/// for the day's own bar, so a quote read in this short window is refused rather than trusted.
+const PRE_OPEN_MS: i64 = 9 * HOUR_MS;
 
 /// Midnight IST of the calendar date `ms` falls on.
 pub fn ist_day_start(ms: i64) -> i64 {
@@ -48,6 +51,77 @@ pub fn last_settled_ms(now_ms: i64) -> i64 {
         .find(|settled| *settled <= now_ms)
         // A week always holds a settled weekday; this only keeps the function total.
         .unwrap_or(i64::MIN)
+}
+
+/// The calendar day a quote taken *right now* speaks for, as a daily bar: today's own session
+/// while it is running, else the last settled session's day. `None` during Kite's pre-open
+/// window (09:00–09:15), when a quote is a special indicative price, not the day's own bar —
+/// a symbol read then should wait, or fall back to the historical endpoint.
+pub fn quote_session_day(now_ms: i64) -> Option<i64> {
+    let today = ist_day_start(now_ms);
+    if is_weekday(now_ms) {
+        let since_midnight = now_ms - today;
+        if (PRE_OPEN_MS..OPEN_MS).contains(&since_midnight) {
+            return None;
+        }
+        if is_open(now_ms) {
+            return Some(today);
+        }
+    }
+    Some(ist_day_start(last_settled_ms(now_ms)))
+}
+
+/// How many weekdays fall strictly between two midnight-IST days (in either order) — a holiday
+/// counts (there is no holiday calendar here), so this is a conservative "is there any day I
+/// might have missed" check, not an exact trading-day count.
+pub fn weekdays_between(a_day_start: i64, b_day_start: i64) -> i64 {
+    let (lo, hi) = if a_day_start <= b_day_start {
+        (a_day_start, b_day_start)
+    } else {
+        (b_day_start, a_day_start)
+    };
+    let mut day = lo + DAY_MS;
+    let mut count = 0;
+    while day < hi {
+        if is_weekday(day) {
+            count += 1;
+        }
+        day += DAY_MS;
+    }
+    count
+}
+
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    // Howard Hinnant's days-to-civil algorithm.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// `YYYY-MM-DD` of an instant, in IST.
+pub fn ist_date(ms: i64) -> String {
+    let secs = (ms + IST_OFFSET_MS).div_euclid(1000);
+    let (y, m, d) = civil_from_days(secs.div_euclid(86_400));
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// `YYYY-MM-DD HH:MM:SS` of an instant, in IST.
+pub fn ist_datetime(ms: i64) -> String {
+    let rem = (ms + IST_OFFSET_MS).div_euclid(1000).rem_euclid(86_400);
+    format!(
+        "{} {:02}:{:02}:{:02}",
+        ist_date(ms),
+        rem / 3600,
+        (rem % 3600) / 60,
+        rem % 60
+    )
 }
 
 #[cfg(test)]
@@ -132,5 +206,87 @@ mod tests {
             assert!(now - settled < 4 * DAY_MS, "always within a long weekend of now: {now}");
             previous = settled;
         }
+    }
+
+    #[test]
+    fn a_quote_speaks_for_todays_session_while_it_is_open() {
+        assert_eq!(quote_session_day(at(0, 9, 15)), Some(at(0, 0, 0)));
+        assert_eq!(quote_session_day(at(0, 12, 0)), Some(at(0, 0, 0)));
+        assert_eq!(quote_session_day(at(0, 15, 29) + 59_999), Some(at(0, 0, 0)));
+    }
+
+    #[test]
+    fn a_quote_in_the_pre_open_window_speaks_for_nothing() {
+        assert_eq!(quote_session_day(at(0, 9, 0)), None);
+        assert_eq!(quote_session_day(at(0, 9, 14) + 59_999), None);
+    }
+
+    #[test]
+    fn outside_the_session_a_quote_speaks_for_the_last_settled_day() {
+        // Before the pre-open window, the session hasn't started: yesterday's (Friday's, over a
+        // weekend) settled day still stands.
+        assert_eq!(
+            quote_session_day(at(0, 8, 59)),
+            Some(at(-3, 0, 0)),
+            "Monday before the open"
+        );
+        assert_eq!(
+            quote_session_day(at(0, 16, 0)),
+            Some(at(0, 0, 0)),
+            "after today settles"
+        );
+        assert_eq!(
+            quote_session_day(at(0, 15, 30)),
+            Some(at(-3, 0, 0)),
+            "right at the bell, not yet settled"
+        );
+        assert_eq!(
+            quote_session_day(at(5, 12, 0)),
+            Some(at(4, 0, 0)),
+            "Saturday speaks for Friday"
+        );
+    }
+
+    #[test]
+    fn weekdays_between_is_zero_for_the_same_day_or_an_ordinary_weekend() {
+        assert_eq!(weekdays_between(at(0, 0, 0), at(0, 0, 0)), 0);
+        assert_eq!(
+            weekdays_between(at(4, 0, 0), at(7, 0, 0)),
+            0,
+            "Friday to the next Monday"
+        );
+        assert_eq!(weekdays_between(at(7, 0, 0), at(4, 0, 0)), 0, "order doesn't matter");
+    }
+
+    #[test]
+    fn weekdays_between_counts_every_weekday_in_a_gap() {
+        assert_eq!(
+            weekdays_between(at(0, 0, 0), at(2, 0, 0)),
+            1,
+            "Monday to Wednesday: Tuesday"
+        );
+        assert_eq!(
+            weekdays_between(at(3, 0, 0), at(7, 0, 0)),
+            1,
+            "Thursday to Monday: Friday"
+        );
+        assert_eq!(
+            weekdays_between(at(0, 0, 0), at(7, 0, 0)),
+            4,
+            "a whole week of weekdays between"
+        );
+    }
+
+    #[test]
+    fn instants_are_written_as_ist_dates_and_times() {
+        // 2026-01-05 00:00 IST is 2026-01-04 18:30 UTC.
+        let monday = 1_767_551_400_000;
+        assert_eq!(ist_date(monday), "2026-01-05");
+        assert_eq!(ist_date(monday - 1), "2026-01-04");
+        assert_eq!(
+            ist_datetime(monday + 9 * 3_600_000 + 15 * 60_000 + 7_000),
+            "2026-01-05 09:15:07"
+        );
+        assert_eq!(ist_date(0), "1970-01-01");
     }
 }

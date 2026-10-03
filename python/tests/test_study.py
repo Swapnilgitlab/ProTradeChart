@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
-from support import Case, ms  # noqa: E402  (also puts the package on the path)
+from support import Case, ms, panel_bytes  # noqa: E402  (also puts the package on the path)
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
@@ -176,6 +176,11 @@ class UniverseTests(unittest.TestCase):
         self.assertEqual(study.normalize_spec(spec(universe={"series": ["SME", "EQ"]}))["universe"]["series"], ["EQ", "SME"])
         with self.assertRaises(study.SpecError):
             study.normalize_spec(spec(universe={"series": ["GB"]}))
+
+    def test_a_study_saved_with_dhan_reads_zerodha_now_that_dhan_is_gone(self):
+        self.assertEqual(study.normalize_spec(spec(universe={"provider": "dhan"}))["universe"]["provider"], "zerodha")
+        with self.assertRaisesRegex(study.SpecError, "universe.provider"):
+            study.normalize_spec(spec(universe={"provider": "yahoo"}))
 
 
 class EngineTests(unittest.TestCase):
@@ -386,6 +391,10 @@ def bars_route(query):
     return 200, body(query["symbol"], closes[closes.index >= start])
 
 
+def sync_route(payload):
+    return 200, {"results": [{"symbol": s, "status": "current", "reason": None} for s in payload["symbols"]]}
+
+
 class RunTests(Case):
     routes = {
         "/v1/ping": lambda q: (200, {"ok": True, "api": 1, "app": "9.9.9"}),
@@ -395,7 +404,7 @@ class RunTests(Case):
         ),
         "/v1/bars": bars_route,
     }
-    posts = {"/v1/results": lambda payload: (200, {"ok": True})}
+    posts = {"/v1/results": lambda payload: (200, {"ok": True}), "/v1/bars/sync": sync_route}
     run_id = "run-9"
 
     def test_a_spec_file_runs_from_start_to_finish_and_posts_one_study(self):
@@ -409,7 +418,7 @@ class RunTests(Case):
         self.assertEqual(code, 0)
         self.assertIn("[progress] 100% Complete", out.getvalue())
         self.assertIn(f"[engine] protrade {study.ENGINE_VERSION} ({study.engine_build()})", out.getvalue())
-        posted = self.stub.posted()
+        posted = self.stub.posted("/v1/results")
         self.assertEqual(len(posted), 1)
         self.assertEqual((posted[0]["runId"], posted[0]["kind"], posted[0]["title"]), ("run-9", "study", "100% Winners"))
         data = posted[0]["data"]
@@ -423,6 +432,44 @@ class RunTests(Case):
         # The fetch reached back far enough for a 52-week high 12 months before a 2018 event.
         starts = sorted(int(r["query"]["from"]) for r in self.stub.requests if r["path"] == "/v1/bars")
         self.assertLessEqual(starts[0], ms("2016-01-20"))
+
+    def test_the_universe_is_offered_for_a_quote_top_up_before_the_historical_fetch(self):
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            study.ResearchStudy(spec()).load(list(SERIES) + ["zerodha:NSE:GONE"])
+        synced = self.stub.posted("/v1/bars/sync")
+        self.assertEqual(len(synced), 1)
+        self.assertEqual(set(synced[0]["symbols"]), set(SERIES) | {"zerodha:NSE:GONE"})
+        self.assertIn("already up to date", out.getvalue())
+
+    def test_symbols_the_market_data_store_holds_are_read_in_batches_with_the_same_study(self):
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            before = study.ResearchStudy(spec(), progress=False).run()
+        self.stub.requests.clear()
+
+        def panel(payload):
+            start = pd.Timestamp(payload["from"], unit="ms", tz="UTC").tz_convert("Asia/Kolkata").tz_localize(None).normalize()
+            held = [(s, SERIES[s]) for s in payload["symbols"] if s in SERIES]
+            return 200, panel_bytes(
+                [(s, body(s, closes[closes.index >= start]), True) for s, closes in held]
+                + [(s, None, False) for s in payload["symbols"] if s not in SERIES]
+            )
+
+        self.stub.posts["/v1/panel"] = panel
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            after = study.ResearchStudy(spec(), progress=False).run()
+        fetched = {r["query"]["symbol"] for r in self.stub.requests if r["path"] == "/v1/bars"}
+        self.assertEqual(fetched, {"zerodha:NSE:GONE"}, "only what the store lacks")
+        self.assertEqual(after["summary"], before["summary"])
+        self.assertEqual(after["events"], before["events"])
+        for key in ("symbols_requested", "symbols_failed"):
+            self.assertEqual(after["meta"][key], before["meta"][key], key)
+
+    def test_a_missing_or_broken_sync_route_does_not_stop_the_run(self):
+        del self.stub.posts["/v1/bars/sync"]  # as an app build without the route would 404
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            data = study.ResearchStudy(spec()).load(list(SERIES) + ["zerodha:NSE:GONE"])
+        self.assertEqual(len(data), 3, "the ordinary per-symbol fetch still ran")
 
     def test_loading_keeps_many_requests_in_flight_and_reports_time_left(self):
         # The app paces the broker; the engine's job is to always have requests waiting at that
@@ -461,7 +508,7 @@ class RunTests(Case):
                 json.dump(spec(universe={"source": "instruments", "min_avg_traded_value": 1.2e7}), f)
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 self.assertEqual(run_study.main(["run_study", path]), 0)
-        meta = self.stub.posted()[0]["data"]["meta"]
+        meta = self.stub.posted("/v1/results")[0]["data"]["meta"]
         # All three series were loaded and fingerprinted; only the one liquid enough is kept.
         self.assertEqual(meta["symbols_loaded"], 3)
         self.assertLess(meta["symbols_kept"], 3)

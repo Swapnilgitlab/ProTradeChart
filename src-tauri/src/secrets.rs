@@ -265,19 +265,19 @@ mod tests {
         let secrets = Secrets::new(Box::new(MemoryKeychain::default()));
 
         assert_eq!(
-            secrets.set(&conn, "dhan", "accessToken", "tok").unwrap(),
+            secrets.set(&conn, "zerodha", "accessToken", "tok").unwrap(),
             Storage::Keychain
         );
         assert_eq!(
-            secrets.get(&conn, "dhan", "accessToken").unwrap().as_deref(),
+            secrets.get(&conn, "zerodha", "accessToken").unwrap().as_deref(),
             Some("tok")
         );
         assert_eq!(
-            secrets.storage_of(&conn, "dhan", "accessToken").unwrap(),
+            secrets.storage_of(&conn, "zerodha", "accessToken").unwrap(),
             Some(Storage::Keychain)
         );
         assert_eq!(
-            settings::get(&conn, Table::FallbackSecrets, "dhan", "accessToken").unwrap(),
+            settings::get(&conn, Table::FallbackSecrets, "zerodha", "accessToken").unwrap(),
             None
         );
     }
@@ -289,15 +289,15 @@ mod tests {
         let secrets = Secrets::new(Box::new(BrokenKeychain));
 
         assert_eq!(
-            secrets.set(&conn, "dhan", "accessToken", "tok").unwrap(),
+            secrets.set(&conn, "zerodha", "accessToken", "tok").unwrap(),
             Storage::Database
         );
         assert_eq!(
-            secrets.get(&conn, "dhan", "accessToken").unwrap().as_deref(),
+            secrets.get(&conn, "zerodha", "accessToken").unwrap().as_deref(),
             Some("tok")
         );
         assert_eq!(
-            secrets.storage_of(&conn, "dhan", "accessToken").unwrap(),
+            secrets.storage_of(&conn, "zerodha", "accessToken").unwrap(),
             Some(Storage::Database)
         );
     }
@@ -308,18 +308,18 @@ mod tests {
         let conn = db.conn.lock().unwrap();
         // First saved while the keychain was down...
         Secrets::new(Box::new(BrokenKeychain))
-            .set(&conn, "dhan", "accessToken", "old")
+            .set(&conn, "zerodha", "accessToken", "old")
             .unwrap();
         // ...then saved again once it works.
         let secrets = Secrets::new(Box::new(MemoryKeychain::default()));
-        secrets.set(&conn, "dhan", "accessToken", "new").unwrap();
+        secrets.set(&conn, "zerodha", "accessToken", "new").unwrap();
 
         assert_eq!(
-            secrets.get(&conn, "dhan", "accessToken").unwrap().as_deref(),
+            secrets.get(&conn, "zerodha", "accessToken").unwrap().as_deref(),
             Some("new")
         );
         assert_eq!(
-            settings::get(&conn, Table::FallbackSecrets, "dhan", "accessToken").unwrap(),
+            settings::get(&conn, Table::FallbackSecrets, "zerodha", "accessToken").unwrap(),
             None
         );
     }
@@ -329,12 +329,12 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
         let secrets = Secrets::new(Box::new(MemoryKeychain::default()));
-        assert_eq!(secrets.get(&conn, "dhan", "accessToken").unwrap(), None);
+        assert_eq!(secrets.get(&conn, "zerodha", "accessToken").unwrap(), None);
 
-        secrets.set(&conn, "dhan", "accessToken", "tok").unwrap();
-        secrets.delete(&conn, "dhan", "accessToken").unwrap();
-        assert_eq!(secrets.get(&conn, "dhan", "accessToken").unwrap(), None);
-        assert_eq!(secrets.storage_of(&conn, "dhan", "accessToken").unwrap(), None);
+        secrets.set(&conn, "zerodha", "accessToken", "tok").unwrap();
+        secrets.delete(&conn, "zerodha", "accessToken").unwrap();
+        assert_eq!(secrets.get(&conn, "zerodha", "accessToken").unwrap(), None);
+        assert_eq!(secrets.storage_of(&conn, "zerodha", "accessToken").unwrap(), None);
     }
 
     /// A store that already holds a token, as after an earlier launch, handed to a `Secrets`
@@ -345,7 +345,7 @@ mod tests {
             .secrets
             .lock()
             .unwrap()
-            .insert("dhan.accessToken".into(), token.into());
+            .insert("zerodha.accessToken".into(), token.into());
         let secrets = Secrets::new(Box::new(store.clone()));
         (store, secrets)
     }
@@ -357,12 +357,12 @@ mod tests {
         let (store, secrets) = holding("tok");
         for _ in 0..50 {
             assert_eq!(
-                secrets.get(&conn, "dhan", "accessToken").unwrap().as_deref(),
+                secrets.get(&conn, "zerodha", "accessToken").unwrap().as_deref(),
                 Some("tok")
             );
-            assert!(secrets.has(&conn, "dhan", "accessToken").unwrap());
+            assert!(secrets.has(&conn, "zerodha", "accessToken").unwrap());
             assert_eq!(
-                secrets.storage_of(&conn, "dhan", "accessToken").unwrap(),
+                secrets.storage_of(&conn, "zerodha", "accessToken").unwrap(),
                 Some(Storage::Keychain)
             );
         }
@@ -375,9 +375,9 @@ mod tests {
         let conn = db.conn.lock().unwrap();
         let (store, secrets) = holding("tok");
         for _ in 0..50 {
-            assert_eq!(secrets.get(&conn, "zerodha", "accessToken").unwrap(), None);
-            assert!(!secrets.has(&conn, "zerodha", "accessToken").unwrap());
-            assert_eq!(secrets.storage_of(&conn, "zerodha", "accessToken").unwrap(), None);
+            assert_eq!(secrets.get(&conn, "zerodha", "apiSecret").unwrap(), None);
+            assert!(!secrets.has(&conn, "zerodha", "apiSecret").unwrap());
+            assert_eq!(secrets.storage_of(&conn, "zerodha", "apiSecret").unwrap(), None);
         }
         assert_eq!(store.reads(), 1);
     }
@@ -388,13 +388,13 @@ mod tests {
         let conn = db.conn.lock().unwrap();
         let (store, secrets) = holding("old");
         assert_eq!(
-            secrets.get(&conn, "dhan", "accessToken").unwrap().as_deref(),
+            secrets.get(&conn, "zerodha", "accessToken").unwrap().as_deref(),
             Some("old")
         );
 
-        secrets.set(&conn, "dhan", "accessToken", "new").unwrap();
+        secrets.set(&conn, "zerodha", "accessToken", "new").unwrap();
         assert_eq!(
-            secrets.get(&conn, "dhan", "accessToken").unwrap().as_deref(),
+            secrets.get(&conn, "zerodha", "accessToken").unwrap().as_deref(),
             Some("new")
         );
         assert_eq!(
@@ -409,19 +409,19 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
         let (_store, secrets) = holding("tok");
-        assert!(secrets.has(&conn, "dhan", "accessToken").unwrap());
+        assert!(secrets.has(&conn, "zerodha", "accessToken").unwrap());
 
-        secrets.delete(&conn, "dhan", "accessToken").unwrap();
-        assert_eq!(secrets.get(&conn, "dhan", "accessToken").unwrap(), None);
-        assert!(!secrets.has(&conn, "dhan", "accessToken").unwrap());
-        assert_eq!(secrets.storage_of(&conn, "dhan", "accessToken").unwrap(), None);
+        secrets.delete(&conn, "zerodha", "accessToken").unwrap();
+        assert_eq!(secrets.get(&conn, "zerodha", "accessToken").unwrap(), None);
+        assert!(!secrets.has(&conn, "zerodha", "accessToken").unwrap());
+        assert_eq!(secrets.storage_of(&conn, "zerodha", "accessToken").unwrap(), None);
     }
 
     #[test]
     fn a_credential_edited_outside_the_app_is_seen_once_the_memory_expires_and_not_before() {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
-        let read = |secrets: &Secrets| secrets.get(&conn, "dhan", "accessToken").unwrap();
+        let read = |secrets: &Secrets| secrets.get(&conn, "zerodha", "accessToken").unwrap();
 
         let (store, secrets) = holding("a");
         assert_eq!(read(&secrets).as_deref(), Some("a"));
@@ -429,7 +429,7 @@ mod tests {
             .secrets
             .lock()
             .unwrap()
-            .insert("dhan.accessToken".into(), "b".into());
+            .insert("zerodha.accessToken".into(), "b".into());
         assert_eq!(read(&secrets).as_deref(), Some("a"), "still remembered");
 
         let store = Arc::new(MemoryKeychain::default());
@@ -437,14 +437,14 @@ mod tests {
             .secrets
             .lock()
             .unwrap()
-            .insert("dhan.accessToken".into(), "a".into());
+            .insert("zerodha.accessToken".into(), "a".into());
         let secrets = Secrets::with_ttl(Box::new(store.clone()), Duration::ZERO);
         assert_eq!(read(&secrets).as_deref(), Some("a"));
         store
             .secrets
             .lock()
             .unwrap()
-            .insert("dhan.accessToken".into(), "b".into());
+            .insert("zerodha.accessToken".into(), "b".into());
         assert_eq!(
             read(&secrets).as_deref(),
             Some("b"),
@@ -457,12 +457,12 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
         let secrets = Secrets::new(Box::new(BrokenKeychain));
-        secrets.set(&conn, "dhan", "accessToken", "tok").unwrap();
+        secrets.set(&conn, "zerodha", "accessToken", "tok").unwrap();
 
-        assert!(secrets.has(&conn, "dhan", "accessToken").unwrap());
-        assert!(!secrets.has(&conn, "dhan", "clientId").unwrap());
+        assert!(secrets.has(&conn, "zerodha", "accessToken").unwrap());
+        assert!(!secrets.has(&conn, "zerodha", "apiKey").unwrap());
         assert_eq!(
-            secrets.get(&conn, "dhan", "accessToken").unwrap().as_deref(),
+            secrets.get(&conn, "zerodha", "accessToken").unwrap().as_deref(),
             Some("tok")
         );
     }

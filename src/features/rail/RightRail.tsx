@@ -23,6 +23,8 @@ export interface RailAction {
   /** Set for something that is either showing or not (the Script Editor, the Python tab): the button is lit
    *  while it shows. Left out for a button that only opens something (a dialog). */
   pressed?: boolean;
+  /** A small dot in the corner — something worth noticing (an update is ready), not a count. */
+  dot?: boolean;
 }
 
 interface Props {
@@ -42,16 +44,18 @@ interface IconButtonProps {
   title: string;
   icon: LucideIcon;
   badge?: number;
+  dot?: boolean;
   /** Lit, and announced as pressed. `undefined` means the button isn't a toggle. */
   pressed?: boolean;
   onClick: () => void;
 }
 
-function RailIconButton({ label, title, icon: Icon, badge, pressed, onClick }: IconButtonProps) {
+function RailIconButton({ label, title, icon: Icon, badge, dot, pressed, onClick }: IconButtonProps) {
   return (
     <button type="button" className={`rail-button${pressed ? ' active' : ''}`} aria-label={label} aria-pressed={pressed} title={title} onClick={onClick}>
       <Icon size={18} />
       {badge != null && badge > 0 && <span className="icon-badge">{badge > 9 ? '9+' : badge}</span>}
+      {dot && <span className="update-dot" aria-hidden="true" />}
     </button>
   );
 }
@@ -63,7 +67,7 @@ function RailIconButton({ label, title, icon: Icon, badge, pressed, onClick }: I
  *  tab); and at the bottom, the settings-like ones (where prices come from). */
 export function RightRail({ panels, activePanel, onTogglePanel, tools = [], footer = [] }: Props) {
   const action = (a: RailAction) => (
-    <RailIconButton key={a.id} label={a.label} title={a.title ?? a.label} icon={a.icon} pressed={a.pressed} onClick={a.onClick} />
+    <RailIconButton key={a.id} label={a.label} title={a.title ?? a.label} icon={a.icon} pressed={a.pressed} dot={a.dot} onClick={a.onClick} />
   );
   return (
     <nav className="right-rail" aria-label="Side panels and tools">

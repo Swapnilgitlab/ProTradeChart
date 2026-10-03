@@ -9,9 +9,9 @@ import { notify } from './events';
  *  instrument. Each streaming broker gets its own hub. */
 
 export interface FeedHubConfig<Tick> {
-  /** The Tauri event carrying ticks, e.g. `dhan-tick`. */
+  /** The Tauri event carrying ticks, e.g. `zerodha-tick`. */
   tickEvent: string;
-  /** The Tauri event carrying status changes, e.g. `dhan-status`. */
+  /** The Tauri event carrying status changes, e.g. `zerodha-status`. */
   statusEvent: string;
   /** Which subscribers a tick is for. */
   keyOf: (tick: Tick) => string;

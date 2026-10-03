@@ -1,6 +1,26 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, CirclePlay, Copy, FilePlus2, Plus, Save, Square, Trash2, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  CirclePlay,
+  Copy,
+  FilePlus2,
+  ListChecks,
+  MapPin,
+  PanelLeft,
+  PanelLeftClose,
+  Plus,
+  RefreshCw,
+  Save,
+  SlidersHorizontal,
+  Square,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useToast } from '../../components/Toasts';
+import { useDismiss } from '../../components/useDismiss';
 import { confirmDelete, confirmDiscard } from '../../lib/dialogs';
 import {
   deleteScreener,
@@ -16,17 +36,19 @@ import {
   type ScreenerRow,
 } from '../../lib/ipc';
 import { formatElapsed } from '../../python/format';
+import { chipText } from '../../screener/catalog';
 import { fromPreset, PRESETS } from '../../screener/presets';
 import { screenReadiness } from '../../screener/readiness';
 import { parseScreenResult, screenCsv, type ScreenResult } from '../../screener/result';
 import { loadFrom, normalizeScreen, outputColumns, screenProblem, type ScreenSpec } from '../../screener/spec';
 import { canonicalFeature, featureLabel } from '../../studies/metrics';
 import { TRIAL_SYMBOLS, type UniverseEstimate } from '../../studies/readiness';
-import type { Condition, Series } from '../../studies/spec';
+import type { Series } from '../../studies/spec';
 import { useProviderState } from '../providers/useProviderState';
 import { AddToWatchlistDialog } from '../python/AddToWatchlistDialog';
-import { ConditionList, FEATURE_CHOICES } from '../studies/ConditionList';
+import { FEATURE_CHOICES } from '../studies/ConditionList';
 import { estimateUniverse } from '../studies/estimate';
+import { FilterChips } from './FilterChips';
 import { ScreenTable } from './ScreenTable';
 import { useScreenRunner } from './useScreenRunner';
 
@@ -68,7 +90,6 @@ function savedForm(spec: unknown): string | null {
 export function ScreenerPanel({ visible, onOpenSymbol }: Props) {
   const toast = useToast();
   const { providers } = useProviderState();
-  const columnListId = useId();
   const [screens, setScreens] = useState<ScreenerRow[]>([]);
   const [watchlistRows, setWatchlistRows] = useState<{ id: number; name: string }[]>([]);
   const watchlists = useMemo(() => watchlistRows.map((w) => w.name), [watchlistRows]);
@@ -80,7 +101,25 @@ export function ScreenerPanel({ visible, onOpenSymbol }: Props) {
   const rawResult = useRef<unknown>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [adding, setAdding] = useState<string[] | null>(null);
-  const [newColumn, setNewColumn] = useState('');
+  const [sideCollapsed, setSideCollapsed] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [columnMenuOpen, setColumnMenuOpen] = useState(false);
+  // Filters and Columns fold while the results are shown as charts, which want the height; each
+  // heading still opens its section.
+  const [filtersCollapsed, setFiltersCollapsed] = useState(false);
+  const [columnsCollapsed, setColumnsCollapsed] = useState(false);
+  const foldForCharts = (charts: boolean) => {
+    setFiltersCollapsed(charts);
+    setColumnsCollapsed(charts);
+  };
+  // With no results there are no charts, so nothing to make room for.
+  useEffect(() => {
+    if (result) return;
+    setFiltersCollapsed(false);
+    setColumnsCollapsed(false);
+  }, [result]);
+  const columnMenuRef = useRef<HTMLDivElement>(null);
+  useDismiss(columnMenuRef, columnMenuOpen, () => setColumnMenuOpen(false));
   const loaded = useRef(false);
   const runner = useScreenRunner();
   const { run, progress, log, now } = runner;
@@ -245,14 +284,8 @@ export function ScreenerPanel({ visible, onOpenSymbol }: Props) {
     }
   };
 
-  const addColumn = () => {
-    const key = canonicalFeature(newColumn);
-    if (!key) {
-      toast(`“${newColumn}” isn’t a feature. Pick one from the list, or write one like ema_50 or return_63.`, 'error');
-      return;
-    }
+  const addColumn = (key: string) => {
     if (!draft.columns.includes(key)) set({ columns: [...draft.columns, key] });
-    setNewColumn('');
   };
 
   const removeColumn = (name: string) => {
@@ -264,7 +297,9 @@ export function ScreenerPanel({ visible, onOpenSymbol }: Props) {
 
   const running = run !== null;
   const canRun = !!normal && !!readiness?.ready && !running;
-  const runTitle = problem ?? readiness?.checks.find((c) => c.blocking)?.text ?? 'Run the screen';
+  const blockingCheck = readiness?.checks.find((c) => c.blocking)?.text;
+  const runTitle = problem ?? blockingCheck ?? 'Run the screen';
+  const availableColumns = FEATURE_CHOICES.filter((f) => !draft.columns.includes(f));
   // The columns a sort can use: those the result will have, spelled correctly.
   const sortChoices = outputColumns({ columns: draft.columns, filters: draft.filters.filter((f) => canonicalFeature(f.left)) })
     .map((c) => canonicalFeature(c))
@@ -273,45 +308,80 @@ export function ScreenerPanel({ visible, onOpenSymbol }: Props) {
   const resultIsStale = result && normal && JSON.stringify(result.spec) !== JSON.stringify(normal);
 
   return (
-    <div className="studies-panel screener-panel">
-      <aside className="python-side studies-side" aria-label="Screens">
+    <div className={`studies-panel screener-panel${sideCollapsed ? ' side-collapsed' : ''}`}>
+      <aside className={`python-side studies-side${sideCollapsed ? ' screener-side-collapsed' : ''}`} aria-label="Screens">
         <div className="python-side-header">
-          <span>My screens</span>
-          <button type="button" className="icon-button" aria-label="New screen" title="New screen" onClick={() => void openPreset('custom')}>
-            <FilePlus2 size={14} />
-          </button>
+          {!sideCollapsed && <span>My screens</span>}
+          <span className="screener-side-header-actions">
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={sideCollapsed ? 'Show my screens' : 'Collapse my screens'}
+              title={sideCollapsed ? 'Show my screens' : 'Collapse'}
+              onClick={() => setSideCollapsed((v) => !v)}
+            >
+              {sideCollapsed ? <PanelLeft size={14} /> : <PanelLeftClose size={14} />}
+            </button>
+            {!sideCollapsed && (
+              <button type="button" className="icon-button" aria-label="New screen" title="New screen" onClick={() => void openPreset('custom')}>
+                <FilePlus2 size={14} />
+              </button>
+            )}
+          </span>
         </div>
-        <div className="python-side-list studies-side-list">
-          {screens.length === 0 && <div className="python-side-empty small muted">No saved screens yet. Start from a preset below.</div>}
-          {screens.map((s) => (
-            <div key={s.id} className={`python-script${s.id === current.id ? ' active' : ''}`}>
-              <button type="button" className="python-script-name studies-run" title={s.name} onClick={() => void openScreen(s)}>
-                <span>{s.name}</span>
-                <span className="muted small">{s.ranAt ? `Ran ${s.ranAt.slice(0, 16).replace('T', ' ')}` : 'Not run yet'}</span>
-              </button>
-              <button type="button" className="icon-button" aria-label={`Delete ${s.name}`} title="Delete" onClick={() => void remove(s)}>
-                <Trash2 size={13} />
-              </button>
-            </div>
-          ))}
-          <div className="python-side-header studies-subhead">Presets</div>
-          {PRESETS.filter((p) => p.id !== 'custom').map((p) => (
-            <div key={p.id} className="python-script">
-              <button type="button" className="python-script-name" title={p.summary} onClick={() => void openPreset(p.id)}>
-                {p.name}
-              </button>
-            </div>
-          ))}
-        </div>
+        {!sideCollapsed && (
+          <div className="python-side-list studies-side-list">
+            {screens.length === 0 && <div className="python-side-empty small muted">No saved screens yet. Start from a preset below.</div>}
+            {screens.map((s) => (
+              <div key={s.id} className={`python-script${s.id === current.id ? ' active' : ''}`}>
+                <button type="button" className="python-script-name studies-run" title={s.name} onClick={() => void openScreen(s)}>
+                  <span>{s.name}</span>
+                  <span className="muted small">{s.ranAt ? `Ran ${s.ranAt.slice(0, 16).replace('T', ' ')}` : 'Not run yet'}</span>
+                </button>
+                <button type="button" className="icon-button" aria-label={`Delete ${s.name}`} title="Delete" onClick={() => void remove(s)}>
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))}
+            <div className="python-side-header studies-subhead">Presets</div>
+            {PRESETS.filter((p) => p.id !== 'custom').map((p) => (
+              <div key={p.id} className="python-script">
+                <button type="button" className="python-script-name" title={p.summary} onClick={() => void openPreset(p.id)}>
+                  {p.name}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </aside>
 
       <div className="python-main">
         <div className="pine-toolbar">
-          <span className="python-current" title={draft.name}>
-            {draft.name || 'Untitled screen'}
-          </span>
+          <label className="screener-name-picker" title={draft.name}>
+            <select
+              className="screener-name-select"
+              value={current.isSaved ? current.id : '__draft__'}
+              onChange={(e) => {
+                if (e.currentTarget.value === '__draft__') return;
+                const row = screens.find((s) => s.id === e.currentTarget.value);
+                if (row) void openScreen(row);
+              }}
+              aria-label="Switch screen"
+            >
+              {!current.isSaved && <option value="__draft__">{draft.name || 'Untitled screen'}</option>}
+              {screens.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={14} aria-hidden="true" />
+          </label>
           <span className={`pine-status${dirty ? ' dirty' : ''}`}>{!current.isSaved ? 'Not saved' : dirty ? 'Unsaved changes' : 'Saved'}</span>
           <div className="pine-toolbar-spacer" />
+          <button type="button" className="icon-button" aria-label="Refresh" title="Run the screen again" onClick={startRun} disabled={!canRun}>
+            <RefreshCw size={15} />
+          </button>
           <button type="button" className="btn pine-btn" onClick={duplicate} title="Duplicate as a new screen">
             <Copy size={14} />
             Duplicate
@@ -333,124 +403,67 @@ export function ScreenerPanel({ visible, onOpenSymbol }: Props) {
           )}
         </div>
 
-        {(running || failed) && (
-          <div className={`study-run${failed ? ' failed' : ''}`} role="status">
-            {running && progress && (
-              <>
-                <div className="study-progress-label">
-                  <span>{progress.stage}</span>
-                  <span className="muted">
-                    {progress.percent}% · {formatElapsed(now - (run?.startedAt ?? now))}
-                  </span>
-                </div>
-                <div className="study-progress" aria-hidden="true">
-                  <div style={{ width: `${progress.percent}%` }} />
-                </div>
-              </>
-            )}
-            {failed && <div className="study-problem">{failed}</div>}
-            {log.length > 0 && (
-              <pre className="study-log">
-                {log.map((l, i) => (
-                  <div key={i} className={l.error ? 'study-loss' : undefined}>
-                    {l.text}
-                  </div>
+        <div className="screener-quickbar" aria-label="Quick universe filters">
+          <label className="screener-chip screener-chip-select" title="Which stocks the screen looks at">
+            <ListChecks size={13} aria-hidden="true" />
+            <select value={draft.universe.source} onChange={(e) => setUniverse({ source: e.currentTarget.value as ScreenSpec['universe']['source'] })}>
+              <option value="instruments">Broker instruments</option>
+              <option value="watchlist">Watchlist</option>
+              <option value="symbols">Symbol list</option>
+            </select>
+            <ChevronDown size={12} aria-hidden="true" />
+          </label>
+          {draft.universe.source === 'watchlist' && (
+            <label className="screener-chip screener-chip-select">
+              <select value={draft.universe.watchlist ?? ''} onChange={(e) => setUniverse({ watchlist: e.currentTarget.value || null })}>
+                <option value="">Choose a watchlist…</option>
+                {watchlists.map((w) => (
+                  <option key={w} value={w}>
+                    {w}
+                  </option>
                 ))}
-              </pre>
-            )}
-            {failed && !running && (
-              <button type="button" className="btn btn-tiny" onClick={() => setFailed(null)}>
-                Dismiss
-              </button>
-            )}
-          </div>
-        )}
+              </select>
+              <ChevronDown size={12} aria-hidden="true" />
+            </label>
+          )}
+          {draft.universe.source === 'instruments' && (
+            <span className="screener-chip screener-chip-static">
+              <MapPin size={13} aria-hidden="true" />
+              {(['NSE', 'BSE'] as const).map((ex) => (
+                <button
+                  type="button"
+                  key={ex}
+                  className={`screener-exchange${draft.universe.exchanges.includes(ex) ? ' on' : ''}`}
+                  aria-pressed={draft.universe.exchanges.includes(ex)}
+                  onClick={() =>
+                    setUniverse({
+                      exchanges: draft.universe.exchanges.includes(ex)
+                        ? draft.universe.exchanges.filter((x) => x !== ex)
+                        : [...draft.universe.exchanges, ex],
+                    })
+                  }
+                >
+                  {ex}
+                </button>
+              ))}
+            </span>
+          )}
+          <button
+            type="button"
+            className={`screener-chip screener-more-toggle${moreOpen ? ' on' : ''}`}
+            onClick={() => setMoreOpen((v) => !v)}
+            aria-expanded={moreOpen}
+            title="Rename, pick a broker, cap the symbol count, include BE/SME, list symbols by hand, or see what the run will cost"
+          >
+            <SlidersHorizontal size={13} aria-hidden="true" />
+            More options
+            {!moreOpen && blockingCheck && <span className="screener-more-dot" aria-hidden="true" title={blockingCheck} />}
+            {moreOpen ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}
+          </button>
+        </div>
 
-        <div className="studies-body">
-          <div className="study-builder screener-builder">
-            <div className="study-form">
-              <section className="study-section">
-                <h3>Filters</h3>
-                <p className="muted small study-hint">
-                  A stock matches when all of these hold on its latest bar. “Crosses above” means it crossed on that bar. With no filters, every stock is listed.
-                </p>
-                <ConditionList<Condition>
-                  items={draft.filters}
-                  onChange={(filters) => set({ filters })}
-                  make={() => ({ left: 'rsi_14', op: '<', right: 30 })}
-                  addLabel="Add a filter (AND)"
-                />
-              </section>
-
-              <section className="study-section">
-                <h3>Columns</h3>
-                <p className="muted small study-hint">Shown for every match, after the symbol. The features the filters read are shown too.</p>
-                <div className="screener-columns">
-                  {draft.columns.map((c) => (
-                    <span key={c} className={`screener-chip${canonicalFeature(c) ? '' : ' invalid'}`} title={c}>
-                      {featureLabel(c)}
-                      <button type="button" className="icon-button" aria-label={`Remove ${featureLabel(c)}`} onClick={() => removeColumn(c)}>
-                        <X size={11} />
-                      </button>
-                    </span>
-                  ))}
-                  <datalist id={columnListId}>
-                    {FEATURE_CHOICES.map((f) => (
-                      <option key={f} value={f}>
-                        {featureLabel(f)}
-                      </option>
-                    ))}
-                  </datalist>
-                  <span className="screener-add-column">
-                    <input
-                      className="python-input"
-                      list={columnListId}
-                      value={newColumn}
-                      placeholder="Add a column: ema_50, return_63…"
-                      aria-label="Column to add"
-                      spellCheck={false}
-                      onChange={(e) => setNewColumn(e.currentTarget.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && newColumn.trim() && addColumn()}
-                    />
-                    <button type="button" className="btn btn-tiny" onClick={addColumn} disabled={!newColumn.trim()}>
-                      <Plus size={13} />
-                      Add
-                    </button>
-                  </span>
-                </div>
-                <div className="study-row">
-                  <label className="study-field">
-                    <span>Order by</span>
-                    <select
-                      className="python-input"
-                      value={draft.sort?.column ?? ''}
-                      onChange={(e) => set({ sort: e.currentTarget.value ? { column: e.currentTarget.value, descending: draft.sort?.descending ?? true } : null })}
-                    >
-                      <option value="">Symbol (A–Z)</option>
-                      {sortChoices.map((c) => (
-                        <option key={c} value={c}>
-                          {featureLabel(c)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  {draft.sort && (
-                    <label className="study-field">
-                      <span>Direction</span>
-                      <select
-                        className="python-input"
-                        value={draft.sort.descending ? 'desc' : 'asc'}
-                        onChange={(e) => set({ sort: draft.sort && { ...draft.sort, descending: e.currentTarget.value === 'desc' } })}
-                      >
-                        <option value="desc">Highest first</option>
-                        <option value="asc">Lowest first</option>
-                      </select>
-                    </label>
-                  )}
-                </div>
-              </section>
-            </div>
-
+        {moreOpen && (
+          <div className="screener-more-panel">
             <div className="study-form">
               <section className="study-section">
                 <h3>Screen</h3>
@@ -473,10 +486,9 @@ export function ScreenerPanel({ visible, onOpenSymbol }: Props) {
                   {draft.universe.source === 'instruments' && (
                     <label className="study-field">
                       <span>Broker</span>
-                      <select className="python-input" value={draft.universe.provider} onChange={(e) => setUniverse({ provider: e.currentTarget.value as 'zerodha' | 'dhan' })}>
+                      <select className="python-input" value={draft.universe.provider} onChange={(e) => setUniverse({ provider: e.currentTarget.value as 'zerodha' })}>
                         <option value="zerodha">Zerodha</option>
-                        <option value="dhan">Dhan</option>
-                      </select>
+                                              </select>
                     </label>
                   )}
                   {draft.universe.source === 'watchlist' && (
@@ -572,8 +584,151 @@ export function ScreenerPanel({ visible, onOpenSymbol }: Props) {
                   </button>
                 )}
                 <p className="muted small">
-                  Bars are the broker’s daily bars. The first run each trading day fetches every symbol once, at the broker’s pace; what is fetched is kept, so runs later that day are quick.
+                  Bars are the broker’s daily bars. With Market data downloaded (Data providers), every NSE stock is read from this computer in one go; anything else is fetched at the broker’s pace and kept, so later runs are quick.
                 </p>
+              </section>
+            </div>
+          </div>
+        )}
+
+        {(running || failed) && (
+          <div className={`study-run${failed ? ' failed' : ''}`} role="status">
+            {running && progress && (
+              <>
+                <div className="study-progress-label">
+                  <span>{progress.stage}</span>
+                  <span className="muted">
+                    {progress.percent}% · {formatElapsed(now - (run?.startedAt ?? now))}
+                  </span>
+                </div>
+                <div className="study-progress" aria-hidden="true">
+                  <div style={{ width: `${progress.percent}%` }} />
+                </div>
+              </>
+            )}
+            {failed && <div className="study-problem">{failed}</div>}
+            {log.length > 0 && (
+              <pre className="study-log">
+                {log.map((l, i) => (
+                  <div key={i} className={l.error ? 'study-loss' : undefined}>
+                    {l.text}
+                  </div>
+                ))}
+              </pre>
+            )}
+            {failed && !running && (
+              <button type="button" className="btn btn-tiny" onClick={() => setFailed(null)}>
+                Dismiss
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="studies-body">
+          <div className="study-builder screener-builder">
+            <div className="study-form">
+              <section className="study-section">
+                <h3>
+                  <SectionToggle title="Filters" collapsed={filtersCollapsed} onToggle={() => setFiltersCollapsed((v) => !v)} />
+                  {filtersCollapsed && (
+                    <span className="muted small screener-section-summary">
+                      {draft.filters.length === 0 ? 'None: every stock is listed' : draft.filters.map(chipText).join(' · ')}
+                    </span>
+                  )}
+                </h3>
+                {!filtersCollapsed && (
+                  <>
+                    <p className="muted small study-hint">
+                      A stock matches when all of these hold on its latest bar. “Crosses above” means it crossed on that bar. With no filters, every stock is listed.
+                    </p>
+                    <FilterChips items={draft.filters} onChange={(filters) => set({ filters })} />
+                  </>
+                )}
+              </section>
+
+              <section className="study-section">
+                <h3>
+                  <SectionToggle title="Columns" collapsed={columnsCollapsed} onToggle={() => setColumnsCollapsed((v) => !v)} />
+                  {columnsCollapsed && (
+                    <span className="muted small screener-section-summary">
+                      {draft.columns.length === 0 ? 'None' : draft.columns.map(featureLabel).join(', ')}
+                      {draft.sort ? ` · ordered by ${featureLabel(draft.sort.column)}` : ''}
+                    </span>
+                  )}
+                </h3>
+                {!columnsCollapsed && (
+                  <>
+                    <p className="muted small study-hint">Shown for every match, after the symbol. The features the filters read are shown too.</p>
+                    <div className="screener-columns">
+                      {draft.columns.map((c) => (
+                        <span key={c} className={`screener-chip${canonicalFeature(c) ? '' : ' invalid'}`} title={c}>
+                          {featureLabel(c)}
+                          <button type="button" className="icon-button" aria-label={`Remove ${featureLabel(c)}`} onClick={() => removeColumn(c)}>
+                            <X size={11} />
+                          </button>
+                        </span>
+                      ))}
+                      <div className="menu-anchor" ref={columnMenuRef}>
+                        <button
+                          type="button"
+                          className="icon-button screener-add-column-btn"
+                          aria-label="Add a column"
+                          aria-haspopup="menu"
+                          aria-expanded={columnMenuOpen}
+                          onClick={() => setColumnMenuOpen((v) => !v)}
+                        >
+                          <Plus size={14} />
+                        </button>
+                        {columnMenuOpen && (
+                          <div className="menu left" role="menu">
+                            {availableColumns.length === 0 && <div className="menu-empty small">Every feature is already a column.</div>}
+                            {availableColumns.map((f) => (
+                              <button
+                                key={f}
+                                type="button"
+                                role="menuitem"
+                                className="menu-item"
+                                onClick={() => addColumn(f)}
+                              >
+                                <span className="grow">{featureLabel(f)}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="study-row">
+                      <label className="study-field">
+                        <span>Order by</span>
+                        <select
+                          className="python-input"
+                          value={draft.sort?.column ?? ''}
+                          onChange={(e) => set({ sort: e.currentTarget.value ? { column: e.currentTarget.value, descending: draft.sort?.descending ?? true } : null })}
+                        >
+                          <option value="">Symbol (A–Z)</option>
+                          {sortChoices.map((c) => (
+                            <option key={c} value={c}>
+                              {featureLabel(c)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {draft.sort && (
+                        <label className="study-field">
+                          <span>Direction</span>
+                          <select
+                            className="python-input"
+                            value={draft.sort.descending ? 'desc' : 'asc'}
+                            onChange={(e) => set({ sort: draft.sort && { ...draft.sort, descending: e.currentTarget.value === 'desc' } })}
+                          >
+                            <option value="desc">Highest first</option>
+                            <option value="asc">Lowest first</option>
+                          </select>
+                        </label>
+                      )}
+                    </div>
+                  </>
+                )}
               </section>
             </div>
           </div>
@@ -589,7 +744,13 @@ export function ScreenerPanel({ visible, onOpenSymbol }: Props) {
                     ))}
                   </ul>
                 )}
-                <ScreenTable result={result} onOpenSymbol={onOpenSymbol} onAddToWatchlist={setAdding} onExport={(rows) => void exportCsv(rows)} />
+                <ScreenTable
+                  result={result}
+                  onOpenSymbol={onOpenSymbol}
+                  onAddToWatchlist={setAdding}
+                  onExport={(rows) => void exportCsv(rows)}
+                  onViewChange={(view) => foldForCharts(view === 'charts')}
+                />
               </>
             ) : (
               !running && <p className="muted small screener-empty">Press Run to see which stocks match today.</p>
@@ -600,5 +761,15 @@ export function ScreenerPanel({ visible, onOpenSymbol }: Props) {
 
       {adding && <AddToWatchlistDialog symbols={adding} onClose={() => setAdding(null)} say={(level, text) => toast(text, level === 'error' ? 'error' : 'success')} />}
     </div>
+  );
+}
+
+/** A builder section's heading as a button that folds the section. */
+function SectionToggle({ title, collapsed, onToggle }: { title: string; collapsed: boolean; onToggle: () => void }) {
+  return (
+    <button type="button" className="screener-section-toggle" aria-expanded={!collapsed} onClick={onToggle}>
+      {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+      {title}
+    </button>
   );
 }

@@ -51,11 +51,13 @@ interface Props {
   visible: boolean;
   /** Opens a symbol a result was clicked on, on the active chart. */
   onOpenSymbol: (symbol: string) => void;
+  /** Bumped to open Python settings (the Home tab's "Python setup" card asks for this). */
+  openSettings?: number;
 }
 
 /** The Python workspace: the user's scripts, an editor, a console, and the state of the
  *  Python that runs them. A script runs only when the person presses Run. */
-export function PythonPanel({ visible, onOpenSymbol }: Props) {
+export function PythonPanel({ visible, onOpenSymbol, openSettings }: Props) {
   const [env, setEnv] = useState<PythonEnvStatus | null>(null);
   const [scripts, setScripts] = useState<PythonScript[]>([]);
   const [current, setCurrent] = useState<string | null>(null);
@@ -78,6 +80,9 @@ export function PythonPanel({ visible, onOpenSymbol }: Props) {
   const [aiPromptOpen, setAiPromptOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
   useDismiss(settingsRef, settingsOpen, () => setSettingsOpen(false));
+  useEffect(() => {
+    if (openSettings) setSettingsOpen(true);
+  }, [openSettings]);
   const nextResultId = useRef(1);
 
   const runRef = useRef<ActiveRun | null>(null);

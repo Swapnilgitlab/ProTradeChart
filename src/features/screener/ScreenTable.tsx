@@ -1,24 +1,35 @@
 import { useMemo, useState } from 'react';
-import { Download, LineChart, ListPlus } from 'lucide-react';
+import { CandlestickChart, Download, LineChart, ListPlus, Table2 } from 'lucide-react';
 import { displayTicker } from '../../lib/symbols';
 import { sortScreenRows, type ScreenResult, type SortKey } from '../../screener/result';
 import { featureLabel, featureUnit, formatValue } from '../../studies/metrics';
+import { ScreenCharts } from './ScreenCharts';
 
 interface Props {
   result: ScreenResult;
   onOpenSymbol: (symbol: string) => void;
   onAddToWatchlist: (symbols: string[]) => void;
   onExport: (rows: ScreenResult['rows']) => void;
+  /** Told when the user switches between the table and the charts. */
+  onViewChange?: (view: 'table' | 'charts') => void;
 }
 
 /** A change, a return or a distance reads best signed and coloured. */
 const SIGNED = /^(return|dist_|gain_from_low|slope_|rs_|drawdown|max_drawdown|macd)/;
 
 /** The matches, one row per stock: sortable by any column, and a row opens its chart. Everything is
- *  drawn as text. */
-export function ScreenTable({ result, onOpenSymbol, onAddToWatchlist, onExport }: Props) {
+ *  drawn as text. **Charts** shows the same matches, in the table's order, as pages of candlestick
+ *  charts (`ScreenCharts`). */
+export function ScreenTable({ result, onOpenSymbol, onAddToWatchlist, onExport, onViewChange }: Props) {
   const [sort, setSort] = useState<{ key: SortKey; descending: boolean } | null>(null);
+  const [view, setViewState] = useState<'table' | 'charts'>('table');
+  const setView = (next: 'table' | 'charts') => {
+    setViewState(next);
+    onViewChange?.(next);
+  };
   const rows = useMemo(() => sortScreenRows(result.rows, sort), [result, sort]);
+  const ordered = useMemo(() => rows.map((r) => r.symbol), [rows]);
+  const names = useMemo(() => new Map(rows.map((r) => [r.symbol, r.name])), [rows]);
   const symbols = useMemo(() => result.rows.map((r) => r.symbol), [result]);
   // A number column sorts high-to-low first (what a screen is usually after), text A-to-Z; the second
   // press reverses it and the third goes back to the screen's own order.
@@ -44,6 +55,16 @@ export function ScreenTable({ result, onOpenSymbol, onAddToWatchlist, onExport }
           {rows.length < meta.matched && ` · the first ${rows.length.toLocaleString()} shown`}
         </span>
         <div className="pine-toolbar-spacer" />
+        {rows.length > 0 && (
+          <span className="screener-chip screener-chip-static" role="group" aria-label="View">
+            <button type="button" className={`screener-exchange${view === 'table' ? ' on' : ''}`} aria-pressed={view === 'table'} onClick={() => setView('table')}>
+              <Table2 size={12} aria-hidden="true" /> Table
+            </button>
+            <button type="button" className={`screener-exchange${view === 'charts' ? ' on' : ''}`} aria-pressed={view === 'charts'} onClick={() => setView('charts')}>
+              <CandlestickChart size={12} aria-hidden="true" /> Charts
+            </button>
+          </span>
+        )}
         {symbols.length > 0 && (
           <>
             <button type="button" className="btn btn-tiny" onClick={() => onAddToWatchlist(symbols)}>
@@ -59,6 +80,8 @@ export function ScreenTable({ result, onOpenSymbol, onAddToWatchlist, onExport }
       </div>
       {rows.length === 0 ? (
         <p className="muted small">Nothing in the universe matches every filter on its latest bar.</p>
+      ) : view === 'charts' ? (
+        <ScreenCharts symbols={ordered} names={names} onOpenSymbol={onOpenSymbol} />
       ) : (
         <div className="python-table-scroll screener-table-scroll">
           <table className="python-table study-table">

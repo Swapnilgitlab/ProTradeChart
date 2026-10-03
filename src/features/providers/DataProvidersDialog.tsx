@@ -3,21 +3,16 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { Check, Copy, ExternalLink, Eye, EyeOff, KeyRound, RefreshCw, ShieldAlert, Star } from 'lucide-react';
 import { Dialog } from '../../components/Dialog';
 import { useToast } from '../../components/Toasts';
-import { onDhanStatus } from '../../data/dhanLive';
 import { onZerodhaStatus } from '../../data/zerodhaLive';
 import { getProviderState, refreshProviders, setDefaultProvider } from '../../data/providerStatus';
 import { confirmDelete } from '../../lib/dialogs';
-import { describeKiteTokenExpiry, describeTokenExpiry, formatDate } from '../../lib/format';
+import { describeKiteTokenExpiry, formatDate } from '../../lib/format';
 import {
   clearProviderConfig,
-  dhanRenewToken,
-  dhanStatus,
-  dhanUpdateInstruments,
   errorMessage,
   saveProviderConfig,
   setProviderEnabled,
   testProvider,
-  type DhanStatus,
   type FeedStatus,
   type ProviderInfo,
   type TestResult,
@@ -30,6 +25,7 @@ import {
   zerodhaUpdateInstruments,
 } from '../../lib/ipc';
 import type { ProviderId } from '../../lib/symbols';
+import { MarketDataSection } from '../marketdata/MarketDataSection';
 import { useProviderState } from './useProviderState';
 
 interface Props {
@@ -65,8 +61,7 @@ const FEED_LABELS: Record<FeedStatus['state'], string> = {
 /** Downloads a broker's instrument list in the background, so symbol search
  *  works as soon as it is switched on. Providers without one do nothing. */
 function refreshInstruments(providerId: string): void {
-  if (providerId === 'dhan') dhanUpdateInstruments().catch(() => {});
-  else if (providerId === 'zerodha') zerodhaUpdateInstruments().catch(() => {});
+  if (providerId === 'zerodha') zerodhaUpdateInstruments().catch(() => {});
 }
 
 /** Where a user configures data sources: turn each on or off, enter broker
@@ -74,7 +69,7 @@ function refreshInstruments(providerId: string): void {
  *  backend's provider list, so a new provider appears here with no UI work. */
 export function DataProvidersDialog({ onClose, initialProvider }: Props) {
   const { providers, defaultProvider } = useProviderState();
-  const [selectedId, setSelectedId] = useState<string>(initialProvider ?? 'dhan');
+  const [selectedId, setSelectedId] = useState<string>(initialProvider ?? 'zerodha');
 
   const groups = useMemo(() => {
     const sorted = [...providers].sort((a, b) => CATEGORY_ORDER[a.category] - CATEGORY_ORDER[b.category]);
@@ -130,6 +125,7 @@ export function DataProvidersDialog({ onClose, initialProvider }: Props) {
 
         {selected && <ProviderDetail key={selected.id} provider={selected} isDefault={selected.id === defaultProvider} />}
       </div>
+      <MarketDataSection />
     </Dialog>
   );
 }
@@ -354,7 +350,6 @@ function ProviderDetail({ provider, isDefault }: { provider: ProviderInfo; isDef
         </div>
       )}
 
-      {provider.id === 'dhan' && provider.configured && <DhanPanel enabled={provider.enabled} />}
       {provider.id === 'zerodha' && <ZerodhaPanel provider={provider} onLoggedIn={afterLogin} />}
 
       {provider.capabilities.search && (
@@ -377,95 +372,6 @@ function ProviderDetail({ provider, isDefault }: { provider: ProviderInfo; isDef
         </div>
       )}
     </section>
-  );
-}
-
-/** Dhan-only status: token life, instrument list and live-feed state. */
-function DhanPanel({ enabled }: { enabled: boolean }) {
-  const toast = useToast();
-  const [status, setStatus] = useState<DhanStatus | null>(null);
-  const [feed, setFeed] = useState<FeedStatus | null>(null);
-  const [working, setWorking] = useState<null | 'renew' | 'instruments'>(null);
-
-  const load = useCallback(() => dhanStatus().then(setStatus).catch(() => {}), []);
-
-  useEffect(() => {
-    void load();
-    const timer = window.setInterval(load, 4000);
-    const off = onDhanStatus(setFeed);
-    return () => {
-      window.clearInterval(timer);
-      off();
-    };
-  }, [load]);
-
-  if (!status) return null;
-  const expiry = describeTokenExpiry(status.tokenExpiresAt, Date.now());
-  const feedState = feed ?? status.feed;
-
-  async function renew() {
-    setWorking('renew');
-    try {
-      await dhanRenewToken();
-      toast('Token renewed for another 24 hours.', 'success');
-      await refreshProviders();
-      await load();
-    } catch (err) {
-      toast(errorMessage(err), 'error');
-    } finally {
-      setWorking(null);
-    }
-  }
-
-  async function updateInstruments() {
-    setWorking('instruments');
-    try {
-      const r = await dhanUpdateInstruments();
-      toast(`Instrument list updated (${r.count.toLocaleString()} instruments).`, 'success');
-      await load();
-    } catch (err) {
-      toast(errorMessage(err), 'error');
-    } finally {
-      setWorking(null);
-    }
-  }
-
-  return (
-    <div className="prov-status">
-      <div className="prov-status-row">
-        <div>
-          <div className="label">Access token</div>
-          <div className={expiry.expired ? 'neg' : expiry.soon ? 'warn-text' : undefined}>{expiry.text}</div>
-        </div>
-        <button type="button" className="btn" disabled={working !== null} onClick={() => void renew()} title="Extends a web-generated token by 24 hours">
-          <RefreshCw size={13} /> {working === 'renew' ? 'Renewing…' : 'Renew'}
-        </button>
-      </div>
-
-      <div className="prov-status-row">
-        <div>
-          <div className="label">Instrument list (for symbol search)</div>
-          <div>
-            {status.instrumentCount > 0
-              ? `${status.instrumentCount.toLocaleString()} instruments · updated ${formatDate(status.instrumentsUpdatedAt)}`
-              : 'Not downloaded yet'}
-          </div>
-        </div>
-        <button type="button" className="btn" disabled={working !== null} onClick={() => void updateInstruments()}>
-          <RefreshCw size={13} /> {working === 'instruments' ? 'Downloading…' : status.instrumentCount > 0 ? 'Update' : 'Download'}
-        </button>
-      </div>
-
-      <div className="prov-status-row">
-        <div>
-          <div className="label">Live feed</div>
-          <div className={feedState.state === 'error' ? 'neg' : undefined}>
-            {enabled ? FEED_LABELS[feedState.state] : 'Off'}
-            {enabled && feedState.message ? ` — ${feedState.message}` : ''}
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 

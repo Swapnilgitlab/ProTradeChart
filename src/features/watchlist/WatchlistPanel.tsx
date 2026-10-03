@@ -691,13 +691,10 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
     e.currentTarget.value = ''; // allow re-picking the same file
     if (!file) return;
     try {
-      // NSE and BSE symbols in the file go to the user's own broker: the default provider if it is one,
-      // otherwise whichever is set up. With no broker they can't be charted and are reported as skipped.
+      // NSE and BSE symbols in the file go to Zerodha when it is the default or set up. With no broker
+      // they can't be charted and are reported as skipped.
       const preferred = effectiveDefaultProvider();
-      const indianProvider =
-        preferred === 'dhan' || preferred === 'zerodha'
-          ? preferred
-          : (['dhan', 'zerodha'] as const).find((id) => isProviderUsable(id));
+      const indianProvider = preferred === 'zerodha' || isProviderUsable('zerodha') ? ('zerodha' as const) : undefined;
       const { items, skipped } = parseWatchlistFile(await file.text(), { indianProvider, defaultProvider: preferred });
       if (items.length === 0) {
         toast('No symbols were found in that file.', 'error');

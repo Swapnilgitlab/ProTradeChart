@@ -146,10 +146,42 @@ pub fn get_watchlist(id: i64, db: State<Database>) -> Result<WatchlistDetail, St
 #[tauri::command]
 pub fn create_indices_watchlist(provider: String, db: State<Database>) -> Result<WatchlistDetail, String> {
     let source = crate::store::instrument_list::Source::parse(&provider)
-        .ok_or("Indices come from Zerodha's or Dhan's instrument list.")?;
+        .ok_or("Indices come from Zerodha's instrument list.")?;
     let mut conn = lock(&db)?;
     let made = crate::store::index_catalog::create(&mut conn, source)?;
     watchlist_detail(&conn, made.id)
+}
+
+/// Every NSE equity a broker's instrument list has — a bounded set (~2,000), unlike its whole
+/// instrument list (which also has BSE, F&O, and other exchanges, easily 50x the size). Feeds
+/// Vela's OWN symbol index (`data/providers/zerodha.ts`'s `listSymbols`), which is
+/// what powers clicking a chart's symbol name or bare-typing to search — the app's own search
+/// box (`SymbolSearchBox`) already searches everything live and doesn't use this.
+const MAX_NSE_EQUITIES: usize = 5_000;
+#[tauri::command]
+pub fn list_nse_equities(provider: String, db: State<Database>) -> Result<Vec<SymbolMatch>, String> {
+    let source = crate::store::instrument_list::Source::parse(&provider)
+        .ok_or("NSE equities come from Zerodha's instrument list.")?;
+    let filter = crate::store::instrument_list::Filter {
+        exchange: Some("NSE".into()),
+        kind: Some("EQUITY".into()),
+        query: None,
+    };
+    let rows = sql(crate::store::instrument_list::list(
+        &*lock(&db)?,
+        source,
+        &filter,
+        MAX_NSE_EQUITIES,
+    ))?;
+    Ok(rows
+        .into_iter()
+        .map(|r| SymbolMatch {
+            symbol: r.ticker,
+            name: r.name,
+            exchange: Some(r.exchange),
+            kind: Some(r.instrument),
+        })
+        .collect())
 }
 
 /// A symbol's drawings document, or `None` when the app has never stored one for it.

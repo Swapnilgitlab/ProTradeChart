@@ -217,6 +217,41 @@ pub fn put(conn: &mut Connection, symbol: &str, interval: &str, bars: &[Bar]) ->
     tx.commit()
 }
 
+/// Swaps a series for a freshly fetched one in one transaction: every stored bar and the
+/// coverage go, and `bars` with `covered` take their place. Used when a corporate action means the
+/// broker's history no longer agrees with what is stored, so mixing the two would be wrong.
+pub fn replace(
+    conn: &mut Connection,
+    symbol: &str,
+    interval: &str,
+    bars: &[Bar],
+    covered: Range,
+    now_ms: i64,
+) -> rusqlite::Result<()> {
+    let tx = conn.transaction()?;
+    tx.execute(
+        "DELETE FROM research_bars WHERE symbol = ?1 AND interval = ?2",
+        params![symbol, interval],
+    )?;
+    tx.execute(
+        "DELETE FROM research_coverage WHERE symbol = ?1 AND interval = ?2",
+        params![symbol, interval],
+    )?;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO research_bars (symbol, interval, ts, open, high, low, close, volume)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )?;
+        for b in bars {
+            stmt.execute(params![
+                symbol, interval, b.time, b.open, b.high, b.low, b.close, b.volume
+            ])?;
+        }
+    }
+    extend_coverage(&tx, symbol, interval, covered, now_ms)?;
+    tx.commit()
+}
+
 /// The newest `limit` bars in `[from, to]` (all of them without a limit), oldest first.
 pub fn get(
     conn: &Connection,
@@ -533,7 +568,7 @@ mod tests {
         let conn = db.conn.lock().unwrap();
         extend_coverage(&conn, SYM, "D", range(1, 2), 3).unwrap();
         assert_eq!(coverage(&conn, SYM, "5").unwrap(), None);
-        assert_eq!(coverage(&conn, "dhan:NSE:RELIANCE", "D").unwrap(), None);
+        assert_eq!(coverage(&conn, "zerodha:NSE:INFY", "D").unwrap(), None);
     }
 
     #[test]
@@ -560,6 +595,44 @@ mod tests {
         assert_eq!(newest[2].close, 99.0, "the newer write won");
 
         assert!(get(&conn, SYM, "5", i64::MIN, i64::MAX, None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn replace_swaps_the_whole_series_and_its_coverage_and_leaves_others_alone() {
+        let db = Database::open_in_memory().unwrap();
+        let mut conn = db.conn.lock().unwrap();
+        put(
+            &mut conn,
+            SYM,
+            "D",
+            &[bar(1000, 100.0), bar(2000, 100.0), bar(3000, 100.0)],
+        )
+        .unwrap();
+        extend_coverage(&conn, SYM, "D", range(0, 3000), 10).unwrap();
+        put(&mut conn, "zerodha:NSE:OTHER", "D", &[bar(1000, 7.0)]).unwrap();
+
+        // After a 1:2 split the broker's history is halved, and starts later than before.
+        replace(
+            &mut conn,
+            SYM,
+            "D",
+            &[bar(2000, 50.0), bar(3000, 50.0)],
+            range(1500, 3000),
+            20,
+        )
+        .unwrap();
+        let stored = get(&conn, SYM, "D", i64::MIN, i64::MAX, None).unwrap();
+        assert_eq!(
+            stored.iter().map(|b| (b.time, b.close)).collect::<Vec<_>>(),
+            [(2000, 50.0), (3000, 50.0)]
+        );
+        assert_eq!(coverage(&conn, SYM, "D").unwrap(), Some(cov(1500, 3000, 20)));
+        assert_eq!(
+            get(&conn, "zerodha:NSE:OTHER", "D", i64::MIN, i64::MAX, None)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]

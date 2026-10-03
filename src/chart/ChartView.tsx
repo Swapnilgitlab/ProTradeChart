@@ -22,7 +22,7 @@ import { showCompanyName } from './watermarkName';
 // layout change brings in — not just the first chart at construction.
 const GRID_COLOR = { light: 'rgba(204, 204, 204, 0.2)', dark: 'rgba(32, 34, 44, 0.2)' } as const;
 
-function applyGridOpacity(ws: VelaWorkspace, baseMode: 'light' | 'dark') {
+export function applyGridOpacity(ws: VelaWorkspace, baseMode: 'light' | 'dark') {
   for (const cell of ws.cells()) {
     try {
       cell.chart.renderer.applyConfig({
@@ -41,7 +41,7 @@ function applyGridOpacity(ws: VelaWorkspace, baseMode: 'light' | 'dark') {
  *  from the canvas it sits on — black on a dark background a layout chose under a light theme, where
  *  it would all but vanish. The mark must stay visible (Vela's licence terms), so it is re-inked
  *  from the background of the cell it is in, the way Vela inks it for a theme. */
-function tintAttribution(ws: VelaWorkspace) {
+export function tintAttribution(ws: VelaWorkspace) {
   for (const cell of ws.cells()) {
     let background: unknown;
     try {
@@ -60,7 +60,7 @@ function tintAttribution(ws: VelaWorkspace) {
 /** Switches the tab to a theme, keeping the canvas background of any chart that has one of its own
  *  (from its layout, or picked in its settings): Vela's `setTheme` re-skins every chart, and the
  *  theme should only fill in where no background was chosen (see canvasBackground.ts). */
-function applyTheme(ws: VelaWorkspace, baseMode: 'light' | 'dark') {
+export function applyTheme(ws: VelaWorkspace, baseMode: 'light' | 'dark') {
   const chosen = ws.cells().map((cell) => {
     try {
       return { chart: cell.chart, background: chosenBackground(cell.chart.renderer.getConfig()) };
@@ -115,7 +115,7 @@ function watchAllCells(ws: VelaWorkspace, watched: Map<object, () => void>) {
 }
 
 /** The machine's IANA timezone, e.g. `Asia/Kolkata`. */
-const LOCAL_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+export const LOCAL_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /** What an Ask AI action reports back, for its confirmation card. */
 export interface ActionResult {

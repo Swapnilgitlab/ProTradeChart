@@ -3,8 +3,7 @@
 //! This file is the single source of truth for what each provider is and what
 //! it needs configured; the frontend renders its settings screen from
 //! `describe()` rather than duplicating the field lists. To add a provider,
-//! add a `ProviderSpec` here, implement its client beside `dhan/` and
-//! `zerodha/`, and register a matching `DataProvider` on the TypeScript side.
+//! add a `ProviderSpec` here, implement its client beside `zerodha/`, and register a matching `DataProvider` on the TypeScript side.
 
 use std::collections::HashMap;
 
@@ -91,36 +90,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         search: true,
         quotes: true,
         docs_url: None,
-    },
-    ProviderSpec {
-        id: "dhan",
-        label: "Dhan",
-        description: "Indian equities, indices, futures and commodities from your own Dhan account: exchange \
-                      historical data (up to 5 years intraday) and a live tick feed. Needs Dhan's paid Data API plan.",
-        category: "broker",
-        fields: &[
-            FieldSpec {
-                key: "clientId",
-                label: "Client ID",
-                secret: false,
-                help: "Your Dhan client ID — shown on web.dhan.co under your profile.",
-                placeholder: "1000000001",
-            },
-            FieldSpec {
-                key: "accessToken",
-                label: "Access token",
-                secret: true,
-                help: "Generate one at web.dhan.co → My Profile → Access DhanHQ APIs. Tokens last 24 hours; \
-                       paste a new one when it expires, or use Renew.",
-                placeholder: "eyJ0eXAiOiJKV1Qi…",
-            },
-        ],
-        can_disable: true,
-        history: true,
-        live: true,
-        search: true,
-        quotes: true,
-        docs_url: Some("https://dhanhq.co/docs/v2/"),
     },
     ProviderSpec {
         id: "zerodha",
@@ -382,9 +351,21 @@ mod tests {
         let conn = db.conn.lock().unwrap();
         assert!(info(&conn, &secrets, "binance").enabled);
         assert!(info(&conn, &secrets, "csv").enabled);
-        let dhan = info(&conn, &secrets, "dhan");
-        assert!(!dhan.enabled);
-        assert!(!dhan.configured);
+        let zerodha = info(&conn, &secrets, "zerodha");
+        assert!(!zerodha.enabled);
+        assert!(!zerodha.configured);
+    }
+
+    #[test]
+    fn dhan_is_not_a_data_source() {
+        assert!(
+            spec("dhan").is_none(),
+            "Dhan was removed; nothing should serve or configure it"
+        );
+        let (db, secrets) = setup();
+        let conn = db.conn.lock().unwrap();
+        assert!(is_usable(&conn, &secrets, "dhan").is_err());
+        assert!(describe(&conn, &secrets).unwrap().iter().all(|p| p.id != "dhan"));
     }
 
     #[test]
@@ -407,25 +388,24 @@ mod tests {
         let storage = save_config(
             &conn,
             &secrets,
-            "dhan",
-            &values(&[("clientId", " 1000000001 "), ("accessToken", "eyJ.tok.sig")]),
+            "zerodha",
+            &values(&[("apiKey", " a1b2c3 "), ("accessToken", "tok123")]),
         )
         .unwrap();
         assert_eq!(storage, Some(Storage::Keychain));
 
-        let dhan = info(&conn, &secrets, "dhan");
-        assert!(dhan.configured);
-        assert_eq!(dhan.secret_storage.as_deref(), Some("keychain"));
-        let client = dhan.fields.iter().find(|f| f.key == "clientId").unwrap();
-        assert_eq!(client.value.as_deref(), Some("1000000001"), "trimmed");
-        let token = dhan.fields.iter().find(|f| f.key == "accessToken").unwrap();
+        let zerodha = info(&conn, &secrets, "zerodha");
+        assert_eq!(zerodha.secret_storage.as_deref(), Some("keychain"));
+        let key = zerodha.fields.iter().find(|f| f.key == "apiKey").unwrap();
+        assert_eq!(key.value.as_deref(), Some("a1b2c3"), "trimmed");
+        let token = zerodha.fields.iter().find(|f| f.key == "accessToken").unwrap();
         assert!(
             token.is_set && token.value.is_none(),
             "a secret is reported as set but never returned"
         );
         // The secret is in the credential store, not in the settings table.
         assert_eq!(
-            settings::get(&conn, Table::Settings, "dhan", "accessToken").unwrap(),
+            settings::get(&conn, Table::Settings, "zerodha", "accessToken").unwrap(),
             None
         );
     }
@@ -437,23 +417,25 @@ mod tests {
         save_config(
             &conn,
             &secrets,
-            "dhan",
-            &values(&[("clientId", "1"), ("accessToken", "keep-me")]),
+            "zerodha",
+            &values(&[("apiKey", "1"), ("accessToken", "keep-me")]),
         )
         .unwrap();
         save_config(
             &conn,
             &secrets,
-            "dhan",
-            &values(&[("clientId", "2"), ("accessToken", "")]),
+            "zerodha",
+            &values(&[("apiKey", "2"), ("accessToken", "")]),
         )
         .unwrap();
         assert_eq!(
-            credential(&conn, &secrets, "dhan", "accessToken").unwrap().as_deref(),
+            credential(&conn, &secrets, "zerodha", "accessToken")
+                .unwrap()
+                .as_deref(),
             Some("keep-me")
         );
         assert_eq!(
-            credential(&conn, &secrets, "dhan", "clientId").unwrap().as_deref(),
+            credential(&conn, &secrets, "zerodha", "apiKey").unwrap().as_deref(),
             Some("2")
         );
     }
@@ -465,12 +447,14 @@ mod tests {
         save_config(
             &conn,
             &secrets,
-            "dhan",
+            "zerodha",
             &values(&[("accessToken", "  \"Bearer abc.def.ghi\"\n")]),
         )
         .unwrap();
         assert_eq!(
-            credential(&conn, &secrets, "dhan", "accessToken").unwrap().as_deref(),
+            credential(&conn, &secrets, "zerodha", "accessToken")
+                .unwrap()
+                .as_deref(),
             Some("abc.def.ghi")
         );
     }
@@ -480,7 +464,7 @@ mod tests {
         let (db, secrets) = setup();
         let conn = db.conn.lock().unwrap();
         assert!(save_config(&conn, &secrets, "nope", &values(&[])).is_err());
-        assert!(save_config(&conn, &secrets, "dhan", &values(&[("password", "x")])).is_err());
+        assert!(save_config(&conn, &secrets, "zerodha", &values(&[("password", "x")])).is_err());
         assert!(set_enabled(&conn, "nope", true).is_err());
     }
 
@@ -488,25 +472,25 @@ mod tests {
     fn a_provider_is_usable_only_when_enabled_and_fully_configured() {
         let (db, secrets) = setup();
         let conn = db.conn.lock().unwrap();
-        assert!(!is_usable(&conn, &secrets, "dhan").unwrap());
+        assert!(!is_usable(&conn, &secrets, "zerodha").unwrap());
 
         save_config(
             &conn,
             &secrets,
-            "dhan",
-            &values(&[("clientId", "1"), ("accessToken", "t")]),
+            "zerodha",
+            &values(&[("apiKey", "1"), ("apiSecret", "s"), ("accessToken", "t")]),
         )
         .unwrap();
         assert!(
-            !is_usable(&conn, &secrets, "dhan").unwrap(),
+            !is_usable(&conn, &secrets, "zerodha").unwrap(),
             "configured but not switched on"
         );
 
-        set_enabled(&conn, "dhan", true).unwrap();
-        assert!(is_usable(&conn, &secrets, "dhan").unwrap());
+        set_enabled(&conn, "zerodha", true).unwrap();
+        assert!(is_usable(&conn, &secrets, "zerodha").unwrap());
 
-        set_enabled(&conn, "dhan", false).unwrap();
-        assert!(!is_usable(&conn, &secrets, "dhan").unwrap());
+        set_enabled(&conn, "zerodha", false).unwrap();
+        assert!(!is_usable(&conn, &secrets, "zerodha").unwrap());
         assert!(
             is_usable(&conn, &secrets, "coinbase").unwrap(),
             "free providers need no setup"
@@ -520,16 +504,16 @@ mod tests {
         save_config(
             &conn,
             &secrets,
-            "dhan",
-            &values(&[("clientId", "1"), ("accessToken", "t")]),
+            "zerodha",
+            &values(&[("apiKey", "1"), ("apiSecret", "s"), ("accessToken", "t")]),
         )
         .unwrap();
-        set_enabled(&conn, "dhan", true).unwrap();
-        clear_config(&conn, &secrets, "dhan").unwrap();
+        set_enabled(&conn, "zerodha", true).unwrap();
+        clear_config(&conn, &secrets, "zerodha").unwrap();
 
-        let dhan = info(&conn, &secrets, "dhan");
-        assert!(!dhan.configured && !dhan.enabled && dhan.secret_storage.is_none());
-        assert_eq!(credential(&conn, &secrets, "dhan", "accessToken").unwrap(), None);
+        let zerodha = info(&conn, &secrets, "zerodha");
+        assert!(!zerodha.configured && !zerodha.enabled && zerodha.secret_storage.is_none());
+        assert_eq!(credential(&conn, &secrets, "zerodha", "accessToken").unwrap(), None);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 """Checks the connection to ProTradeChart and shows a few bars.
 
-Run it from the Python tab. It uses the first data source you have set up under
-Data providers (Zerodha or Dhan).
+Run it from the Python tab. It uses Zerodha, once you have set it up under
+Data providers.
 """
 
 import protrade as pt
@@ -11,7 +11,7 @@ print("Connected to ProTradeChart", pt.status()["app"])
 sources = pt.providers()
 print(sources.to_string(index=False))
 
-ready = sources[sources["usable"] & sources["id"].isin(["zerodha", "dhan"])]
+ready = sources[sources["usable"] & sources["id"].isin(["zerodha"])]
 if ready.empty:
     print(
         "\nNo broker is set up yet. Open Data providers in the app, enter your "

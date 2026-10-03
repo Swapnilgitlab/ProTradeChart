@@ -30,7 +30,11 @@
     { "patch": { "sort": "close" }, "word": "sort must be" },
     { "patch": { "sort": { "column": "rsi_14", "descending": true } }, "word": "sort.column must be one of" },
     { "patch": { "columns": ["rs_126"], "sort": null }, "word": "benchmark" },
-    { "patch": { "benchmark": "NIFTY" }, "word": "benchmark must be" }
+    { "patch": { "benchmark": "NIFTY" }, "word": "benchmark must be" },
+    { "patch": { "filters": [{ "left": "rsi_14", "op": "between", "right": [60, 40] }] }, "word": "low end" },
+    { "patch": { "filters": [{ "left": "rsi_14", "op": "between", "right": 50 }] }, "word": "range" },
+    { "patch": { "filters": [{ "left": "rsi_14", "op": ">", "right": [40, 60] }] }, "word": "right side" },
+    { "patch": { "filters": [{ "left": "rsi_14@H", "op": ">", "right": 50 }] }, "word": "filters[0]" }
   ],
   "accepted": [
     {
@@ -62,7 +66,7 @@
       }
     },
     {
-      "about": "a watchlist with no filters and no sort is a plain table; series keep their canonical order",
+      "about": "a watchlist with no filters and no sort is a plain table; series keep their canonical order; a screen saved with Dhan, no longer a source, reads Zerodha",
       "patch": {
         "name": "  My list  ",
         "universe": { "source": "watchlist", "watchlist": " Swing ", "provider": "dhan", "exchanges": ["BSE", "NSE", "BSE"], "series": ["SME", "EQ"], "max_symbols": 50 },
@@ -76,7 +80,7 @@
         "name": "My list",
         "universe": {
           "source": "watchlist",
-          "provider": "dhan",
+          "provider": "zerodha",
           "exchanges": ["BSE", "NSE"],
           "series": ["EQ", "SME"],
           "watchlist": "Swing",
@@ -87,6 +91,41 @@
         "columns": ["rs_126"],
         "sort": null,
         "benchmark": "zerodha:NSE:NIFTY 500"
+      }
+    },
+    {
+      "about": "weekly and monthly features, the new price features and range conditions",
+      "patch": {
+        "filters": [
+          { "left": "RSI_14@w", "op": "between", "right": [40, 60] },
+          { "left": "close", "op": ">=", "right": "ema_50@M" },
+          { "left": "gap_up", "op": ">", "right": 0.02 },
+          { "left": "change_1", "op": "outside", "right": [-5, 5] }
+        ],
+        "columns": ["close"],
+        "sort": { "column": "rsi_14@W" }
+      },
+      "expect": {
+        "version": 1,
+        "name": "Near 52-week high",
+        "universe": {
+          "source": "instruments",
+          "provider": "zerodha",
+          "exchanges": ["NSE"],
+          "series": ["EQ"],
+          "watchlist": null,
+          "symbols": [],
+          "max_symbols": null
+        },
+        "filters": [
+          { "left": "rsi_14@W", "op": "between", "right": [40, 60] },
+          { "left": "close", "op": ">=", "right": "ema_50@M" },
+          { "left": "gap_up", "op": ">", "right": 0.02 },
+          { "left": "change_1", "op": "outside", "right": [-5, 5] }
+        ],
+        "columns": ["close"],
+        "sort": { "column": "rsi_14@W", "descending": true },
+        "benchmark": null
       }
     }
   ]

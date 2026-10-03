@@ -16,6 +16,24 @@ pub struct Bar {
     pub volume: Option<f64>,
 }
 
+/// A broker's quote for one instrument, read as a stand-in for its daily bar — internal only,
+/// never sent to the frontend (the watchlist's own, smaller [`Quote`] is unaffected). The day's
+/// close isn't known until settlement, so `last` (the latest traded price) stands in for it;
+/// `previous_close` is the broker's own record of the prior session's close, used to check the
+/// snapshot before it's trusted (`store::day_topup::snapshot_bar`), not stored itself.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DaySnapshot {
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub last: f64,
+    pub previous_close: Option<f64>,
+    pub volume: Option<f64>,
+    /// When the quote's price was last traded, epoch milliseconds — absent on a broker that
+    /// doesn't report it. Dates which session the snapshot actually speaks for.
+    pub traded_at_ms: Option<i64>,
+}
+
 // ---- Layouts ---------------------------------------------------------------
 
 /// A named chart session. `state_json` is opaque to Rust: the frontend owns
@@ -144,7 +162,7 @@ pub struct WatchlistSummary {
 #[serde(rename_all = "camelCase")]
 pub struct WatchlistItem {
     pub id: i64,
-    /// Fully-qualified chart symbol, e.g. `binance:BTCUSDT` or `dhan:NSE:RELIANCE`.
+    /// Fully-qualified chart symbol, e.g. `binance:BTCUSDT` or `zerodha:NSE:RELIANCE`.
     pub symbol: String,
     pub name: Option<String>,
     /// Where the row sits among the list's symbols *and* sections (see `WatchlistSection`).

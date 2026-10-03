@@ -9,7 +9,7 @@ const found = new Map<string, string>();
 
 /** Only the brokers' instrument lists carry company names; a crypto pair or an imported
  *  file has none, so asking the backend about one would be a wasted round trip. */
-const HAS_NAMES = new Set(['dhan', 'zerodha']);
+const HAS_NAMES = new Set(['zerodha']);
 
 /** The company name for `symbol`, or null if none is known. */
 export async function companyName(symbol: string): Promise<string | null> {

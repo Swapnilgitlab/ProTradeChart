@@ -2,9 +2,8 @@ import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 import { useDismiss } from '../../components/useDismiss';
 import { effectiveDefaultProvider } from '../../data/providerStatus';
-import { searchSymbols, type SearchScope, type SymbolResult } from '../../data/search';
+import { searchSymbols, type SymbolResult } from '../../data/search';
 import { displayTicker, providerLabel, resolveTypedSymbol } from '../../lib/symbols';
-import { useProviderState } from '../providers/useProviderState';
 
 export interface PickedSymbol {
   symbol: string;
@@ -41,17 +40,10 @@ export const SymbolSearchBox = forwardRef<HTMLInputElement, Props>(function Symb
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
-  const [scope, setScope] = useState<SearchScope>('all');
-  const { providers } = useProviderState();
   const rootRef = useRef<HTMLDivElement>(null);
   const requestId = useRef(0);
 
   useDismiss(rootRef, open, () => setOpen(false));
-
-  // The sources worth offering as a filter: those that can be searched and are on.
-  const sources = useMemo(() => providers.filter((p) => p.capabilities.search && p.enabled && p.configured), [providers]);
-  // A source that has since been switched off can no longer be the scope.
-  const activeScope: SearchScope = scope === 'all' || sources.some((s) => s.id === scope) ? scope : 'all';
 
   const groups = useMemo(() => groupResults(results), [results]);
   const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);
@@ -67,7 +59,7 @@ export const SymbolSearchBox = forwardRef<HTMLInputElement, Props>(function Symb
     setLoading(true);
     const id = ++requestId.current;
     const timer = window.setTimeout(async () => {
-      const found = await searchSymbols(q, activeScope);
+      const found = await searchSymbols(q);
       if (id !== requestId.current) return; // a newer query superseded this one
       setResults(found);
       setResultsFor(q);
@@ -76,7 +68,7 @@ export const SymbolSearchBox = forwardRef<HTMLInputElement, Props>(function Symb
       setOpen(true);
     }, DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [query, activeScope]);
+  }, [query]);
 
   function reset() {
     requestId.current++;
@@ -96,8 +88,7 @@ export const SymbolSearchBox = forwardRef<HTMLInputElement, Props>(function Symb
     // Only trust the highlighted result if it belongs to what's typed now;
     // otherwise (Enter pressed before results landed) load the typed text.
     if (open && flat[active] && resultsFor === query.trim()) return pick(flat[active]);
-    // Typed text goes to the picked source, or else to the default provider.
-    const typed = resolveTypedSymbol(query, activeScope === 'all' ? effectiveDefaultProvider() : activeScope);
+    const typed = resolveTypedSymbol(query, effectiveDefaultProvider());
     if (typed) {
       onSelect({ symbol: typed });
       reset();
@@ -126,22 +117,6 @@ export const SymbolSearchBox = forwardRef<HTMLInputElement, Props>(function Symb
       }}
     >
       <form onSubmit={submit}>
-        {!block && sources.length > 1 && (
-          <select
-            className="search-scope"
-            aria-label="Search in"
-            title="Search in"
-            value={activeScope}
-            onChange={(e) => setScope(e.currentTarget.value as SearchScope)}
-          >
-            <option value="all">All sources</option>
-            {sources.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        )}
         <div className="search-input-wrap">
           <Search size={14} />
           <input

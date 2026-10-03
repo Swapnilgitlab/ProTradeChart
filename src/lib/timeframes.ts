@@ -158,44 +158,12 @@ export function localMidnight(dayKey: string): number {
   return new Date(y, m - 1, d).getTime();
 }
 
-// ---- Dhan ------------------------------------------------------------------
-
-/** How Dhan should be asked for a timeframe. Dhan serves 1, 5, 15, 25 and 60
- *  minute bars and daily bars; everything else is built from those — grouped
- *  within the trading day (`groupSize`), or, for weeks and months, from daily
- *  bars (`resampleDaily`). */
-export interface DhanPlan {
-  /** `"D"` or a native minute count as a string. */
-  interval: string;
-  groupSize?: number;
-  resampleDaily?: 'week' | 'month';
-}
-
-/** Largest first, so the coarsest divisor wins (4h = 4 × 60m, not 240 × 1m). */
-const DHAN_MINUTES = [60, 25, 15, 5, 1];
-
-export function toDhanPlan(tf: Timeframe): DhanPlan | null {
-  switch (tf.kind) {
-    case 'day':
-      return { interval: 'D' };
-    case 'week':
-      return { interval: 'D', resampleDaily: 'week' };
-    case 'month':
-      return { interval: 'D', resampleDaily: 'month' };
-    case 'minutes': {
-      if (tf.minutes > 24 * 60) return null;
-      const base = DHAN_MINUTES.find((m) => tf.minutes % m === 0);
-      if (base === undefined) return null;
-      return base === tf.minutes ? { interval: String(base) } : { interval: String(base), groupSize: tf.minutes / base };
-    }
-  }
-}
-
 // ---- Zerodha ---------------------------------------------------------------
 
 /** How Zerodha (Kite Connect) should be asked for a timeframe. Kite serves 1, 3,
  *  5, 10, 15, 30 and 60 minute bars and daily bars; everything else is built
- *  from those, the same way as for Dhan. */
+ *  from those — grouped within the trading day (`groupSize`), or, for weeks and
+ *  months, from daily bars (`resampleDaily`). */
 export interface KitePlan {
   /** `"D"` or a native minute count as a string. */
   interval: string;

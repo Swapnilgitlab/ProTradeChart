@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TEMPLATES, declaredTitle, detectKind } from './source';
+import { BLANKS, TEMPLATES, declaredTitle, detectKind } from './source';
 
 describe('detectKind', () => {
   it('reads the declaration, ignoring comments and blank lines', () => {
@@ -36,7 +36,7 @@ describe('declaredTitle', () => {
 
 describe('TEMPLATES', () => {
   it('declare the kind they are filed under', () => {
-    for (const t of TEMPLATES) expect(detectKind(t.source), t.id).toBe(t.kind);
+    for (const t of [...BLANKS, ...TEMPLATES]) expect(detectKind(t.source), t.id).toBe(t.kind);
   });
 
   it('have unique ids and titles', () => {

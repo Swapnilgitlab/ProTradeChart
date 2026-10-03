@@ -18,6 +18,9 @@ TOKEN_ENV = "PROTRADE_TOKEN"
 TIMEOUT_ENV = "PROTRADE_TIMEOUT"
 # Names this run to the app, so what the script shows appears in the window that started it.
 RUN_ENV = "PROTRADE_RUN_ID"
+# Set to disable the daily quote top-up (``api._top_up``) outright: a kill switch, and a way to
+# diff a screen's results with and without it.
+NO_TOPUP_ENV = "PROTRADE_NO_TOPUP"
 # A request can queue behind the app's broker pacing (Kite allows three history calls a
 # second), so a long first sync of many symbols is normal, not a hang.
 DEFAULT_TIMEOUT = 900.0
@@ -56,8 +59,7 @@ class NotConfiguredError(ProTradeError):
 
 
 class NoAccessError(ProTradeError):
-    """The broker's plan does not include this data (Kite Connect's paid plan, or Dhan's
-    Data API subscription)."""
+    """The broker's plan does not include this data (Kite Connect's paid plan)."""
 
     code = "no_access"
 
@@ -149,6 +151,11 @@ def get(path: str, **params):
 def post(path: str, payload):
     """POST ``payload`` as JSON to ``path`` and return the decoded answer. NaN and infinity are
     refused (JSON has no such numbers); the callers turn them into ``None`` first."""
+    return json.loads(post_raw(path, payload, accept="application/json"))
+
+
+def post_raw(path: str, payload, accept: str = "application/octet-stream") -> bytes:
+    """POST ``payload`` as JSON to ``path`` and return the answer's bytes, undecoded."""
     url, token = connection()
     return _send(
         urllib.request.Request(
@@ -157,18 +164,20 @@ def post(path: str, payload):
             method="POST",
             headers={
                 "Authorization": f"Bearer {token}",
-                "Accept": "application/json",
+                "Accept": accept,
                 "Content-Type": "application/json",
             },
         ),
         url,
+        decode=False,
     )
 
 
-def _send(request: urllib.request.Request, url: str):
+def _send(request: urllib.request.Request, url: str, decode: bool = True):
     try:
         with _OPENER.open(request, timeout=_timeout()) as response:
-            return json.loads(response.read())
+            body = response.read()
+            return json.loads(body) if decode else body
     except urllib.error.HTTPError as e:
         raise error_from(e.code, e.read()) from None
     except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:

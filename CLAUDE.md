@@ -75,7 +75,7 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   `[]` or toasting — see `isBackfillRequest` in `data/providers/common.ts`.
 - A tab is a grid of up to 16 charts, not one chart. `ws.chart` is only the *active* cell and cells are created and
   destroyed as the grid changes: never cache a chart, and apply per-chart settings to `ws.cells()`.
-- Not every tab is a chart: the Python and Studies workspaces are tabs too (`features/workspace/tabs.ts`). Anything outside the tab
+- Not every tab is a chart: the Script Editor, Python, Studies and Screener workspaces are tabs too (`features/workspace/tabs.ts`). Anything outside the tab
   that needs a chart must go through `activeChartTab`, never `tabs[i].symbol`; layouts save chart tabs only; and the
   last chart tab can't be closed. See "Layouts and tabs" in `docs/ARCHITECTURE.md`.
 - Daily-and-up bars are stamped at local midnight of the exchange's date; intraday bars keep their real instant. Each new
@@ -101,7 +101,7 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
 - Backtests are approximate (PineTS's broker emulator differs from TradingView's) and cover only the bars the chart has
   loaded. The app is AGPL-3.0 because it bundles PineTS: new dependencies must be compatible with that.
 - Verify a new broker integration against the real service with fake credentials (real error bodies, real socket
-  behaviour) before trusting the docs: Dhan's feed, for one, accepts the socket and drops it on a bad token.
+  behaviour) before trusting the docs: a broker's feed may accept the socket and only then drop it on a bad token (Dhan's did).
 - Zerodha's one-click login (`zerodha/callback.rs`) catches Kite's redirect on `127.0.0.1:47821`, so the port is part of
   the user's Kite app configuration: changing it silently breaks every existing setup. Bind before opening the browser,
   keep it loopback-only, and leave `zerodha_complete_login` (paste the address) working for apps that redirect elsewhere.
@@ -109,6 +109,12 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   from when the token was saved (`accessTokenSavedAt`). Kite's instrument lists are public (no login) and its bad-token
   errors are `{"status":"error","error_type":"TokenException"}`. `cargo test --lib zerodha::live -- --ignored` runs opt-in
   tests against the real service (no credentials needed) — run them when touching `zerodha/`.
+- Zerodha gives Vela's OWN symbol index (`listSymbols`, `capabilities.enumerate`) only its NSE equities
+  (`list_nse_equities` → `store::instrument_list`, ~2,000 symbols) — its full instrument list (BSE, F&O, indices) are
+  50x that and were deliberately left out of an eager in-memory index. That index is what powers clicking a chart's
+  symbol name or bare-typing to search; it's read once, when Vela registers the provider, so connecting a broker
+  mid-session needs a restart to be indexed. It has nothing to do with the app's own search box (`SymbolSearchBox`,
+  `data/search.ts`), which already searches everything live and doesn't use this.
 - Price alerts fire from exactly one place: the engine in the `main` window (`alerts/engine.ts`). Don't start it elsewhere or
   alerts will ring once per window. A crossing is judged between two price samples, so anything that changes an alert's
   status (pause, re-arm, edit) must clear `basePrice` (or set it to the current price) so it doesn't fire over a move that
@@ -139,12 +145,40 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   (`watchlist_update`) checks and `store::watchlists::sync_named` writes; it is not forwarded to a window. Its symbols are
   made canonical there (a bare broker ticker is NSE). `replace` keeps surviving rows where they are, with their flags, and never
   touches section headings. Every write emits `watchlists-changed`, which `watchlistBus` relays to the panel. Don't add any
-  other write route to the local API.
+  other route that gives a script a way to change something a window shows (a layout, an alert, a setting) — `POST
+  /v1/bars/sync` is not one of these: like `GET /v1/bars`'s own caching, it only ever writes to the research store, never
+  anything a script asked it to store, and a script can't tell it what to write.
 - A screen (the Screener tab, `src/screener/`, `protrade/screen.py`) judges its filters on each symbol's **latest bar** only, in
   the Studies' feature grammar. `normalizeScreen` and `normalize_screen` apply the same rules (both run
   `src/screener/fixtures/screen-cases.json`), and `src/screener/fixtures/engine-result.json` is real engine output that
   `result.test.ts` parses: when the result's shape changes, regenerate it with `PROTRADE_WRITE_FIXTURE=1` (see
   `python/tests/test_screen.py`). A saved screen keeps only its last run (`store/screeners.rs`).
+- The Screener's toolbar (`ScreenerPanel.tsx`) has quick shortcuts into `draft.universe` — a `<select>` for the screen name
+  (styled as `.screener-name-select`, listing `screens` so it doubles as a switcher), and `.screener-quickbar`'s universe
+  source and NSE/BSE pills — that write the exact same `setUniverse` the full Universe section (now behind **More
+  options**, `.screener-more-panel`) does; there is no separate state to keep in sync. The side list still owns creating,
+  presets and delete, and can itself collapse to a thin strip (`sideCollapsed`, `.screener-panel.side-collapsed`) for more
+  room. Everything that used to sit beside the filters in a fixed column — rename, the full universe form, and **Before
+  it runs** — now lives behind the quickbar's **More options** toggle (`moreOpen`), so `.screener-builder` is a single
+  column and Filters/Columns get the width. A column is added by picking it from a dropdown off a **+** button
+  (`.screener-columns`'s `menu`/`menu-item`, reusing the `.menu-anchor` pattern from `LayoutMenu.tsx`), not by typing a
+  name — it filters out columns already added and stays open so several can be picked in one go.
+- Filters in the Screener are chips (`FilterChips.tsx`), not the always-expanded rows `ConditionList.tsx` still draws for
+  Study Builder — the two are deliberately separate components over the same `Condition` type, so a Screener-only UI
+  change never touches Study Builder's filters. A chip collapses to `describeCondition(c)`; clicking it opens that one
+  condition's own popover (a period, via `parseFeature`'s `window` — skipped for a feature with none, like `close` —
+  friendlier operator words in `OP_LABELS`, and a value or another feature). A feature is added the same picker-menu way
+  as a column, and immediately opens its new chip's editor. The period `<select>` always injects the condition's actual
+  window as an option even when it isn't one of `WINDOW_CHOICES`' curated ones (a hand-edited or older spec, or a short
+  period like RSI's 14) — never silently rounds it to the nearest offered choice.
+- The Screener's and a Study's first run over a whole exchange pays Kite's historical rate limit once (`store/day_topup.rs`,
+  `pyapi/data.rs`'s `sync_daily`); every run after that calls `api._top_up` (`POST /v1/bars/sync`, from `screen.py`'s `Screen.run`
+  and `study.py`'s `Study.load`, right before their own fetch loop) to bring already-cached symbols' latest bar up to date from one
+  batched broker quote instead of a historical call each. `candidate()` only offers a symbol with no unaccounted weekday gap since
+  its last settled session; `snapshot_bar()` then only trusts a quote whose previous close matches the prior stored bar (within a
+  tick) and whose volume isn't newly missing — anything it rejects, or any provider whose quote call fails, falls back to the
+  existing per-symbol `/v1/bars` read untouched, so a mismatch degrades to slow-but-correct, never a wrong bar. `_top_up` itself
+  never raises (`PROTRADE_NO_TOPUP=1` disables it outright); don't let it block a run.
 - Drawings belong to the symbol (`chart/symbolDrawings.ts`, `store/symbol_drawings.rs`), not the chart: every chart swaps
   them on a symbol change. A symbol with no stored row adopts a layout's drawings; an *empty* document means "cleared" — never
   delete the row instead. Anything that replaces a chart's drawings must go through the port (deselect, `fromJSON`, deselect,
@@ -166,10 +200,16 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   folder and not listed. A debug build writes the repository's copy instead (so Python changes need no rebuild under `tauri:dev`);
   a release build always writes the embedded one. The package is standard library plus pandas, and must work on pandas 2 and 3. Script names refuse
   anything that could shadow a library (`scripts.rs`), because a script's folder is first on Python's import path.
+- `python/examples/*.py` (a different embedding: `scripts.rs`'s `EXAMPLES`, `include_str!`) are the scripts seeded into a new
+  Python tab. One the user hasn't touched is replaced when a newer version ships (their own edit or deletion is left alone).
+  `python::e2e`'s example-scripts test runs every one against the real API and expects it to fit one of three shapes: prints
+  only (`hello.py` — extend that list for another pure-side-effect script), a `pt.show` table
+  (`screen_*.py`), or a `pt.report` (everything else) — a new example needs a matching branch there, not just a spot in
+  `EXAMPLES`.
 - A broker symbol is stored and compared in its long form (`zerodha:NSE:HFCL`) but *shown* short (`HFCL`) — never render
   `symbol` or `splitSymbol(...).ticker` to the user; use `displayTicker`. A chart is given the short form (`chartSymbol`), so
   anything read back from Vela must go through `normalizeSymbol` before it is compared or stored, or a watchlist row, an
-  alert and a chart will disagree about what they are looking at. `NSE:` is the one exchange hidden (both brokers read a bare
+  alert and a chart will disagree about what they are looking at. `NSE:` is the one exchange hidden (Zerodha reads a bare
   ticker as NSE); don't hide another without giving the backends a way to find it from a bare ticker. See "How a symbol is
   shown" in `docs/ARCHITECTURE.md`.
 - A colour flag belongs to the **symbol** (`symbol_flags`), not a list's row: `watchlists::get` joins it in, and
@@ -187,12 +227,29 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   there, and its `subscribe` receives the chart's ticker in whatever form Vela chose, so the tap goes through `normalizeSymbol`.
 - The right rail (`features/rail/`) shows one panel at a time; the watchlist panel stays mounted while hidden and must not fetch
   prices then (`visible`). The alerts *list* is that rail's panel; only the new/edit **form** is a dialog. The rail also carries
-  the Home, Script Editor, Python, Studies and Screener buttons (actions, not panels) — the tab bar no longer has them.
+  the Home, Script Editor, Strategy Tester, Python, Studies and Screener buttons, and at the bottom, Import data, New window, Data providers,
+  AI providers, Help and About (all `RailAction`s, not panels) — the tab bar keeps only the Layout menu, search and theme.
+  A `RailAction` can carry `dot: true` for a small "something's ready" indicator (About's update dot); that's different from
+  a `RailPanelButton`'s numeric `badge` (the alerts count) — don't conflate the two.
 - The Home tab (`features/home/HomePage.tsx`, `kind: 'home'` in `features/workspace/tabs.ts`) is a workspace tab like Python,
-  at most one open, opened from the rail's Home button. It holds no state of its own: every card just calls the same
-  callback its equivalent elsewhere in `Workspace.tsx` already uses (`openPython`, `showRailPanel('watchlist')`, `setAboutOpen`,
-  …), so add a new card by wiring it the same way rather than duplicating logic. Add a feature here too, and it belongs on the
-  Home tab: update its section in `HomePage.tsx` in the same change, the same rule the Help Center gotcha above already follows.
+  at most one open, opened from the rail's Home button. Every card just calls the same callback its equivalent elsewhere in
+  `Workspace.tsx` already uses (`openPython`, `showRailPanel('watchlist')`, `setAboutOpen`, …), so add a new card by wiring
+  it the same way rather than duplicating logic. Add a feature here too, and it belongs on the Home tab: update its section
+  in `HomePage.tsx` in the same change, the same rule the Help Center gotcha above already follows. The Setup section is the
+  one exception to "no state of its own": it reads its cards' Done/Pending status itself (a broker connected, an AI key set,
+  a dataset imported, Python ready, `research_bars` non-empty), on its own mount, since Home may be the first thing opened —
+  it can't assume `Workspace.tsx` or another tab has already loaded any of that. Give a new Setup card a status only if it
+  has a genuine finished state; an ongoing action (open a tool, import another file) stays unmarked.
+- The window has no native title bar (`"decorations": false` on every window, `tauri.conf.json` and `lib/windows.ts`'s
+  `openNewWindow`): the tab bar is it. `.tab-brand` (the logo and "ProTradeChart") and `.tab-bar-drag` (the spacer before
+  the actions) are what's draggable (`data-tauri-drag-region`, `app.css`); double-click either to maximize needs no code —
+  Tauri's own `internal_toggle_maximize` handles it, pre-granted by `core:window:default` — so don't wire that by hand, it
+  would double-toggle against the native one. `WindowControls.tsx` draws the minimize/maximize/close the OS no longer does,
+  and each of those (plus dragging itself) needs its own permission in `src-tauri/capabilities/default.json`
+  (`core:window:allow-minimize`/`allow-maximize`/`allow-unmaximize`/`allow-toggle-maximize`/`allow-close`/
+  `allow-start-dragging`) — `core:default` only covers read-only window state (`is-maximized` and the like), so a window
+  control added without its permission silently does nothing, no error shown. Built and tested on Windows only; macOS and
+  Linux haven't been checked.
 - A Study's source of truth is its **Study Specification** (`src/studies/spec.ts`), not Python. `normalizeSpec` (TS) and
   `normalize_spec` (`python/protrade/study.py`) apply the same rules, and `studies/metrics.ts` accepts exactly the feature
   grammar `protrade/features.py` computes: change one side, change the other. The engine's result is untrusted script output
@@ -239,9 +296,37 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   don't start runs any other way). A synthesis is a separate press, drawn as text; follow-ups are *questions* that become a new
   plan needing a new approval. Claude's answers stream (`SseAccumulator`): judge `stop_reason` at the end, and drop text written
   before a `fallback` block.
+- The market-data store (`marketdata/`, "Market data store" in `docs/ARCHITECTURE.md`) keeps five years of every NSE stock's
+  and index's daily bars in `research_bars`. Its jobs are **Rust jobs, not scripts**: the daily update runs only after the user
+  started the download, only while the app is open, never during startup (first look two minutes after launch), and always inside
+  `throttle::in_background` so charts and user-run scripts go ahead of it at the broker (the lane is a task-local: wrap every task
+  a job spawns). Bulk work uses `ResearchDb`'s own connections, never the UI's `Database` lock, and writes one symbol per
+  transaction. A series whose broker history disagrees with the store (a split or bonus) is refetched whole with
+  `research_bars::replace`, never mixed. New listings are found through `market_symbols`, which outlives the instrument tables.
+- `POST /v1/panel` is a read (posted because the symbol list doesn't fit a URL): it answers from the store alone, never the broker,
+  in the binary layout documented on `wire::panel_body`, which `protrade/panels.py` reads — change both together. A series not
+  `current` is the caller's to read through `/v1/bars`.
+- A feature name may carry an interval, `rsi_14@W` / `ema_50@M` (bare = daily): weekly (to Friday) and monthly bars are built
+  from the daily ones by `features.period_bounds`/`period_bars`, which `Features` and `WideFeatures` share. A condition is
+  judged on its **left** feature's interval (a weekly cross is this week against last week). Intervals are for the Screener
+  only: `normalize_spec`/`normalizeSpec` refuse them, because a past day's week includes the days after it. `between` /
+  `outside` take `right: [low, high]`; `withOp` reshapes the right side when the operator changes. The Screener's filter
+  editor is driven by `src/screener/catalog.ts` (picker groups, titles, chip text, which families compare); a new feature
+  family needs an entry there as well as in both grammars.
+- `protrade/wide.py` computes features for many symbols on a table **aligned by bar position** (each symbol's bars at the bottom of
+  its column), which is what makes its numbers equal `Features`'. `features.py`'s maths must work on a Series and a DataFrame alike:
+  don't add an `iloc` by position or a `where(..., value)` that turns a row above a symbol's first bar into a value. Keep
+  `tests/test_wide.py`, which checks every family, and the Screener fixture, which must not change.
 - **Yahoo Finance is not a data source, and shouldn't come back without the owner's say-so.** It was removed entirely: its
   provider, backend client and rate limiter, its terms/opt-in UI, and its `yahoo:` symbols. Symbols saved from it stay in
   users' watchlists, layouts and alerts but can't load: `isSupportedSymbol` (`lib/symbols.ts`) recognises them, and
   `withoutUnsupportedSymbols` moves a layout's tabs off them when it opens (nothing stored is rewritten). `store/retired.rs`
   purges its cache and settings once. A bare ticker now means Binance (`DEFAULT_PROVIDER`), which needs no account. Don't add
   a source that scrapes an unofficial endpoint, and don't leave `yahoo` in any provider list.
+- **Dhan is not a data source either** — removed the same way, at the owner's request: its provider, `dhan/` client and feed,
+  commands, Data providers panel and `dhan_instruments`. `dhan:` symbols stay where users saved them but can't load
+  (`isSupportedSymbol` is false; `BROKERS` in `lib/symbols.ts` keeps `dhan` only so they still *display* short), and
+  `store::retired::purge_dhan_leftovers_once` deletes its keychain secrets (through `Secrets::delete`), settings, cached and
+  research bars, `market_symbols` rows and instrument table once. A screen or Study saved with `universe.provider: "dhan"`
+  normalises to `"zerodha"` (`currentProvider` in `studies/spec.ts`, `RETIRED_PROVIDERS` in `protrade/study.py`) rather than
+  refusing to open. Zerodha is now the only broker: don't reintroduce Dhan without the owner's say-so.

@@ -181,6 +181,10 @@ pub const EXAMPLES: &[(&str, &str)] = &[
         include_str!("../../../python/examples/screen_52_week_high.py"),
     ),
     (
+        "screen_six_month_momentum.py",
+        include_str!("../../../python/examples/screen_six_month_momentum.py"),
+    ),
+    (
         "backtest_sma_cross.py",
         include_str!("../../../python/examples/backtest_sma_cross.py"),
     ),

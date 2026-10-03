@@ -7,7 +7,7 @@
  *  checked by the engine as it runs and reported with the result. Pure. */
 
 import { splitSymbol } from '../lib/symbols';
-import { measureFeatures, measureReach, requiredFeatures, type StudySpec } from './spec';
+import { measureFeatures, measureReach, requiredFeatures, type Condition, type StudySpec } from './spec';
 import { DEFAULT_MIN_TRADED_VALUE } from './templates';
 
 export type ReadinessStatus = 'available' | 'unavailable' | 'warning' | 'unused';
@@ -40,6 +40,7 @@ export interface UniverseEstimate {
   symbols: number;
   stored: number;
   requests: number;
+  quoteRequests: number;
   seconds: number;
   listingsSkipped: number;
 }
@@ -55,6 +56,15 @@ export function formatDuration(seconds: number): string {
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return `about ${minutes} min`;
   return `about ${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+}
+
+/** What loading the rest of the universe costs: "2,000 broker requests, about 12 min", "1 quick
+ *  quote check, about 1 s", both joined, or "nothing to fetch" when the store already covers it. */
+export function formatCost(e: Pick<UniverseEstimate, 'requests' | 'quoteRequests' | 'seconds'>): string {
+  const parts: string[] = [];
+  if (e.requests) parts.push(`${e.requests.toLocaleString()} broker request${e.requests === 1 ? '' : 's'}`);
+  if (e.quoteRequests) parts.push(`${e.quoteRequests.toLocaleString()} quick quote check${e.quoteRequests === 1 ? '' : 's'}`);
+  return parts.length ? `${parts.join(' and ')}, ${formatDuration(e.seconds)}` : 'nothing to fetch';
 }
 
 export interface Readiness {
@@ -118,7 +128,7 @@ export function checkReadiness(spec: StudySpec, facts: ReadinessFacts): Readines
   const items: ReadinessItem[] = [];
   const notes: string[] = [];
   const usable = new Set(facts.providers.filter((p) => p.usable).map((p) => p.id));
-  const label = (id: string) => (id === 'zerodha' ? 'Zerodha' : id === 'dhan' ? 'Dhan' : id);
+  const label = (id: string) => (id === 'zerodha' ? 'Zerodha' : id);
 
   items.push(
     facts.pythonReady
@@ -127,8 +137,8 @@ export function checkReadiness(spec: StudySpec, facts: ReadinessFacts): Readines
   );
 
   const sources = providersOf(spec);
-  const unsupported = sources.filter((p) => p !== 'zerodha' && p !== 'dhan');
-  const missing = sources.filter((p) => (p === 'zerodha' || p === 'dhan') && !usable.has(p));
+  const unsupported = sources.filter((p) => p !== 'zerodha');
+  const missing = sources.filter((p) => p === 'zerodha' && !usable.has(p));
   if (spec.universe.source === 'watchlist') {
     const known = facts.watchlists.some((w) => w.toLowerCase() === (spec.universe.watchlist ?? '').toLowerCase());
     items.push({
@@ -140,7 +150,7 @@ export function checkReadiness(spec: StudySpec, facts: ReadinessFacts): Readines
   }
   const priceStatus: ReadinessItem =
     unsupported.length > 0
-      ? { field: 'OHLC', status: 'unavailable', detail: `Studies read Zerodha and Dhan data only, not ${unsupported.join(', ')}.`, blocking: true }
+      ? { field: 'OHLC', status: 'unavailable', detail: `Studies read Zerodha data only, not ${unsupported.join(', ')}.`, blocking: true }
       : missing.length > 0
         ? { field: 'OHLC', status: 'unavailable', detail: `${missing.map(label).join(' and ')} isn't set up and switched on (Data providers).`, blocking: true }
         : { field: 'OHLC', status: 'available', detail: 'Daily bars, as the broker supplies them (adjusted for corporate actions at source)', blocking: false };
@@ -190,7 +200,7 @@ export function checkReadiness(spec: StudySpec, facts: ReadinessFacts): Readines
       `${e.symbols.toLocaleString()} symbol${e.symbols === 1 ? '' : 's'}`,
       e.listingsSkipped ? `${e.listingsSkipped.toLocaleString()} other listings left out (bonds, SGBs, funds, second listings)` : null,
       `${e.stored.toLocaleString()} already stored`,
-      e.requests === 0 ? 'nothing to fetch' : `${e.requests.toLocaleString()} broker requests, ${formatDuration(e.seconds)} at the broker's limit`,
+      formatCost(e),
     ].filter(Boolean);
     items.push({
       field: 'Data to load',
@@ -244,7 +254,7 @@ export function applyFix(spec: StudySpec, fix: ReadinessFix): StudySpec {
     next.universe.max_symbols = TRIAL_SYMBOLS;
   } else if (fix === 'drop_benchmark') {
     next.benchmark = null;
-    const usesRs = (c: { left: string; right: number | string }) => c.left.startsWith('rs_') || (typeof c.right === 'string' && c.right.startsWith('rs_'));
+    const usesRs = (c: { left: string; right: Condition['right'] }) => c.left.startsWith('rs_') || (typeof c.right === 'string' && c.right.startsWith('rs_'));
     next.metrics = next.metrics.filter((m) => !m.startsWith('rs_'));
     next.characteristics = next.characteristics.filter((c) => !usesRs(c));
     next.pre_event_filters = next.pre_event_filters.filter((c) => !usesRs(c));

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PineEngine } from '@luxalgo/vela-pinets';
 import type { ExecutionRequest } from '@luxalgo/vela/plugin';
-import { TEMPLATES } from './source';
+import { BLANKS, TEMPLATES } from './source';
 
 /** Every starter script must compile and run on the real engine — a template that fails
  *  is the first thing a new user would hit. */
@@ -14,7 +14,7 @@ const BARS: ExecutionRequest['bars'] = Array.from({ length: 200 }, (_, i) => {
 });
 
 describe('starter templates run on the real engine', () => {
-  for (const template of TEMPLATES) {
+  for (const template of [...BLANKS, ...TEMPLATES]) {
     it(template.label, async () => {
       const engine = new PineEngine({ props: 'strategy' });
       const prepared = await engine.prepare(template.source, `tpl-${template.id}`);

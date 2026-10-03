@@ -1,9 +1,130 @@
 /* The Screener tab. It wears the Studies tab's classes (`studies-panel`, `study-*`: side list, toolbar,
    sections, progress, tables); this adds only what is its own. Every colour is a theme token. */
 
-/* Filters on the left, the screen's name, universe and readiness on the right. */
+/* The screen-name dropdown in the toolbar, styled like Pine's own `.pine-name`. */
+.screener-name-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.screener-name-select {
+  appearance: none;
+  width: 220px;
+  max-width: 34vw;
+  height: 28px;
+  padding: 0 26px 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.screener-name-select:hover {
+  border-color: var(--border);
+}
+.screener-name-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface-1);
+}
+.screener-name-picker > svg {
+  position: absolute;
+  right: 8px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+/* Quick universe/exchange shortcuts into the same state the Universe section (below) edits in full. */
+.screener-quickbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.screener-chip-select,
+.screener-chip-static {
+  gap: 6px;
+  color: var(--text-secondary);
+}
+.screener-chip-select > svg:first-child,
+.screener-chip-static > svg:first-child {
+  color: var(--text-muted);
+}
+.screener-chip-select select {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.screener-chip-select select:focus {
+  outline: none;
+}
+.screener-chip-select > svg:last-child {
+  color: var(--text-muted);
+}
+.screener-exchange {
+  padding: 2px 7px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.screener-exchange.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* The "More options" toggle (name, broker, listings, symbol list, before-it-runs) and the panel
+   it opens below the quickbar, in place of what used to sit beside the filters. */
+.screener-more-toggle {
+  margin-left: auto;
+  cursor: pointer;
+}
+.screener-more-toggle.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.screener-more-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--loss);
+}
+.screener-more-panel {
+  padding: 4px 16px 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.screener-more-panel .study-form {
+  max-width: 560px;
+}
+
+/* My screens (the left sidebar) can collapse to a thin strip, to give the builder more room. */
+.screener-panel.side-collapsed {
+  grid-template-columns: 36px minmax(0, 1fr);
+}
+.screener-side-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.screener-side-collapsed .python-side-header {
+  justify-content: center;
+  padding: 0;
+}
+
+/* Filters and columns alone, now that the name/universe/readiness form lives behind
+   "More options" (`.screener-more-panel`): let them use the full width. */
 .screener-builder {
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  grid-template-columns: minmax(0, 1fr);
   padding-bottom: 8px;
 }
 
@@ -33,13 +154,150 @@
   width: 18px;
   height: 18px;
 }
-.screener-add-column {
+.screener-add-column-btn {
+  width: 24px;
+  height: 24px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+}
+
+/* Filters as TradingView-style chips: collapsed to a short description until clicked, which opens
+   that one filter's own editor in a popover instead of a row that's always fully expanded. */
+.screener-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.screener-filter-chip {
   display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 26px;
+  padding: 0 2px 0 2px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--bg-base);
+  font-size: 12px;
+}
+.screener-filter-chip.invalid {
+  border-color: var(--loss);
+  color: var(--loss);
+}
+.screener-filter-chip .icon-button {
+  width: 20px;
+  height: 20px;
+}
+.screener-filter-chip-text {
+  height: 100%;
+  padding: 0 4px 0 10px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.screener-filter-chip-text:hover {
+  color: var(--accent);
+}
+
+.screener-filter-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 280px;
+  padding: 10px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+}
+.screener-filter-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.screener-filter-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.screener-filter-reset {
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.screener-filter-popover .study-field {
+  margin-bottom: 6px;
+}
+/* The length or period, and the interval, under a filter's title ("50 · 1 day"), as TradingView shows them. */
+.screener-filter-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: -4px 0 8px 26px;
+}
+.study-field .screener-filter-params {
+  margin: 4px 0 0;
+}
+.screener-filter-param {
+  padding: 1px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.screener-filter-param:hover,
+.screener-filter-param:focus {
+  border-color: var(--border);
+  color: var(--text);
+}
+.screener-filter-range {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+}
+.screener-filter-range .study-field {
+  min-width: 0;
+}
+.screener-filter-picker {
+  max-height: 420px;
+  min-width: 240px;
+  overflow-y: auto;
+}
+.screener-filter-picker > .python-input {
+  width: calc(100% - 12px);
+  margin: 4px 6px 2px;
+}
+.screener-filter-none {
+  padding: 6px 8px;
+}
+.screener-filter-value-input {
+  display: flex;
   align-items: center;
   gap: 6px;
 }
-.screener-add-column .python-input {
-  width: 220px;
+.screener-filter-value-input .python-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .screener-checks {
@@ -83,4 +341,58 @@
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text-secondary);
+}
+
+/* The results as pages of candlestick charts (ScreenCharts): the grid picker, a button to open each
+   chart in a tab, the pager, and the Vela grid itself. */
+.screener-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.screener-charts-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.screener-charts-open {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.screener-charts-grid {
+  position: relative;
+  height: 560px;
+  min-height: 320px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.screener-exchange svg {
+  vertical-align: -2px;
+}
+
+/* The Columns heading folds its section (it does while the results are shown as charts); folded, a
+   one-line summary of the columns and order sits beside it. */
+.screener-section-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.screener-section-toggle:hover {
+  color: var(--accent);
+}
+.screener-section-summary {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

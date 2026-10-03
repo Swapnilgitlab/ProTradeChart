@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeKiteTokenExpiry, describeTokenExpiry, formatPercent, formatPrice, formatSpan } from './format';
+import { describeKiteTokenExpiry, formatPercent, formatPrice, formatSpan } from './format';
 
 describe('formatPrice', () => {
   it('uses two decimals for large prices', () => {
@@ -36,20 +36,6 @@ describe('formatSpan', () => {
     expect(formatSpan(5 * 3600 + 12 * 60)).toBe('5h 12m');
     expect(formatSpan(2 * 86_400 + 3 * 3600)).toBe('2d 3h');
     expect(formatSpan(-3600)).toBe('1h 0m');
-  });
-});
-
-describe('describeTokenExpiry', () => {
-  const now = 1_800_000_000_000;
-  it('says how long a token has left, and warns when it is nearly out', () => {
-    const fine = describeTokenExpiry(now / 1000 + 20 * 3600, now);
-    expect(fine).toMatchObject({ text: 'Valid for another 20h 0m.', expired: false, soon: false });
-    expect(describeTokenExpiry(now / 1000 + 3600, now).soon).toBe(true);
-  });
-
-  it('reports an expired token and an unreadable one', () => {
-    expect(describeTokenExpiry(now / 1000 - 7200, now)).toMatchObject({ text: 'Expired 2h 0m ago.', expired: true });
-    expect(describeTokenExpiry(null, now).expired).toBe(false);
   });
 });
 

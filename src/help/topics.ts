@@ -49,7 +49,8 @@ export const SHORTCUTS: [string, string][] = [
   ['Ctrl + W', 'Close the current tab'],
   ['Ctrl + PageUp / PageDown', 'Previous / next tab'],
   ['Ctrl + K', 'Search for a symbol'],
-  ['Ctrl + E', 'Show or hide the Script Editor and Strategy Tester'],
+  ['Ctrl + E', 'Open the Script Editor tab'],
+  ['Ctrl + Shift + E', 'Show or hide the Strategy Tester under the chart'],
   ['Ctrl + Shift + Y', 'Open the Python tab'],
   ['Ctrl + Shift + N', 'New window'],
   ['Alt + W', 'Show or hide the watchlist panel'],
@@ -92,7 +93,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             'ProTradeChart is a free, open-source desktop application for charting and researching financial markets. It draws fast candlestick charts with indicators and drawing tools, keeps live watchlists and price alerts, runs Pine Script®-compatible indicators and strategy backtests, and offers research tools — a Screener, Python scripting and historical Studies — for Indian equities through your own broker account.',
           ),
           p(
-            'It needs no account and no subscription of its own. Cryptocurrency data from Binance, Coinbase and Hyperliquid works immediately. Indian equities, indices, futures and commodities are available when you connect your own **Dhan** or **Zerodha** account, and you can chart any data of your own by importing a CSV file.',
+            'It needs no account and no subscription of its own. Cryptocurrency data from Binance, Coinbase and Hyperliquid works immediately. Indian equities, indices, futures and commodities are available when you connect your own **Zerodha** account, and you can chart any data of your own by importing a CSV file.',
           ),
           note('ProTradeChart is for information and research only. Nothing in it is financial advice, and it never places orders.'),
         ],
@@ -103,11 +104,11 @@ export const HELP_TOPICS: HelpTopic[] = [
           table(
             ['Area', 'What it holds'],
             [
-              ['Tab bar (top)', 'One tab per chart, each showing its symbol, live price and the day’s change; the Python, Studies and Screener workspaces when open; the **+** button for a new tab.'],
-              ['Tab bar actions (top right)', 'The **Layout** menu, the symbol search box, **Import data**, **New window**, the theme selector and **About**.'],
+              ['Tab bar (top)', 'The window’s title bar and its tabs in one: the application’s logo at the left (drag it, or the space beside the tabs, to move the window; double-click either to maximize or restore), then one tab per chart, each showing its symbol, live price and the day’s change, the Python, Studies, Screener and Home workspaces when open, and the **+** button for a new tab.'],
+              ['Tab bar actions (top right)', 'The **Layout** menu, the symbol search box, the theme selector, and the window’s minimize, maximize and close.'],
               ['Chart area (centre)', 'The chart, or a grid of up to sixteen charts, with Vela’s toolbar for timeframe, chart type, indicators and drawings.'],
               ['Side panel (right)', 'The watchlist, the price alerts list or the Ask AI assistant — one at a time.'],
-              ['Right rail (far right)', 'Icons that switch the side panel and open the tools described below.'],
+              ['Right rail (far right)', 'Icons that switch the side panel and open the tools described below, and further down, **Import data**, **New window**, **Data providers**, **AI providers**, **Help** and **About**.'],
             ],
           ),
         ],
@@ -123,13 +124,17 @@ export const HELP_TOPICS: HelpTopic[] = [
               ['**Price alerts**', 'Shows the list of alerts. A badge counts alerts that fired since you last looked.'],
               ['**Ask AI**', 'Opens the AI assistant, which answers questions and proposes actions you approve.'],
               ['**Home** (house)', 'Opens the Home tab, an overview of the application linking to everything else in it.'],
-              ['**Script Editor**', 'Opens the Pine Script editor and Strategy Tester below the chart (`Ctrl+E`).'],
+              ['**Script Editor**', 'Opens the Pine Script editor in a tab of its own (`Ctrl+E`).'],
+              ['**Strategy Tester**', 'Shows or hides a strategy’s backtest under the chart (`Ctrl+Shift+E`).'],
               ['**Python**', 'Opens the Python workspace (`Ctrl+Shift+Y`).'],
               ['**Studies**', 'Opens the Studies workspace for historical research.'],
               ['**Screener**', 'Opens the Screener workspace.'],
+              ['**Import data** (database)', 'Chart your own data from a CSV file.'],
+              ['**New window**', 'Opens another window (`Ctrl+Shift+N`).'],
               ['**Data providers** (plug)', 'Chooses and configures where prices come from.'],
               ['**AI providers** (key)', 'Holds the API keys for Claude or GPT.'],
               ['**Help**', 'Opens this Help Center (`F1`).'],
+              ['**About** (info)', 'Version, licence, source code, credits and the keyboard shortcuts. A dot means an update is ready.'],
             ],
           ),
           p('Pressing the icon of the panel that is showing folds it away, giving the chart the full width. The application remembers your choice.'),
@@ -168,11 +173,11 @@ export const HELP_TOPICS: HelpTopic[] = [
             '**Charts** — start a new chart tab or window, and open any of your saved layouts with one click.',
             '**Watchlists and alerts** — show the watchlist panel or the price alerts list.',
             '**Research** — Ask AI, Python, Studies and the Screener.',
-            '**Setup** — Data providers, AI providers and importing your own data.',
+            '**Setup** — Data providers, AI providers, importing your own data, Python setup, and **Market data** (five years of every NSE stock’s daily prices on this computer). Each shows **Done** once it is, or a highlighted **Pending** while it isn’t.',
             '**Config** — the theme, the keyboard shortcut list and where to check for updates.',
-            '**About** and **Help** — the same dialogs as the tab bar and right rail open.',
+            '**About** and **Help** — the same dialogs the right rail opens.',
           ),
-          p('Every card does exactly what its equivalent button elsewhere in the application does; the Home tab keeps no state of its own.'),
+          p('Every card does exactly what its equivalent button elsewhere in the application does.'),
         ],
       },
     ],
@@ -207,7 +212,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Connect Indian market data (optional)',
         blocks: [
           p(
-            'To chart NSE, BSE, NFO or MCX instruments, and to use the Screener, Python and Studies, connect a broker account you already have: open **Data providers** from the plug icon at the bottom of the right rail and follow **Connecting Zerodha** or **Connecting Dhan**.',
+            'To chart NSE, BSE, NFO or MCX instruments, and to use the Screener, Python and Studies, connect a broker account you already have: open **Data providers** from the plug icon at the bottom of the right rail and follow **Connecting Zerodha**.',
           ),
         ],
       },
@@ -243,7 +248,6 @@ export const HELP_TOPICS: HelpTopic[] = [
               ['Coinbase', '`coinbase:BTC-USD`'],
               ['Hyperliquid', '`hyperliquid:BTC`'],
               ['Zerodha', '`zerodha:NSE:RELIANCE`, `zerodha:NSE:NIFTY_50`, `zerodha:BSE:TCS`'],
-              ['Dhan', '`dhan:NSE:RELIANCE`, `dhan:IDX:NIFTY`, `dhan:NFO:BANKNIFTY-OCT2026-FUT`, `dhan:MCX:GOLD-05OCT2026-FUT`'],
               ['Imported data', '`csv:MY_DATA`'],
             ],
           ),
@@ -254,8 +258,8 @@ export const HELP_TOPICS: HelpTopic[] = [
         blocks: [
           list(
             'Press `Ctrl+K` or click the search box, then type part of a ticker or a company name.',
-            'Results come from every data source that is switched on. When more than one is on, the dropdown to the left of the search box (**All sources**) limits the search to one.',
-            'A ticker typed without a source uses the **default provider**, which is Binance until you choose another in **Data providers** (**Make default**). With Zerodha or Dhan as the default, typing `RELIANCE` opens the NSE listing.',
+            'Results come from every data source that is switched on, grouped by source.',
+            'A ticker typed without a source uses the **default provider**, which is Binance until you choose another in **Data providers** (**Make default**). With Zerodha as the default, typing `RELIANCE` opens the NSE listing.',
             'Options contracts are not listed (there are too many to search usefully); futures are.',
           ),
         ],
@@ -264,7 +268,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Symbols that can no longer load',
         blocks: [
           p(
-            'Yahoo Finance was removed as a data source. Symbols saved from it (`yahoo:…`) stay in your watchlists, layouts and alerts but cannot be loaded. Opening a layout that contains one moves that chart to a working symbol and tells you; saving the layout again removes the old symbol. To chart US or other world markets, import your own data file.',
+            'Yahoo Finance and Dhan were removed as data sources. Symbols saved from them (`yahoo:…`, `dhan:…`) stay in your watchlists, layouts and alerts but cannot be loaded. To chart an Indian instrument again, add it from Zerodha. Opening a layout that contains one moves that chart to a working symbol and tells you; saving the layout again removes the old symbol. To chart US or other world markets, import your own data file.',
           ),
         ],
       },
@@ -387,7 +391,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         blocks: [
           list(
             '`Ctrl+T` or the **+** button opens a new chart tab. If you have a default layout, the new tab starts as a copy of its first chart — symbol, indicators, drawings and style — so the default layout doubles as a template.',
-            '`Ctrl+W`, the tab’s **×** or a middle-click closes a tab. The last chart tab cannot be closed, because the watchlist, alerts and Script Editor always work with a chart.',
+            '`Ctrl+W`, the tab’s **×** or a middle-click closes a tab. The last chart tab cannot be closed, because the watchlist, alerts, Script Editor and Strategy Tester always work with a chart.',
             '`Ctrl+PageUp` and `Ctrl+PageDown` move between tabs.',
             'Each tab shows its symbol’s latest price and the day’s change. Tabs whose chart streams live update tick by tick; the others refresh about every 20 seconds.',
             'As more tabs open they narrow to share the space: first the price is hidden, then the day’s change, then the close button on tabs you are not on (hover a tab to see it). The tab you are on always shows its name, and hovering any tab shows its full name.',
@@ -407,7 +411,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'More windows',
         blocks: [
           p(
-            '`Ctrl+Shift+N` or the **New window** button opens another window, useful on a second monitor. All windows share your layouts, watchlists and alerts. Only the first (main) window checks alerts and runs background tasks, so nothing happens twice.',
+            '`Ctrl+Shift+N` or **New window** in the right rail opens another window, useful on a second monitor. All windows share your layouts, watchlists and alerts. Only the first (main) window checks alerts and runs background tasks, so nothing happens twice.',
           ),
         ],
       },
@@ -457,7 +461,10 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Opening the editor',
         blocks: [
           p(
-            'Press `Ctrl+E` or the **Script Editor** icon on the right rail. The editor opens in a dock below the chart and works with the active chart of the current tab. The pencil icon on a script’s legend row reopens that script’s code.',
+            'Press `Ctrl+E` or the **Script Editor** icon on the right rail. The editor opens in a tab of its own, like Python: your scripts, the scripts bundled with the app and examples to start from are listed on the left, the editor and its **Console** beside them. The pencil icon on a script’s legend row opens that script’s code there.',
+          ),
+          p(
+            'Scripts are added to the chart tab you looked at last, named on the button in the editor’s toolbar; click it to go to that chart.',
           ),
         ],
       },
@@ -465,7 +472,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Writing and running a script',
         blocks: [
           steps(
-            'Open **Open** to start from **New from an example**, reopen one of **My scripts**, or view a script **Bundled with the app**.',
+            'Press **+ Indicator** or **+ Strategy** at the top of the list on the left to start a new script, or start from **New from an example**, reopen one of **My scripts** (its bin deletes it), or view a script **Bundled with the app**.',
             'Write or paste your script. The editor highlights Pine syntax.',
             'Press **Add to chart** (`Ctrl+Enter`). The script is added only if it compiles; errors and warnings appear in the editor’s **Console**.',
             'Edit and press `Ctrl+Enter` again to update the script on the chart in place.',
@@ -478,7 +485,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Indicators and strategies',
         blocks: [
           p(
-            'The editor detects whether a script is an **Indicator** (`indicator(...)`) or a **Strategy** (`strategy(...)`) from its declaration. A strategy also opens the **Strategy Tester**.',
+            'The editor detects whether a script is an **Indicator** (`indicator(...)`) or a **Strategy** (`strategy(...)`) from its declaration. Adding a strategy opens the **Strategy Tester** under its chart.',
           ),
           note(
             'Scripts run on PineTS, an open-source Pine Script engine. Most scripts behave as they do on TradingView, but some functions and behaviours differ. Pine Script is a trademark of TradingView, Inc.; ProTradeChart is not affiliated with TradingView.',
@@ -498,7 +505,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Reading a backtest',
         blocks: [
           p(
-            'When a strategy is on the active chart, the Strategy Tester shows its equity curve, a performance summary (net profit, maximum drawdown, run-up, percent profitable, profit factor and more) and the list of trades with their entry and exit, size, signal and profit. With several strategies on the chart, choose which one to show.',
+            'The Strategy Tester sits in a panel under the chart. **Strategy Tester** on the right rail (`Ctrl+Shift+E`) shows or hides it, and adding a strategy from the Script Editor opens it. When a strategy is on the active chart, it shows its equity curve, a performance summary (net profit, maximum drawdown, run-up, percent profitable, profit factor and more) and the list of trades with their entry and exit, size, signal and profit. With several strategies on the chart, choose which one to show.',
           ),
         ],
       },
@@ -587,7 +594,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'The Indices watchlist',
         blocks: [
           p(
-            'With Zerodha or Dhan connected, **Create Indices watchlist** in the browse dialog builds a watchlist of Indian market indices from your broker’s instrument list, in three sections: **Broad market** (Nifty 50, Sensex, Nifty Next 50, the midcap and smallcap indices, India VIX and others), **Sectors** (Nifty Bank, IT, Pharma, Auto, FMCG, Metal, Realty, Energy, Healthcare and the other sector indices) and **Themes** (Defence, Infrastructure, CPSE, Consumption, EV and others). Follow a sector’s performance through its index. Indices your broker does not list are skipped.',
+            'With Zerodha connected, **Create Indices watchlist** in the browse dialog builds a watchlist of Indian market indices from your broker’s instrument list, in three sections: **Broad market** (Nifty 50, Sensex, Nifty Next 50, the midcap and smallcap indices, India VIX and others), **Sectors** (Nifty Bank, IT, Pharma, Auto, FMCG, Metal, Realty, Energy, Healthcare and the other sector indices) and **Themes** (Defence, Infrastructure, CPSE, Consumption, EV and others). Follow a sector’s performance through its index. Indices your broker does not list are skipped.',
           ),
           note('The application has no data on which stocks belong to each sector, so it does not build sector-by-sector stock lists. You can make your own with sections, or from the Screener’s results.'),
         ],
@@ -702,7 +709,8 @@ export const HELP_TOPICS: HelpTopic[] = [
           p(
             'The Screener lists the stocks that meet a set of conditions on their latest daily bar, with the columns you choose. Open it from the **Screener** icon on the right rail. It uses the same indicators as Studies, so its numbers match a Study’s.',
           ),
-          note('The Screener needs Python (set up once in the Python tab) and a connected Zerodha or Dhan account.'),
+          note('The Screener needs Python (set up once in the Python tab) and a connected Zerodha account.'),
+          p('The collapse icon above **My screens** tucks the saved-screens list away to a thin strip, for more room; click it again to bring the list back.'),
         ],
       },
       {
@@ -710,13 +718,17 @@ export const HELP_TOPICS: HelpTopic[] = [
         blocks: [
           steps(
             'Start from a preset on the left (for example **Near 52-week high** or **Volume spike**), or press **New screen**.',
-            'Under **Filters**, add conditions of the form *feature, operator, value or feature* — for example `RSI 14 < 30` or `Close > EMA 200`. A stock matches when all filters hold on its latest bar. **Crosses above** and **crosses below** mean the cross happened on that bar. With no filters, every stock in the universe is listed.',
-            'Under **Columns**, add the values to show for each match, such as `return_63` or `ema_50`. The features your filters read are shown as well.',
+            'Under **Filters**, press **+** and pick a filter from the list — grouped into Price (price, **Price change**, **Change %**, **Gap %**, **Gap up %**, **Gap down %**, 52-week high and low), Volume (volume, **Relative volume**, average volume, **Average traded value**), Moving averages, Oscillators, Performance and Volatility — or type to search it. It is added as a chip such as `Chg > 2%` or `Price ≥ EMA, 50`; the chip’s own **×** removes it.',
+            'Click a chip to open its editor. Under the title, choose the length (14, 50, 200…) or period (1 day, 3 months…) and the interval: **1 day**, **1 week** or **1 month** (weekly and monthly bars are built from the daily ones; a week ends on Friday). Then pick the condition — **Above**, **Above or equal**, **Below**, **Below or equal**, **Crosses above**, **Crosses below**, **Between** or **Outside** — and a value, a range, or another indicator or price (with its own length and interval). A stock matches when every filter holds on its latest bar; **Crosses above** and **crosses below** mean the cross happened on that bar — or, for a weekly or monthly filter, this week or month compared with the last. With no filters, every stock in the universe is listed.',
+            'Under **Columns**, press **+** and pick the values to show for each match, such as `return_63` or `ema_50`, from the list — it stays open so you can add several. The features your filters read are shown as well.',
             'Choose **Order by** and a direction.',
-            'Under **Universe**, choose a broker’s instrument list (NSE, BSE or both, and which listings count as stocks), one of your watchlists, or a list of symbols you type.',
-            'Check **Before it runs**, then press **Run**.',
+            'The **Broker instruments / Watchlist / Symbol list** pill, and, for broker instruments, the **NSE**/**BSE** toggle, set the universe quickly. Open **More options** for the rest: renaming the screen, which broker, a symbol cap, including BE/SME listings, a symbol list you type by hand, and **Before it runs**.',
+            'Open **More options**, check **Before it runs**, then press **Run**.',
           ),
-          p('Percentages are typed as percentages: enter `-5` for −5%. See **Indicator reference** for every feature you can use.'),
+          p('Percentages are typed as percentages: enter `-5` for −5%. **Gap %** is the open against the previous close; **Gap up %** and **Gap down %** are its size in that direction (0 otherwise), so `Gap down % ≥ 2%` finds stocks that opened at least 2% lower. See **Indicator reference** for every feature you can use. Weekly and monthly filters are for the Screener only: a Study reads daily bars.'),
+          p(
+            'The toolbar’s screen name is a dropdown to switch between your saved screens without the side list. The universe pill and **More options**’s own universe fields write the same settings — changing one changes the other too, there is no separate state to keep in sync. The refresh icon reruns the current screen, same as **Run**.',
+          ),
         ],
       },
       {
@@ -724,6 +736,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         blocks: [
           list(
             'The table shows the matches, as of the latest trading day in the data. Click a column heading to sort; click a row to open that stock’s chart.',
+            '**Charts** (beside **Table**, above the results) shows the matches as daily candlestick charts instead, in the table’s current order: pick **1 × 1**, **1 × 2**, **2 × 1** or **2 × 2**, page through with the arrows, and press a stock’s name above the charts to open it in a chart tab. Above the charts, **1M**, **3M**, **6M**, **1Y**, **5Y** and **All** choose how much history each chart shows (a chart’s own toolbar still changes its interval). While the charts are shown, the **Filters** and **Columns** sections fold to one line each to give them room; click either heading to open it again.',
             '**Add to a watchlist** puts every match on a new or existing watchlist. **CSV** saves the table in its current order.',
             'Symbols with too little history for a filter, or that have not traded for a week (suspended or delisted), are left out and counted in a note above the table.',
           ),
@@ -734,7 +747,8 @@ export const HELP_TOPICS: HelpTopic[] = [
         blocks: [
           list(
             '**Save** keeps the screen under **My screens**. A saved screen keeps its last result, which reappears when you open it.',
-            '**Before it runs** estimates how many broker requests the run needs and how long they take. The first screen of a trading day over a whole exchange fetches every stock once at the broker’s rate limit — about 12 minutes for NSE through Zerodha. The data is kept, so later runs that day, and Studies, take seconds. Use **Try it on the first 100 symbols first** for a quick trial.',
+            'With **Market data** downloaded (Data providers → **Market data**), a screen reads every NSE stock’s history from this computer in one go and finishes in a couple of seconds. Without it, the very first screen over a whole exchange fetches every stock’s full history at the broker’s rate limit — about 12 minutes for NSE through Zerodha — and later runs top up each stock with one quick batched quote check.',
+            '**Before it runs** estimates how many broker requests, and quick quote checks, the run needs and how long they take. Use **Try it on the first 100 symbols first** for a quick trial.',
           ),
         ],
       },
@@ -774,7 +788,7 @@ export const HELP_TOPICS: HelpTopic[] = [
               ['**Schedules**', 'Runs scripts automatically at set times. See **Scheduled scripts**.'],
             ],
           ),
-          p('Example scripts are provided to start from: a greeting, three screens (above the 200-day average, RSI oversold, 52-week highs) and a moving-average crossover backtest.'),
+          p('Example scripts are provided to start from: a greeting, four screens (above the 200-day average, RSI oversold, 52-week highs, and six-month momentum read with `pt.panel`) and a moving-average crossover backtest.'),
         ],
       },
       {
@@ -788,7 +802,8 @@ export const HELP_TOPICS: HelpTopic[] = [
             ['Function', 'Purpose'],
             [
               ['`pt.bars(symbol, interval, start, end, limit)`', 'Price history for one symbol, as a pandas DataFrame.'],
-              ['`pt.bars_many(symbols, …)`', 'History for many symbols in parallel: a dictionary of DataFrames.'],
+              ['`pt.bars_many(symbols, …)`', 'History for many symbols: a dictionary of DataFrames. Daily bars the market data holds come in one read; the rest are fetched in parallel.'],
+              ['`pt.panel(symbols, start, end, bars)`', 'Stored daily bars for many symbols in one read from the market data on this computer. `.frame(symbol)` is one symbol’s DataFrame, `.wide("close")` a dates × symbols table, and `.missing` the symbols it doesn’t hold yet.'],
               ['`pt.universe(name)` / `pt.watchlist(name)`', 'The symbols of a watchlist.'],
               ['`pt.watchlists()` / `pt.instruments(provider, …)`', 'Your watchlists, or a broker’s instrument list.'],
               ['`pt.resample(df, rule)`', 'Builds coarser bars, starting each bucket at the session open.'],
@@ -804,9 +819,9 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Things to know',
         blocks: [
           list(
-            '**Data sources.** Scripts can read Zerodha, Dhan and your imported CSV data, only for reading. Crypto data is not available to scripts.',
-            '**Timeframes.** Zerodha serves 1, 3, 5, 10, 15, 30 and 60 minutes and daily; Dhan serves 1, 5, 15, 25 and 60 minutes and daily. Use `pt.resample` for others.',
-            '**Speed.** The first request for a symbol’s history is limited by your broker (Zerodha allows about three a second). The application keeps what it fetched, so later runs are fast.',
+            '**Data sources.** Scripts can read Zerodha and your imported CSV data, only for reading. Crypto data is not available to scripts.',
+            '**Timeframes.** Zerodha serves 1, 3, 5, 10, 15, 30 and 60 minutes and daily. Use `pt.resample` for others.',
+            '**Speed.** With **Market data** downloaded, `pt.panel` and `pt.bars_many` read daily bars for every NSE stock from this computer in one request. Anything else is fetched from your broker at its pace (Zerodha allows about three a second) and kept, so later runs are fast.',
             '**Your credentials stay in the application.** A script never receives a broker key or token; it asks the application for data over a private local connection.',
           ),
           note('Python is not a sandbox. A script runs with your own permissions, exactly as if you ran it from a terminal. Run only code you trust. Nothing in the Python tab places orders.'),
@@ -886,7 +901,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           p(
             'A Study examines every occasion in history when a set of conditions first held for a stock — for example, *its 12-month return crossed +100%* — and measures what the stocks looked like before, on and after those events. It is research into historical association, not a screen of today’s market and not a trading backtest.',
           ),
-          p('Open **Studies** from the flask icon on the right rail. Studies need Python and a connected Zerodha or Dhan account.'),
+          p('Open **Studies** from the flask icon on the right rail. Studies need Python and a connected Zerodha account.'),
         ],
       },
       {
@@ -922,7 +937,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             'The readiness panel shows what is available: prices and volume from your broker, index data for relative strength, and how many stocks will be loaded, how many are already stored and roughly how long the rest will take.',
             '**Market cap, sectors and historical index membership are not available** from these data sources. A Study that needs market cap cannot run; the builder offers a floor on average traded value instead, applied only if you choose it.',
             'Results carry a survivorship-bias warning: today’s instrument list does not include companies delisted in the past.',
-            'The first run over a whole exchange fetches every stock’s history at the broker’s rate limit — about 12 minutes for NSE through Zerodha, several times longer with BSE. It is kept, so reruns are quick.',
+            'With **Market data** downloaded (Data providers → **Market data**), a Study reads NSE stocks’ history from this computer in batches instead of asking the broker. Anything it doesn’t hold (BSE listings, history older than five years) is fetched at the broker’s rate limit — about 12 minutes for all of NSE through Zerodha, several times longer with BSE — and kept, so reruns take seconds.',
           ),
         ],
       },
@@ -1079,7 +1094,6 @@ export const HELP_TOPICS: HelpTopic[] = [
               ['**Coinbase**', 'Spot crypto; 1 minute to monthly; live stream. No account needed.'],
               ['**Hyperliquid**', 'Perpetual and spot crypto; 1 minute to monthly; live stream. No account needed.'],
               ['**Zerodha** (your account)', 'NSE, BSE, NFO and MCX equities, indices, futures and commodities; history and a live tick feed. Needs a paid Kite Connect subscription.'],
-              ['**Dhan** (your account)', 'NSE, BSE and MCX equities, indices, futures and commodities; history and a live tick feed. Needs Dhan’s Data API subscription.'],
               ['**Imported data**', 'Your own CSV files.'],
             ],
           ),
@@ -1096,11 +1110,53 @@ export const HELP_TOPICS: HelpTopic[] = [
             'Press **Make default** to decide which source a ticker typed without a source uses.',
             'See the state of its **Instrument list** (used for symbol search), which is refreshed weekly.',
           ),
+          p('Below the sources, **Market data** downloads every NSE stock’s daily history to this computer. See **Market data on this computer**.'),
           note('Market data from your broker account is licensed for your own use. Do not rebroadcast it, for example on a public stream or website.'),
         ],
       },
     ],
-    related: ['zerodha', 'dhan', 'import-csv'],
+    related: ['market-data', 'zerodha', 'import-csv'],
+  },
+  {
+    id: 'market-data',
+    title: 'Market data on this computer',
+    group: 'Data and settings',
+    summary: 'Five years of every NSE stock’s daily prices, downloaded once and kept current, so research runs in seconds.',
+    sections: [
+      {
+        heading: 'What it is',
+        blocks: [
+          p(
+            'The Screener, Studies and Python scripts look at hundreds or thousands of stocks at once. Asking your broker for each one is slow — Zerodha allows about three history requests a second. **Market data** keeps five years of daily prices for every NSE stock (regular EQ series) and every NSE index on this computer instead, so a whole-market screen reads them in a second or two.',
+          ),
+          p('Daily, weekly and monthly charts of those stocks draw from it too, fetching only the latest bar. Intraday charts (1 minute, 5 minutes…) still come from your broker as before.'),
+        ],
+      },
+      {
+        heading: 'Downloading it',
+        blocks: [
+          steps(
+            'Connect Zerodha under **Data providers** — the history comes from your own account.',
+            'In the same dialog, under **Market data on this computer**, press **Download**. It takes about 10–15 minutes at the broker’s pace.',
+            'Keep working: charts always go ahead of the download at the broker. **Stop** pauses it; **Resume download** carries on from where it stopped.',
+          ),
+          p('The Home tab’s **Market data** card shows **Done** once the download has finished.'),
+        ],
+      },
+      {
+        heading: 'Keeping it current',
+        blocks: [
+          list(
+            'With **Update after each trading day** on, the application brings the data up to date by itself once each session has settled (after 4 PM IST), whenever it is open — or a couple of minutes after you open it, if it missed a day. It never runs during startup. **Update now** does it straight away.',
+            'Each update adds the latest prices, downloads the history of any newly listed stock (an IPO), and, after a split or bonus, reads that stock’s whole history again so old and adjusted prices are never mixed.',
+            'A holiday is noticed from the market itself and costs nothing.',
+            'A Zerodha login lasts until the next morning. If it has expired, the update says so and waits; log in again under **Data providers**.',
+          ),
+          note('Prices are your broker’s, as it supplies them. The store holds about 150–200 MB.'),
+        ],
+      },
+    ],
+    related: ['data-providers', 'screener', 'studies', 'python'],
   },
   {
     id: 'zerodha',
@@ -1149,38 +1205,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         ],
       },
     ],
-    related: ['data-providers', 'dhan'],
-  },
-  {
-    id: 'dhan',
-    title: 'Connecting Dhan',
-    group: 'Data and settings',
-    summary: 'Set up Dhan’s Data API for history, a live feed and the research tools.',
-    sections: [
-      {
-        heading: 'Setting up',
-        blocks: [
-          steps(
-            'Subscribe to Dhan’s Data API. Dhan’s trading APIs are free, but market data is a separate paid plan.',
-            'On web.dhan.co, open your profile, choose **Access DhanHQ APIs**, and generate an access token. Note your client ID.',
-            'Open **Data providers → Dhan**, enter both, and press **Save**. Dhan switches on and downloads its instrument list (about 26 MB, refreshed weekly).',
-            'Press **Test connection** to confirm that everything works, and optionally **Make default**.',
-          ),
-        ],
-      },
-      {
-        heading: 'Things to know',
-        blocks: [
-          list(
-            'Access tokens last 24 hours. The dialog shows how long yours has left. **Renew** extends a web-generated token by another 24 hours; otherwise paste a new one.',
-            'Dhan provides up to five years of intraday history in 1, 5, 15, 25 and 60 minute bars, and daily bars.',
-            'One live feed connection is shared by every chart, tab and window, and is open only while a chart needs it.',
-            'Options are not listed in search; futures are.',
-          ),
-        ],
-      },
-    ],
-    related: ['data-providers', 'zerodha'],
+    related: ['data-providers'],
   },
   {
     id: 'import-csv',
@@ -1192,7 +1217,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Importing a file',
         blocks: [
           steps(
-            'Press the **Import data** (database) icon in the tab bar and choose **Choose CSV file…**.',
+            'Press **Import data** (database icon) in the right rail and choose **Choose CSV file…**.',
             'Check the detected columns and **Bar size**, and correct them if needed.',
             'Give the data a **Ticker** and, optionally, a description, then import it.',
             'Open it by searching for its ticker, or from the list of **Imported datasets** in the same dialog.',
@@ -1290,7 +1315,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'About',
         blocks: [
           p(
-            'The **About** dialog (the information icon in the tab bar) shows the version, the location of your data, the licence (GNU AGPL-3.0, free software with no warranty), the source code, credits and the keyboard shortcuts.',
+            'The **About** dialog (the information icon in the right rail) shows the version, the location of your data, the licence (GNU AGPL-3.0, free software with no warranty), the source code, credits and the keyboard shortcuts.',
           ),
         ],
       },
@@ -1335,7 +1360,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Conditions',
         blocks: [
           p(
-            'A condition compares a feature with a number or with another feature, using `>`, `>=`, `<`, `<=`, `crosses_above` or `crosses_below`. For example `close crosses_above prior_high_252` means the close rose above the previous 52-week high.',
+            'A condition compares a feature with a number or with another feature, using `>`, `>=`, `<`, `<=`, `crosses_above` or `crosses_below`, or with a range using `between` (both ends included) or `outside`. For example `close crosses_above prior_high_252` means the close rose above the previous 52-week high, and `rsi_14 between 40 and 60` that RSI is in the middle of its range. In the Screener a feature can also be on weekly or monthly bars (`rsi_14@W`, `ema_50@M`).',
           ),
         ],
       },
@@ -1390,9 +1415,9 @@ export const HELP_TOPICS: HelpTopic[] = [
         blocks: [
           list(
             'Check that the symbol’s data source is switched on in **Data providers**.',
-            'For Zerodha, log in again: tokens expire every morning. For Dhan, renew or replace the token after 24 hours.',
+            'For Zerodha, log in again: tokens expire every morning.',
             'Messages about a plan or subscription mean your broker account does not include market data.',
-            'Symbols beginning `yahoo:` can no longer be loaded; see **Symbols and searching**.',
+            'Symbols beginning `yahoo:` or `dhan:` can no longer be loaded; see **Symbols and searching**.',
           ),
         ],
       },
@@ -1401,8 +1426,8 @@ export const HELP_TOPICS: HelpTopic[] = [
         blocks: [
           list(
             'Open the Python tab and follow the banner: install Python 3.10 or newer, then press **Set up Python**.',
-            'Make sure Zerodha or Dhan is connected and its token is current.',
-            'Read **Before it runs** (Screener) or the readiness panel (Studies), which names anything blocking the run.',
+            'Make sure Zerodha is connected and its token is current.',
+            'Read **Before it runs**, under **More options** for the Screener, or the readiness panel for Studies, which names anything blocking the run.',
             'If a result cannot be read after an update, restart the application so that it uses the current engine.',
           ),
         ],

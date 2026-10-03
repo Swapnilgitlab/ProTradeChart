@@ -3,7 +3,6 @@ import { BinanceProvider } from '@luxalgo/vela/providers/binance';
 import { CoinbaseProvider } from '@luxalgo/vela/providers/coinbase';
 import { HyperliquidProvider } from '@luxalgo/vela/providers/hyperliquid';
 import { CsvProvider } from './csv';
-import { DhanProvider } from './dhan';
 import { ZerodhaProvider } from './zerodha';
 import { joinSymbol, normalizeSymbol, type ProviderId } from '../../lib/symbols';
 import { publishLivePrice } from '../livePrices';
@@ -23,7 +22,6 @@ const instances: Record<ProviderId, DataProvider> = {
   coinbase: withLivePriceTap('coinbase', withoutRemoteIcons(new CoinbaseProvider())),
   hyperliquid: withLivePriceTap('hyperliquid', withoutRemoteIcons(new HyperliquidProvider())),
   csv: new CsvProvider(),
-  dhan: withLivePriceTap('dhan', new DhanProvider()),
   zerodha: withLivePriceTap('zerodha', new ZerodhaProvider()),
 };
 
@@ -34,7 +32,6 @@ export const providerFactories: Record<ProviderId, () => DataProvider> = {
   coinbase: () => instances.coinbase,
   hyperliquid: () => instances.hyperliquid,
   csv: () => instances.csv,
-  dhan: () => instances.dhan,
   zerodha: () => instances.zerodha,
 };
 

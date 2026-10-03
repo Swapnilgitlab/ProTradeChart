@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, CirclePlay, FolderOpen, RefreshCw, Save, Trash2, Eraser } from 'lucide-react';
+import { CandlestickChart, CirclePlay, Plus, RefreshCw, Save, Trash2, Eraser } from 'lucide-react';
 import type { VelaWorkspace } from '@luxalgo/vela/workspace';
 import { useToast } from '../../components/Toasts';
-import { useDismiss } from '../../components/useDismiss';
 import { confirmDelete, confirmDiscard } from '../../lib/dialogs';
 import { getPreference, setPreference, type PineScriptRow } from '../../lib/ipc';
 import { BUNDLED_SCRIPTS, type BundledScript } from '../../pine/bundled';
 import type { DockRequest } from '../../pine/dockBus';
 import { makeIndicatorId, scriptIdOf } from '../../pine/engine';
-import { TEMPLATES, declaredTitle, detectKind, type ScriptTemplate } from '../../pine/source';
+import { BLANKS, TEMPLATES, declaredTitle, detectKind, type ScriptTemplate } from '../../pine/source';
 import { CodeEditor } from './CodeEditor';
 import { useActiveChart, useIndicatorTick } from './useActiveChart';
 import { usePineScripts } from './usePineScripts';
@@ -36,11 +35,16 @@ interface ConsoleLine {
 type EditRequest = Extract<DockRequest, { type: 'edit-indicator' }>;
 
 interface Props {
+  /** The chart's workspace scripts are added to: the last chart tab shown. Null until it is built. */
   workspace: VelaWorkspace | null;
+  /** That chart's ticker, as the toolbar names it. */
+  chartLabel: string | null;
   /** A legend "Edit script" click; a new object each time so the same row can be reopened. */
   editRequest: EditRequest | null;
-  /** A strategy was just added, so the tester is what to look at next. */
+  /** A strategy was just added: open the Strategy Tester under its chart. */
   onStrategyAdded: () => void;
+  /** Shows the chart scripts are added to. */
+  onShowChart: () => void;
 }
 
 const fromTemplate = (t: ScriptTemplate): Buffer => ({
@@ -52,7 +56,10 @@ const fromTemplate = (t: ScriptTemplate): Buffer => ({
 
 const time = (d: Date) => d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-export function PineEditor({ workspace, editRequest, onStrategyAdded }: Props) {
+/** The Script Editor tab: your scripts, the bundled ones and examples on the left, the editor and its
+ *  console beside them. **Add to chart** puts the script on the chart tab you last looked at (named in
+ *  the toolbar); a strategy's backtest shows in the Strategy Tester under that chart. */
+export function PineEditor({ workspace, chartLabel, editRequest, onStrategyAdded, onShowChart }: Props) {
   const toast = useToast();
   const { scripts, save, remove } = usePineScripts();
   const chart = useActiveChart(workspace);
@@ -61,13 +68,12 @@ export function PineEditor({ workspace, editRequest, onStrategyAdded }: Props) {
   const [buffer, setBuffer] = useState<Buffer>(() => fromTemplate(TEMPLATES[0]));
   const [editorKey, setEditorKey] = useState(0);
   const [lines, setLines] = useState<ConsoleLine[]>([]);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const consoleRef = useRef<HTMLDivElement>(null);
   const lineCounter = useRef(1);
   const touched = useRef(false);
+  /** Typed into since it was opened or saved: only then is there work to lose. */
+  const edited = useRef(false);
   const seenWarnings = useRef(new Set<string>());
-  useDismiss(menuRef, menuOpen, () => setMenuOpen(false));
 
   const log = useCallback((level: Level, text: string) => {
     setLines((prev) => [...prev.slice(-(MAX_CONSOLE_LINES - 1)), { n: lineCounter.current++, level, text, at: new Date() }]);
@@ -96,6 +102,7 @@ export function PineEditor({ workspace, editRequest, onStrategyAdded }: Props) {
         if (typeof d.id === 'string' && typeof d.name === 'string' && typeof d.source === 'string') {
           setBuffer({ id: d.id, name: d.name, source: d.source, linkedIndicatorId: null });
           setEditorKey((k) => k + 1);
+          edited.current = true;
         }
       })
       .catch(() => {}); // a missing or corrupt draft just means starting from the template
@@ -142,19 +149,19 @@ export function PineEditor({ workspace, editRequest, onStrategyAdded }: Props) {
 
   const load = useCallback((next: Buffer) => {
     touched.current = true;
+    edited.current = false;
     setBuffer(next);
     setEditorKey((k) => k + 1);
   }, []);
 
   /** Asks before unsaved work is replaced; true means go ahead. */
   const canReplace = useCallback(async () => {
-    if (!dirty || buffer.source.trim() === '') return true;
+    if (!edited.current || !dirty || buffer.source.trim() === '') return true;
     return confirmDiscard(`"${buffer.name || 'Untitled script'}" has unsaved changes. Discard them?`);
   }, [dirty, buffer.name, buffer.source]);
 
   const openTemplate = useCallback(
     async (t: ScriptTemplate) => {
-      setMenuOpen(false);
       if (await canReplace()) load(fromTemplate(t));
     },
     [canReplace, load],
@@ -162,7 +169,6 @@ export function PineEditor({ workspace, editRequest, onStrategyAdded }: Props) {
 
   const openBundled = useCallback(
     async (script: BundledScript) => {
-      setMenuOpen(false);
       // A copy: saving it adds to the user's library and never touches the shipped file.
       if (await canReplace()) load({ id: crypto.randomUUID(), name: script.name, source: script.source, linkedIndicatorId: null });
     },
@@ -171,7 +177,6 @@ export function PineEditor({ workspace, editRequest, onStrategyAdded }: Props) {
 
   const openSaved = useCallback(
     async (row: PineScriptRow) => {
-      setMenuOpen(false);
       if (row.id === buffer.id && !dirty) return;
       if (await canReplace()) load({ id: row.id, name: row.name, source: row.source, linkedIndicatorId: null });
     },
@@ -209,6 +214,7 @@ export function PineEditor({ workspace, editRequest, onStrategyAdded }: Props) {
     const name = buffer.name.trim() || declaredTitle(buffer.source) || 'Untitled script';
     if (!(await save({ id: buffer.id, name, kind, source: buffer.source }))) return false;
     setBuffer((b) => (b.id === buffer.id ? { ...b, name } : b));
+    edited.current = false;
     log('info', `Saved "${name}".`);
     return true;
   }, [kind, buffer.id, buffer.name, buffer.source, save, log]);
@@ -252,8 +258,11 @@ export function PineEditor({ workspace, editRequest, onStrategyAdded }: Props) {
     }
     setBuffer((b) => ({ ...b, linkedIndicatorId: id }));
     log('info', `Added "${result.run?.title ?? buffer.name}" to the chart.`);
-    if (result.run?.kind === 'strategy') onStrategyAdded();
-  }, [workspace, chart, kind, linked, buffer.id, buffer.name, buffer.source, log, onStrategyAdded]);
+    if (result.run?.kind === 'strategy') {
+      log('info', `Its backtest is in the Strategy Tester under the ${chartLabel} chart.`);
+      onStrategyAdded();
+    }
+  }, [workspace, chart, kind, linked, buffer.id, buffer.name, buffer.source, log, onStrategyAdded, chartLabel]);
 
   const deleteSaved = useCallback(
     async (row: PineScriptRow) => {
@@ -266,6 +275,48 @@ export function PineEditor({ workspace, editRequest, onStrategyAdded }: Props) {
   const runLabel = linked ? 'Update on chart' : 'Add to chart';
 
   return (
+    <div className="pine-page">
+      <aside className="pine-library" aria-label="Scripts">
+        <div className="pine-library-new">
+          {BLANKS.map((t) => (
+            <button key={t.id} type="button" className="btn pine-btn" onClick={() => void openTemplate(t)} title={`Start a ${t.kind} from scratch`}>
+              <Plus size={14} />
+              {t.kind === 'strategy' ? 'Strategy' : 'Indicator'}
+            </button>
+          ))}
+        </div>
+        <div className="pine-library-heading">My scripts</div>
+        {scripts.length === 0 && <div className="pine-library-empty small muted">Nothing saved yet. Write a script and press Ctrl+S.</div>}
+        {scripts.map((s) => (
+          <div key={s.id} className={`pine-library-row${s.id === buffer.id ? ' active' : ''}`}>
+            <button type="button" className="pine-library-item" onClick={() => void openSaved(s)} title={s.kind === 'strategy' ? 'Strategy' : 'Indicator'}>
+              <span className={`pine-kind-dot ${s.kind}`} aria-hidden="true" />
+              <span className="grow">{s.name}</span>
+            </button>
+            <button type="button" className="icon-button" aria-label={`Delete ${s.name}`} title="Delete" onClick={() => void deleteSaved(s)}>
+              <Trash2 size={13} />
+            </button>
+          </div>
+        ))}
+        {BUNDLED_SCRIPTS.length > 0 && (
+          <>
+            <div className="pine-library-heading">Bundled with the app</div>
+            {BUNDLED_SCRIPTS.map((s) => (
+              <button key={s.file} type="button" className="pine-library-item" onClick={() => void openBundled(s)} title={s.category}>
+                <span className={`pine-kind-dot ${s.kind}`} aria-hidden="true" />
+                <span className="grow">{s.name}</span>
+              </button>
+            ))}
+          </>
+        )}
+        <div className="pine-library-heading">New from an example</div>
+        {TEMPLATES.map((t) => (
+          <button key={t.id} type="button" className="pine-library-item" onClick={() => void openTemplate(t)}>
+            <span className={`pine-kind-dot ${t.kind}`} aria-hidden="true" />
+            <span className="grow">{t.label}</span>
+          </button>
+        ))}
+      </aside>
     <div className="pine-editor">
       <div className="pine-toolbar">
         <input
@@ -275,6 +326,7 @@ export function PineEditor({ workspace, editRequest, onStrategyAdded }: Props) {
           aria-label="Script name"
           onChange={(e) => {
             touched.current = true;
+            edited.current = true;
             setBuffer((b) => ({ ...b, name: e.currentTarget.value }));
           }}
         />
@@ -283,54 +335,16 @@ export function PineEditor({ workspace, editRequest, onStrategyAdded }: Props) {
 
         <div className="pine-toolbar-spacer" />
 
-        <div className="menu-anchor" ref={menuRef}>
-          <button type="button" className="menu-trigger" onClick={() => setMenuOpen((v) => !v)} aria-haspopup="menu" aria-expanded={menuOpen}>
-            <FolderOpen size={14} />
-            <span>Open</span>
-            <ChevronDown size={14} />
-          </button>
-          {menuOpen && (
-            <div className="menu up left pine-menu" role="menu">
-              <div className="menu-heading">My scripts</div>
-              {scripts.length === 0 && <div className="menu-empty small">Nothing saved yet. Write a script and press Ctrl+S.</div>}
-              {scripts.map((s) => (
-                <div key={s.id} className={`menu-row${s.id === buffer.id ? ' active' : ''}`}>
-                  <button type="button" role="menuitem" className="menu-item" onClick={() => void openSaved(s)}>
-                    <span className={`pine-kind-dot ${s.kind}`} aria-hidden="true" />
-                    <span className="grow">{s.name}</span>
-                    <span className="muted small">{s.kind === 'strategy' ? 'Strategy' : 'Indicator'}</span>
-                  </button>
-                  <button type="button" className="icon-button" aria-label={`Delete ${s.name}`} onClick={() => void deleteSaved(s)}>
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              ))}
-              <div className="menu-divider" />
-              {BUNDLED_SCRIPTS.length > 0 && (
-                <>
-                  <div className="menu-heading">Bundled with the app</div>
-                  {BUNDLED_SCRIPTS.map((s) => (
-                    <button key={s.file} type="button" role="menuitem" className="menu-item" onClick={() => void openBundled(s)}>
-                      <span className={`pine-kind-dot ${s.kind}`} aria-hidden="true" />
-                      <span className="grow">{s.name}</span>
-                      <span className="muted small">{s.category}</span>
-                    </button>
-                  ))}
-                  <div className="menu-divider" />
-                </>
-              )}
-              <div className="menu-heading">New from an example</div>
-              {TEMPLATES.map((t) => (
-                <button key={t.id} type="button" role="menuitem" className="menu-item" onClick={() => void openTemplate(t)}>
-                  <span className={`pine-kind-dot ${t.kind}`} aria-hidden="true" />
-                  <span className="grow">{t.label}</span>
-                  <span className="muted small">{t.kind === 'strategy' ? 'Strategy' : 'Indicator'}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
+        <button
+          type="button"
+          className="btn pine-btn pine-target"
+          onClick={onShowChart}
+          disabled={!chartLabel}
+          title="The chart Add to chart puts this script on: the chart tab you last looked at. Click to show it."
+        >
+          <CandlestickChart size={14} />
+          {chartLabel ?? 'No chart'}
+        </button>
         <button type="button" className="btn pine-btn" onClick={() => void saveScript()} disabled={!dirty} title="Save script (Ctrl+S)">
           <Save size={14} />
           Save
@@ -346,6 +360,7 @@ export function PineEditor({ workspace, editRequest, onStrategyAdded }: Props) {
         value={buffer.source}
         onChange={(source) => {
           touched.current = true;
+          edited.current = true;
           setBuffer((b) => ({ ...b, source }));
         }}
         onSave={() => void saveScript()}
@@ -369,6 +384,7 @@ export function PineEditor({ workspace, editRequest, onStrategyAdded }: Props) {
           ))}
         </div>
       </div>
+    </div>
     </div>
   );
 }

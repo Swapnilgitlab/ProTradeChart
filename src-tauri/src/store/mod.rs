@@ -4,9 +4,11 @@
 pub mod alerts;
 pub mod bars_cache;
 pub mod datasets;
+pub mod day_topup;
 pub mod index_catalog;
 pub mod instrument_list;
 pub mod layouts;
+pub mod market_symbols;
 pub mod notebooks;
 pub mod preferences;
 pub mod provider_settings;

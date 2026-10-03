@@ -10,10 +10,10 @@ use tokio::time::sleep;
 
 use super::instruments::{Instrument, EXCHANGES};
 use super::protocol::{
-    checksum, classify_error, history_path, history_query, is_failure_body, parse_candles, parse_quotes, parse_session,
-    plan_windows, Interval, ZerodhaError, ZerodhaErrorKind, BASE_URL,
+    checksum, classify_error, history_path, history_query, is_failure_body, parse_candles, parse_day_snapshots,
+    parse_quotes, parse_session, plan_windows, Interval, ZerodhaError, ZerodhaErrorKind, BASE_URL,
 };
-use crate::models::{Bar, Quote};
+use crate::models::{Bar, DaySnapshot, Quote};
 use crate::throttle::Throttle;
 
 #[derive(Debug, Clone)]
@@ -43,8 +43,9 @@ impl Default for Pacing {
 }
 
 const MAX_RETRIES: u32 = 3;
-/// Instruments per `/quote/ohlc` request. Kite allows 1000; a shorter URL is safer.
-const QUOTE_BATCH: usize = 200;
+/// Instruments per `/quote/ohlc` or `/quote` request. Kite allows 1000; a shorter URL is safer.
+/// Also what `study_universe::estimate` prices a quote top-up's batching at.
+pub(crate) const QUOTE_BATCH: usize = 200;
 const VERSION_HEADER: (&str, &str) = ("X-Kite-Version", "3");
 
 pub struct ZerodhaClient {
@@ -141,6 +142,23 @@ impl ZerodhaClient {
             let query: Vec<(&str, String)> = batch.iter().map(|i| ("i", i.quote_key())).collect();
             let (status, body) = self.get(&self.quote, "/quote/ohlc", &query, creds).await?;
             out.extend(parse_quotes(status, &body, batch)?);
+        }
+        Ok(out)
+    }
+
+    /// A quote-based stand-in for today's (or the last session's) bar, batched — used only to
+    /// check a few symbols whose deep history is already cached (`store::day_topup`); every
+    /// other read still goes through `fetch_history`. Shares the quote throttle with `quotes`.
+    pub async fn day_snapshots(
+        &self,
+        creds: &Credentials,
+        instruments: &[Instrument],
+    ) -> Result<Vec<Option<DaySnapshot>>, ZerodhaError> {
+        let mut out = Vec::with_capacity(instruments.len());
+        for batch in instruments.chunks(QUOTE_BATCH) {
+            let query: Vec<(&str, String)> = batch.iter().map(|i| ("i", i.quote_key())).collect();
+            let (status, body) = self.get(&self.quote, "/quote", &query, creds).await?;
+            out.extend(parse_day_snapshots(status, &body, batch)?);
         }
         Ok(out)
     }

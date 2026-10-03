@@ -1,6 +1,6 @@
 //! The Indices watchlist: a curated set of Indian market indices, grouped as people follow them —
-//! the broad market, sectors, and themes — with each broker's own ticker for it (Zerodha writes
-//! `NSE:NIFTY_BANK`, Dhan `IDX:BANKNIFTY`). Strategy, factor and bond indices are left out.
+//! the broad market, sectors, and themes — with Zerodha's ticker for each (`NSE:NIFTY_BANK`).
+//! Strategy, factor and bond indices are left out.
 //!
 //! Only index *levels* are listed: no source the app uses publishes which stocks make up an index,
 //! so there are no sector stock lists here. An index the broker's instrument list doesn't have is
@@ -15,69 +15,69 @@ use crate::store::watchlists;
 
 pub const SECTIONS: [&str; 3] = ["Broad market", "Sectors", "Themes"];
 
-/// `(section, Zerodha ticker, Dhan ticker)`; `None` where that broker doesn't list the index.
-const CATALOG: &[(usize, Option<&str>, Option<&str>)] = &[
+/// `(section, Zerodha ticker)`.
+const CATALOG: &[(usize, &str)] = &[
     // Broad market
-    (0, Some("NSE:NIFTY_50"), Some("IDX:NIFTY")),
-    (0, Some("BSE:SENSEX"), Some("IDX:SENSEX")),
-    (0, Some("NSE:NIFTY_NEXT_50"), Some("IDX:NIFTYNXT50")),
-    (0, Some("NSE:NIFTY_100"), Some("IDX:NIFTY_100")),
-    (0, Some("NSE:NIFTY_200"), Some("IDX:NIFTY_200")),
-    (0, Some("NSE:NIFTY_500"), Some("IDX:NIFTY_500")),
-    (0, Some("NSE:NIFTY_TOTAL_MKT"), Some("IDX:NIFTY_TOTAL_MKT")),
-    (0, Some("NSE:NIFTY_LARGEMID250"), Some("IDX:NIFTY_LARGEMID250")),
-    (0, Some("NSE:NIFTY_MID_SELECT"), Some("IDX:MIDCPNIFTY")),
-    (0, Some("NSE:NIFTY_MIDCAP_50"), Some("IDX:NIFTYMCAP50")),
-    (0, Some("NSE:NIFTY_MIDCAP_100"), Some("IDX:NIFTY_MID100_FREE")),
-    (0, Some("NSE:NIFTY_MIDCAP_150"), Some("IDX:NIFTY_MIDCAP_150")),
-    (0, Some("NSE:NIFTY_MIDSML_400"), Some("IDX:NIFTY_MIDSMALLCAP_400")),
-    (0, Some("NSE:NIFTY_SMLCAP_50"), Some("IDX:NIFTY_SMALLCAP_50")),
-    (0, Some("NSE:NIFTY_SMLCAP_100"), Some("IDX:NIFTY_SMALLCAP_100")),
-    (0, Some("NSE:NIFTY_SMLCAP_250"), Some("IDX:NIFTY_SMALLCAP_250")),
-    (0, Some("NSE:NIFTY_MICROCAP250"), Some("IDX:NIFTY_MICROCAP250")),
-    (0, Some("NSE:INDIA_VIX"), Some("IDX:INDIA_VIX")),
+    (0, "NSE:NIFTY_50"),
+    (0, "BSE:SENSEX"),
+    (0, "NSE:NIFTY_NEXT_50"),
+    (0, "NSE:NIFTY_100"),
+    (0, "NSE:NIFTY_200"),
+    (0, "NSE:NIFTY_500"),
+    (0, "NSE:NIFTY_TOTAL_MKT"),
+    (0, "NSE:NIFTY_LARGEMID250"),
+    (0, "NSE:NIFTY_MID_SELECT"),
+    (0, "NSE:NIFTY_MIDCAP_50"),
+    (0, "NSE:NIFTY_MIDCAP_100"),
+    (0, "NSE:NIFTY_MIDCAP_150"),
+    (0, "NSE:NIFTY_MIDSML_400"),
+    (0, "NSE:NIFTY_SMLCAP_50"),
+    (0, "NSE:NIFTY_SMLCAP_100"),
+    (0, "NSE:NIFTY_SMLCAP_250"),
+    (0, "NSE:NIFTY_MICROCAP250"),
+    (0, "NSE:INDIA_VIX"),
     // Sectors
-    (1, Some("NSE:NIFTY_AUTO"), Some("IDX:NIFTY_AUTO")),
-    (1, Some("NSE:NIFTY_BANK"), Some("IDX:BANKNIFTY")),
-    (1, Some("NSE:NIFTY_PVT_BANK"), Some("IDX:NIFTY_PVT_BANK")),
-    (1, Some("NSE:NIFTY_PSU_BANK"), Some("IDX:NIFTY_PSU_BANK")),
-    (1, Some("BSE:BANKEX"), Some("IDX:BANKEX")),
-    (1, Some("NSE:NIFTY_FIN_SERVICE"), Some("IDX:FINNIFTY")),
-    (1, Some("NSE:NIFTY_FINSRV25_50"), Some("IDX:NIFTY_FINSRV25_50")),
-    (1, Some("NSE:NIFTY_FINSEREXBNK"), Some("IDX:NIFTY_FINSEREXBNK")),
-    (1, Some("NSE:NIFTY_CHEMICALS"), None),
-    (1, Some("NSE:NIFTY_CONSR_DURBL"), Some("IDX:NIFTY_CONSR_DURBL")),
-    (1, Some("NSE:NIFTY_FMCG"), Some("IDX:NIFTY_FMCG")),
-    (1, Some("NSE:NIFTY_HEALTHCARE"), Some("IDX:NIFTY_HEALTHCARE")),
-    (1, Some("NSE:NIFTY_PHARMA"), Some("IDX:NIFTY_PHARMA")),
-    (1, Some("NSE:NIFTY_IT"), Some("IDX:NIFTYIT")),
-    (1, Some("NSE:NIFTY_MEDIA"), Some("IDX:NIFTY_MEDIA")),
-    (1, Some("NSE:NIFTY_METAL"), Some("IDX:NIFTY_METAL")),
-    (1, Some("NSE:NIFTY_OIL_AND_GAS"), Some("IDX:NIFTY_OIL_AND_GAS")),
-    (1, Some("NSE:NIFTY_REALTY"), Some("IDX:NIFTY_REALTY")),
-    (1, Some("NSE:NIFTY_MS_FIN_SERV"), Some("IDX:NIFTY_MS_FIN_SERV")),
-    (1, Some("NSE:NIFTY_MIDSML_HLTH"), Some("IDX:NIFTY_MIDSML_HLTH")),
-    (1, Some("NSE:NIFTY_MS_IT_TELCM"), Some("IDX:NIFTY_MS_IT_TELCM")),
+    (1, "NSE:NIFTY_AUTO"),
+    (1, "NSE:NIFTY_BANK"),
+    (1, "NSE:NIFTY_PVT_BANK"),
+    (1, "NSE:NIFTY_PSU_BANK"),
+    (1, "BSE:BANKEX"),
+    (1, "NSE:NIFTY_FIN_SERVICE"),
+    (1, "NSE:NIFTY_FINSRV25_50"),
+    (1, "NSE:NIFTY_FINSEREXBNK"),
+    (1, "NSE:NIFTY_CHEMICALS"),
+    (1, "NSE:NIFTY_CONSR_DURBL"),
+    (1, "NSE:NIFTY_FMCG"),
+    (1, "NSE:NIFTY_HEALTHCARE"),
+    (1, "NSE:NIFTY_PHARMA"),
+    (1, "NSE:NIFTY_IT"),
+    (1, "NSE:NIFTY_MEDIA"),
+    (1, "NSE:NIFTY_METAL"),
+    (1, "NSE:NIFTY_OIL_AND_GAS"),
+    (1, "NSE:NIFTY_REALTY"),
+    (1, "NSE:NIFTY_MS_FIN_SERV"),
+    (1, "NSE:NIFTY_MIDSML_HLTH"),
+    (1, "NSE:NIFTY_MS_IT_TELCM"),
     // Themes
-    (2, Some("NSE:NIFTY_CAPITAL_MKT"), Some("IDX:NIFTY_CAPITAL_MKT")),
-    (2, Some("NSE:NIFTY_COMMODITIES"), Some("IDX:NIFTY_COMMODITIES")),
-    (2, Some("NSE:NIFTY_CONSUMPTION"), Some("IDX:NIFTY_CONSUMPTION")),
-    (2, Some("NSE:NIFTY_CPSE"), Some("IDX:NIFTYCPSE")),
-    (2, Some("NSE:NIFTY_ENERGY"), Some("IDX:NIFTY_ENERGY")),
-    (2, Some("NSE:NIFTY_EV"), Some("IDX:NIFTY_EV")),
-    (2, Some("NSE:NIFTY_HOUSING"), Some("IDX:NIFTY_HOUSING")),
-    (2, Some("NSE:NIFTY_IND_DEFENCE"), Some("IDX:NIFTY_IND_DEFENCE")),
-    (2, Some("NSE:NIFTY_IND_DIGITAL"), Some("IDX:NIFTY_IND_DIGITAL")),
-    (2, Some("NSE:NIFTY_INDIA_MFG"), Some("IDX:NIFTY_INDIA_MFG")),
-    (2, Some("NSE:NIFTY_IND_TOURISM"), Some("IDX:NIFTY_IND_TOURISM")),
-    (2, Some("NSE:NIFTY_INFRA"), Some("IDX:NIFTYINFRA")),
-    (2, Some("NSE:NIFTY_MNC"), Some("IDX:NIFTY_MNC")),
-    (2, Some("NSE:NIFTY_MOBILITY"), Some("IDX:NIFTY_MOBILITY")),
-    (2, Some("NSE:NIFTY_PSE"), Some("IDX:NIFTYPSE")),
-    (2, Some("NSE:NIFTY_RAILWAYS_PSU"), None),
-    (2, Some("NSE:NIFTY_RURAL"), Some("IDX:NIFTY_RURAL")),
-    (2, Some("NSE:NIFTY_SERV_SECTOR"), Some("IDX:NIFTY_SERV_SECTOR")),
-    (2, Some("NSE:NIFTY_TRANS_LOGIS"), Some("IDX:NIFTY_TRANS_LOGIS")),
+    (2, "NSE:NIFTY_CAPITAL_MKT"),
+    (2, "NSE:NIFTY_COMMODITIES"),
+    (2, "NSE:NIFTY_CONSUMPTION"),
+    (2, "NSE:NIFTY_CPSE"),
+    (2, "NSE:NIFTY_ENERGY"),
+    (2, "NSE:NIFTY_EV"),
+    (2, "NSE:NIFTY_HOUSING"),
+    (2, "NSE:NIFTY_IND_DEFENCE"),
+    (2, "NSE:NIFTY_IND_DIGITAL"),
+    (2, "NSE:NIFTY_INDIA_MFG"),
+    (2, "NSE:NIFTY_IND_TOURISM"),
+    (2, "NSE:NIFTY_INFRA"),
+    (2, "NSE:NIFTY_MNC"),
+    (2, "NSE:NIFTY_MOBILITY"),
+    (2, "NSE:NIFTY_PSE"),
+    (2, "NSE:NIFTY_RAILWAYS_PSU"),
+    (2, "NSE:NIFTY_RURAL"),
+    (2, "NSE:NIFTY_SERV_SECTOR"),
+    (2, "NSE:NIFTY_TRANS_LOGIS"),
 ];
 
 /// The list for `source`: each section with its symbols (`provider:TICKER`), keeping only
@@ -85,16 +85,11 @@ const CATALOG: &[(usize, Option<&str>, Option<&str>)] = &[
 pub fn plan(source: Source, available: &HashSet<String>) -> (Vec<(&'static str, Vec<String>)>, usize) {
     let provider = match source {
         Source::Zerodha => "zerodha",
-        Source::Dhan => "dhan",
     };
     let mut sections: Vec<(&'static str, Vec<String>)> = SECTIONS.iter().map(|s| (*s, Vec::new())).collect();
     let mut missing = 0;
-    for (section, zerodha, dhan) in CATALOG {
-        let ticker = match source {
-            Source::Zerodha => zerodha,
-            Source::Dhan => dhan,
-        };
-        match ticker.filter(|t| available.contains(*t)) {
+    for (section, ticker) in CATALOG {
+        match Some(*ticker).filter(|t| available.contains(*t)) {
             Some(t) => sections[*section].1.push(format!("{provider}:{t}")),
             None => missing += 1,
         }
@@ -177,22 +172,24 @@ mod tests {
     #[test]
     fn every_catalogue_entry_is_well_formed_and_listed_once() {
         let mut seen = HashSet::new();
-        for (section, zerodha, dhan) in CATALOG {
+        for (section, t) in CATALOG {
             assert!(*section < SECTIONS.len());
-            assert!(zerodha.is_some() || dhan.is_some());
-            for t in [zerodha, dhan].into_iter().flatten() {
-                assert!(t.contains(':') && !t.contains(' '), "{t}");
-                assert!(seen.insert(*t), "{t} twice");
-            }
+            assert!(t.contains(':') && !t.contains(' '), "{t}");
+            assert!(seen.insert(*t), "{t} twice");
         }
     }
 
     #[test]
     fn the_plan_keeps_what_the_broker_lists_in_catalogue_order() {
-        let available: HashSet<String> = ["NSE:NIFTY_BANK", "NSE:NIFTY_50", "NSE:NIFTY_EV", "IDX:BANKNIFTY"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let available: HashSet<String> = [
+            "NSE:NIFTY_BANK",
+            "NSE:NIFTY_50",
+            "NSE:NIFTY_EV",
+            "NSE:NOT_IN_THE_CATALOGUE",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
         let (sections, missing) = plan(Source::Zerodha, &available);
         assert_eq!(
             sections,
@@ -203,8 +200,6 @@ mod tests {
             ]
         );
         assert_eq!(missing, CATALOG.len() - 3);
-        let (dhan, _) = plan(Source::Dhan, &available);
-        assert_eq!(dhan, vec![("Sectors", vec!["dhan:IDX:BANKNIFTY".to_string()])]);
     }
 
     fn seed(conn: &Connection, tickers: &[&str]) {

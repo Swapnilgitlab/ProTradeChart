@@ -65,7 +65,7 @@ export function AboutDialog({ onClose }: Props) {
           <a href={SOURCE_URL}>github.com/Swapnilgitlab/ProTradeChart</a>
         </dd>
         <dt>Developer</dt>
-        <dd>Swapnil Pawar, ProTradeJournal</dd>
+        <dd>Swapnil Pawar</dd>
         <dt>Profiles</dt>
         <dd>
           <a href="https://x.com/swapnilpawar_">X: @swapnilpawar_</a>
@@ -78,6 +78,16 @@ export function AboutDialog({ onClose }: Props) {
 
       <UpdatesSection />
 
+      <div className="section-title">Credits</div>
+      <p className="secondary about-links" style={{ marginTop: 0 }}>
+        Charts are rendered by <a href="https://luxalgo.com/vela">Vela™</a>, an open-source charting library by LuxAlgo
+        (Apache-2.0). The desktop shell is built with <a href="https://tauri.app">Tauri</a>.
+      </p>
+      <p className="secondary about-links">
+        Pine Script support is powered by <a href="https://github.com/LuxAlgo/PineTS">PineTS</a> and Vela PineTS, built by
+        LuxAlgo (AGPL-3.0). The script editor is <a href="https://codemirror.net">CodeMirror</a>. Pine Script® and TradingView®
+        are registered trademarks of TradingView, Inc.; this app is not affiliated with, or endorsed by, TradingView.
+      </p>
       <div className="section-title">Shortcuts</div>
       <dl className="about-list">
         {SHORTCUTS.map(([keys, action]) => (
@@ -90,16 +100,6 @@ export function AboutDialog({ onClose }: Props) {
         ))}
       </dl>
 
-      <div className="section-title">Credits</div>
-      <p className="secondary about-links" style={{ marginTop: 0 }}>
-        Charts are rendered by <a href="https://luxalgo.com/vela">Vela™</a>, an open-source charting library by LuxAlgo
-        (Apache-2.0). The desktop shell is built with <a href="https://tauri.app">Tauri</a>.
-      </p>
-      <p className="secondary about-links">
-        Pine Script support is powered by <a href="https://github.com/LuxAlgo/PineTS">PineTS</a> and Vela PineTS, built by
-        LuxAlgo (AGPL-3.0). The script editor is <a href="https://codemirror.net">CodeMirror</a>. Pine Script® and TradingView®
-        are registered trademarks of TradingView, Inc.; this app is not affiliated with, or endorsed by, TradingView.
-      </p>
       <div className="section-title">Legal</div>
       <p className="secondary" style={{ marginTop: 0 }}>
         Copyright &copy; 2026 Swapnil Pawar and the ProTradeChart contributors.
@@ -121,8 +121,8 @@ export function AboutDialog({ onClose }: Props) {
         </button>
       </p>
       <p className="notice">
-        Market data comes from the sources you turn on: Binance, Coinbase and Hyperliquid for crypto, and Dhan or Zerodha
-        with your own account. Prices can be delayed or wrong. Everything here is for information only and is not
+        Market data comes from the sources you turn on: Binance, Coinbase and Hyperliquid for crypto, and Zerodha with
+        your own account. Prices can be delayed or wrong. Everything here is for information only and is not
         financial advice.
       </p>
     </Dialog>

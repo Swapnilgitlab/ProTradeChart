@@ -10,18 +10,18 @@ use rusqlite::Connection;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use super::data::{self, BarsData, BarsRequest, Fetched, Fetcher, DEFAULT_LIMIT, MAX_LIMIT};
+use super::data::{
+    self, BarsData, BarsRequest, Fetched, Fetcher, PanelRequest, PanelSeries, SyncReport, SyncRequest, DEFAULT_LIMIT,
+    MAX_LIMIT,
+};
 use super::routes::{Backend, InstrumentQuery, WatchlistSel};
 use super::wire::{
     InstrumentRow, ProviderStatus, ResultPost, WatchlistContent, WatchlistInfo, WatchlistSymbol, WatchlistSync,
     WatchlistUpdate,
 };
 use super::{split_symbol, ApiError};
-use crate::db::{now_ms, Database};
-use crate::dhan::client::DhanClient;
-use crate::dhan::instruments as dhan_instruments;
-use crate::dhan::protocol::{plan_windows as dhan_windows, DhanError, DhanErrorKind, Interval as DhanInterval};
-use crate::provider_commands::dhan_credentials;
+use crate::db::{now_ms, Database, ResearchDb};
+use crate::models::DaySnapshot;
 use crate::providers;
 use crate::secrets::Secrets;
 use crate::store::instrument_list::{self, Source};
@@ -80,24 +80,9 @@ pub fn zerodha_error(e: ZerodhaError) -> ApiError {
     ApiError::new(status, code, e.message())
 }
 
-pub fn dhan_error(e: DhanError) -> ApiError {
-    let not_set_up = e == DhanError::not_configured();
-    let (status, code) = match e.kind {
-        DhanErrorKind::Auth if not_set_up => (409, "not_configured"),
-        DhanErrorKind::Auth => (401, "auth"),
-        DhanErrorKind::NotSubscribed => (403, "no_access"),
-        DhanErrorKind::RateLimited => (429, "rate_limited"),
-        DhanErrorKind::BadRequest => (400, "bad_request"),
-        DhanErrorKind::NoData | DhanErrorKind::Server | DhanErrorKind::Network | DhanErrorKind::Other => {
-            (502, "upstream")
-        }
-    };
-    ApiError::new(status, code, e.message())
-}
-
 fn unsupported_provider(provider: &str) -> ApiError {
     ApiError::bad_request(format!(
-        "Python can't read '{provider}' data. Supported: zerodha, dhan and csv (your imported files)."
+        "Python can't read '{provider}' data. Supported: zerodha and csv (your imported files)."
     ))
 }
 
@@ -142,12 +127,8 @@ fn kind_of(instrument: &str) -> String {
 }
 
 pub fn list_instruments(conn: &Connection, q: &InstrumentQuery) -> Result<Vec<InstrumentRow>, ApiError> {
-    let source = Source::parse(&q.provider).ok_or_else(|| {
-        ApiError::bad_request(format!(
-            "'{}' has no instrument list. Ask for zerodha or dhan.",
-            q.provider
-        ))
-    })?;
+    let source = Source::parse(&q.provider)
+        .ok_or_else(|| ApiError::bad_request(format!("'{}' has no instrument list. Ask for zerodha.", q.provider)))?;
     Ok(instrument_list::list(conn, source, &q.filter, q.limit)?
         .into_iter()
         .map(|i| InstrumentRow {
@@ -229,11 +210,6 @@ impl Backend for AppBackend {
                 usable: usable("zerodha"),
             },
             ProviderStatus {
-                id: "dhan",
-                label: "Dhan",
-                usable: usable("dhan"),
-            },
-            ProviderStatus {
                 id: "csv",
                 label: "Imported files",
                 usable: true,
@@ -291,10 +267,50 @@ impl Backend for AppBackend {
                 .ok_or_else(|| ApiError::bad_request("a symbol looks like zerodha:NSE:RELIANCE"))?;
             match provider {
                 "csv" => self.with_conn(|conn| csv_bars(conn, ticker, &request)),
-                "zerodha" | "dhan" => {
-                    let db = self.app.state::<Database>();
-                    data::load_bars(&db, self, &request, now_ms()).await
+                "zerodha" => {
+                    let research = self.app.state::<ResearchDb>();
+                    data::load_bars(&research.write, self, &request, now_ms()).await
                 }
+                other => Err(unsupported_provider(other)),
+            }
+        })
+    }
+
+    fn sync_bars<'a>(&'a self, request: SyncRequest) -> BoxFuture<'a, Result<SyncReport, ApiError>> {
+        Box::pin(async move {
+            let research = self.app.state::<ResearchDb>();
+            Ok(data::sync_daily(&research.write, self, &request, now_ms()).await)
+        })
+    }
+
+    fn panel<'a>(&'a self, request: PanelRequest) -> BoxFuture<'a, Result<Vec<PanelSeries>, ApiError>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            // A whole market's history is a second or so of reading: off the async threads.
+            tauri::async_runtime::spawn_blocking(move || {
+                let research = app.state::<ResearchDb>();
+                let conn = research
+                    .read
+                    .conn
+                    .lock()
+                    .map_err(|e| ApiError::internal(e.to_string()))?;
+                data::read_panel(&conn, &request, now_ms())
+            })
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
+        })
+    }
+}
+
+impl data::Snapshots for AppBackend {
+    fn snapshots<'a>(
+        &'a self,
+        provider: &'a str,
+        tickers: &'a [String],
+    ) -> BoxFuture<'a, Result<Vec<Option<DaySnapshot>>, ApiError>> {
+        Box::pin(async move {
+            match provider {
+                "zerodha" => self.zerodha_day_snapshots(tickers).await,
                 other => Err(unsupported_provider(other)),
             }
         })
@@ -314,7 +330,6 @@ impl Fetcher for AppBackend {
                 .ok_or_else(|| ApiError::bad_request("a symbol looks like zerodha:NSE:RELIANCE"))?;
             match provider {
                 "zerodha" => self.fetch_zerodha(ticker, interval, from_ms, to_ms).await,
-                "dhan" => self.fetch_dhan(ticker, interval, from_ms, to_ms).await,
                 other => Err(unsupported_provider(other)),
             }
         })
@@ -355,36 +370,35 @@ impl AppBackend {
         Ok(Fetched { bars, from_ms: began })
     }
 
-    async fn fetch_dhan(&self, ticker: &str, interval: &str, from_ms: i64, to_ms: i64) -> Result<Fetched, ApiError> {
-        let kind = DhanInterval::parse(interval).ok_or_else(|| {
-            ApiError::bad_request(format!(
-                "Dhan doesn't serve a '{interval}' interval. It serves D and 1, 5, 15, 25 or 60 minutes; \
-                 resample the rest in pandas."
-            ))
-        })?;
+    /// `tickers` not in the instrument list come back `None`, same as a ticker the broker itself
+    /// had nothing for — `day_topup`'s caller treats both as "fall back to the historical read."
+    async fn zerodha_day_snapshots(&self, tickers: &[String]) -> Result<Vec<Option<DaySnapshot>>, ApiError> {
         let db = self.app.state::<Database>();
         let secrets = self.app.state::<Secrets>();
-        let client = self.app.state::<DhanClient>();
-        let (creds, inst) = {
+        let client = self.app.state::<ZerodhaClient>();
+        let (creds, resolved) = {
             let conn = db.conn.lock().map_err(|e| ApiError::internal(e.to_string()))?;
-            let creds = dhan_credentials(&conn, &secrets).map_err(dhan_error)?;
-            let inst = dhan_instruments::resolve(&conn, ticker)?.ok_or_else(|| {
-                ApiError::not_found(format!(
-                    "Dhan has no instrument called '{ticker}'. Search with pt.instruments(), or update the \
-                     instrument list in Data providers."
-                ))
-            })?;
-            (creds, inst)
+            let creds = zerodha_credentials(&conn, &secrets).map_err(zerodha_error)?;
+            let resolved: Vec<Option<zerodha_instruments::Instrument>> = tickers
+                .iter()
+                .map(|t| zerodha_instruments::resolve(&conn, t))
+                .collect::<rusqlite::Result<_>>()
+                .map_err(|e| ApiError::internal(e.to_string()))?;
+            (creds, resolved)
         };
-        let now = now_ms();
-        let began = dhan_windows(kind, Some(from_ms), Some(to_ms), now)
-            .first()
-            .map_or(from_ms, |w| w.from_ms.max(from_ms));
-        let bars = client
-            .fetch_history(&creds, &inst, kind, Some(from_ms), Some(to_ms), now)
-            .await
-            .map_err(dhan_error)?;
-        Ok(Fetched { bars, from_ms: began })
+        let (known_idx, known): (Vec<usize>, Vec<zerodha_instruments::Instrument>) = resolved
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, inst)| inst.map(|inst| (i, inst)))
+            .unzip();
+        let mut out = vec![None; tickers.len()];
+        if !known.is_empty() {
+            let snapshots = client.day_snapshots(&creds, &known).await.map_err(zerodha_error)?;
+            for (i, snapshot) in known_idx.into_iter().zip(snapshots) {
+                out[i] = snapshot;
+            }
+        }
+        Ok(out)
     }
 }
 
@@ -423,24 +437,6 @@ mod tests {
     fn a_rejected_kite_token_says_to_log_in_again() {
         let e = zerodha_error(ZerodhaError::new(ZerodhaErrorKind::Token, ""));
         assert!(e.message.contains("log in again"), "{}", e.message);
-    }
-
-    #[test]
-    fn dhan_failures_map_the_same_way_and_tell_not_set_up_from_a_bad_token() {
-        let map = |kind, detail: &str| dhan_error(DhanError::new(kind, detail));
-        err(409, "not_configured", dhan_error(DhanError::not_configured()));
-        err(401, "auth", map(DhanErrorKind::Auth, "Client ID or token is invalid"));
-        err(403, "no_access", map(DhanErrorKind::NotSubscribed, "no data api"));
-        err(429, "rate_limited", map(DhanErrorKind::RateLimited, ""));
-        err(400, "bad_request", map(DhanErrorKind::BadRequest, "dates"));
-        for kind in [
-            DhanErrorKind::NoData,
-            DhanErrorKind::Server,
-            DhanErrorKind::Network,
-            DhanErrorKind::Other,
-        ] {
-            err(502, "upstream", map(kind, "boom"));
-        }
     }
 
     #[test]
@@ -556,9 +552,9 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
         conn.execute_batch(
-            "INSERT INTO dhan_instruments (ticker, exchange, segment, security_id, instrument, symbol, name, expiry)
-               VALUES ('NSE:INFY','NSE',1,1,'EQUITY','INFY','Infosys',NULL),
-                      ('NFO:NIFTY26SEPFUT','NFO',2,2,'FUTIDX','NIFTY','NIFTY','2026-09-29');",
+            "INSERT INTO zerodha_instruments (ticker, exchange, token, instrument, symbol, name, expiry)
+               VALUES ('NSE:INFY','NSE',1,'EQUITY','INFY','Infosys',NULL),
+                      ('NFO:NIFTY26SEPFUT','NFO',2,'FUT','NIFTY26SEPFUT','NIFTY','2026-09-29');",
         )
         .unwrap();
         let q = |provider: &str, kind: Option<&str>| InstrumentQuery {
@@ -570,21 +566,23 @@ mod tests {
             limit: 100,
         };
 
-        let all = list_instruments(&conn, &q("dhan", None)).unwrap();
+        let all = list_instruments(&conn, &q("zerodha", None)).unwrap();
         assert_eq!(all.len(), 2);
-        let infy = all.iter().find(|r| r.symbol == "dhan:NSE:INFY").unwrap();
+        let infy = all.iter().find(|r| r.symbol == "zerodha:NSE:INFY").unwrap();
         assert_eq!((infy.kind.as_str(), infy.name.as_deref()), ("EQUITY", Some("Infosys")));
 
-        let futures = list_instruments(&conn, &q("dhan", Some("FUT"))).unwrap();
+        let futures = list_instruments(&conn, &q("zerodha", Some("FUT"))).unwrap();
         assert_eq!(futures.len(), 1);
-        assert_eq!(futures[0].kind, "FUT", "FUTIDX is reported as FUT");
+        assert_eq!(futures[0].kind, "FUT");
         assert_eq!(futures[0].expiry.as_deref(), Some("2026-09-29"));
 
-        err(
-            400,
-            "bad_request",
-            list_instruments(&conn, &q("binance", None)).unwrap_err(),
-        );
+        for retired_or_unknown in ["binance", "dhan"] {
+            err(
+                400,
+                "bad_request",
+                list_instruments(&conn, &q(retired_or_unknown, None)).unwrap_err(),
+            );
+        }
     }
 
     #[test]

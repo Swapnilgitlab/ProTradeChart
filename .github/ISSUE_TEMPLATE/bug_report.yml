@@ -27,7 +27,7 @@ body:
     id: symbol
     attributes:
       label: Symbol and timeframe (if it's a data problem)
-      placeholder: dhan:NSE:RELIANCE, 15m
+      placeholder: zerodha:NSE:RELIANCE, 15m
   - type: input
     id: version
     attributes:

@@ -2,7 +2,7 @@ import type { OHLCV } from '@luxalgo/vela';
 import { localMidnight, type Timeframe } from './timeframes';
 
 /** Turns a stream of trade ticks into the forming candle Vela draws, for
- *  brokers that stream ticks rather than candles (Dhan and Zerodha).
+ *  a broker that streams ticks rather than candles (Zerodha).
  *
  *  Indian markets: bars are anchored to the session open (09:15 IST for equities
  *  and derivatives, 09:00 for currency and commodities), so a 5-minute chart has
@@ -11,17 +11,11 @@ import { localMidnight, type Timeframe } from './timeframes';
 const MINUTE_MS = 60_000;
 const DAY_MS = 86_400_000;
 const IST_OFFSET_MS = 19_800_000;
-/** Seconds between the Unix epoch and 1 Jan 1980, the other epoch Dhan has been seen to use. */
+/** Seconds between the Unix epoch and 1 Jan 1980, an epoch some Indian broker feeds have used. */
 const EPOCH_1980_OFFSET_S = 315_532_800;
 const IST_OFFSET_S = 19_800;
 /** A tick's own timestamp is trusted only if it lands this close to the local clock. */
 const CLOCK_TOLERANCE_MS = 10 * MINUTE_MS;
-
-/** Minutes after midnight IST at which a Dhan exchange segment opens. */
-export function sessionOpenMinutes(segmentCode: number): number {
-  // 3 and 7 are the currency segments, 5 is MCX commodities.
-  return segmentCode === 3 || segmentCode === 7 || segmentCode === 5 ? 9 * 60 : 9 * 60 + 15;
-}
 
 /** Minutes after midnight IST at which a Zerodha exchange opens: currency (CDS,
  *  BCD) and commodity (MCX) sessions start at 09:00, everything else at 09:15. */
@@ -29,8 +23,8 @@ export function sessionOpenForExchange(exchange: string): number {
   return exchange === 'CDS' || exchange === 'BCD' || exchange === 'MCX' ? 9 * 60 : 9 * 60 + 15;
 }
 
-/** Works out a tick's real time. Dhan's docs say only "epoch", and the base has
- *  varied, so the tick's timestamp is tried under each plausible reading and
+/** Works out a tick's real time. A feed's docs may say only "epoch", and the base
+ *  has been seen to vary, so the tick's timestamp is tried under each plausible reading and
  *  the one that lands within minutes of the local clock wins. If none does (or
  *  there is no timestamp), the arrival time is used. */
 export function resolveTickTime(ltt: number | null, receivedAtMs: number): number {

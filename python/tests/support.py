@@ -2,6 +2,7 @@
 
 import json
 import os
+import struct
 import sys
 import threading
 import unittest
@@ -49,6 +50,32 @@ def bars_body(times, interval="D", **extra):
     return body
 
 
+def panel_bytes(series):
+    """A `/v1/panel` answer, as the app encodes it (`panel_body` in src-tauri/src/pyapi/wire.rs).
+    `series` is `[(symbol, bars_body or None, current)]`; a `None` body holds no bars."""
+    heads, columns = [], {k: [] for k in "tohlcv"}
+    for symbol, body, current in series:
+        n = body["count"] if body else 0
+        heads.append(
+            {
+                "symbol": symbol,
+                "count": n,
+                "current": current,
+                "coveredFrom": body["coveredFrom"] if body else None,
+                "coveredTo": body["coveredTo"] if body else None,
+            }
+        )
+        for k in "tohlcv":
+            columns[k].extend((body[k] if body else [])[:n])
+    head = json.dumps({"format": 1, "interval": "D", "timezone": IST, "count": len(columns["t"]), "series": heads}).encode()
+    out = struct.pack("<I", len(head)) + head
+    out += b"\0" * ((-len(out)) % 8)
+    out += struct.pack(f"<{len(columns['t'])}q", *columns["t"])
+    for k in "ohlcv":
+        out += struct.pack(f"<{len(columns[k])}d", *[float("nan") if x is None else x for x in columns[k]])
+    return out
+
+
 class Stub:
     """A local HTTP server standing in for the app.
 
@@ -64,9 +91,10 @@ class Stub:
 
         class Handler(BaseHTTPRequestHandler):
             def reply(self, status, body):
-                data = json.dumps(body).encode()
+                binary = isinstance(body, bytes)
+                data = body if binary else json.dumps(body).encode()
                 self.send_response(status)
-                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Type", "application/octet-stream" if binary else "application/json")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
@@ -110,9 +138,9 @@ class Stub:
         self.server.shutdown()
         self.server.server_close()
 
-    def posted(self):
-        """The bodies of the POSTs received, in order."""
-        return [r["payload"] for r in self.requests if r["method"] == "POST"]
+    def posted(self, path=None):
+        """The bodies of the POSTs received, in order; `path` narrows it to one route."""
+        return [r["payload"] for r in self.requests if r["method"] == "POST" and (path is None or r["path"] == path)]
 
 
 class Case(unittest.TestCase):
@@ -123,7 +151,7 @@ class Case(unittest.TestCase):
     run_id = None  # set to a run id to give the script one
 
     def setUp(self):
-        keys = (client.API_ENV, client.TOKEN_ENV, client.TIMEOUT_ENV, client.RUN_ENV)
+        keys = (client.API_ENV, client.TOKEN_ENV, client.TIMEOUT_ENV, client.RUN_ENV, client.NO_TOPUP_ENV)
         self._saved = {k: os.environ.get(k) for k in keys}
         self.stub = Stub(dict(self.routes), dict(self.posts))
         os.environ[client.API_ENV] = self.stub.url
@@ -133,6 +161,7 @@ class Case(unittest.TestCase):
             os.environ[client.RUN_ENV] = self.run_id
         else:
             os.environ.pop(client.RUN_ENV, None)
+        os.environ.pop(client.NO_TOPUP_ENV, None)
 
     def tearDown(self):
         self.stub.close()

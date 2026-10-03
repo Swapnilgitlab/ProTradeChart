@@ -86,14 +86,24 @@ pub struct Estimate {
     pub symbols: usize,
     /// Already held from far enough back: at most a top-up of the newest bars.
     pub stored: usize,
-    /// Broker requests the run is expected to make, and how long they take at the broker's pace.
+    /// Historical-endpoint requests the run is expected to make: new symbols, or ones whose
+    /// coverage doesn't reach back to `from_ms`.
     pub requests: usize,
+    /// Batched quote calls the run's quote top-up (`store::day_topup`) is expected to make
+    /// instead, for stored symbols that need only their newest bar — each covers up to
+    /// `quote_batch` symbols, so this is usually 0 or 1, never one per symbol.
+    pub quote_requests: usize,
     pub seconds: f64,
 }
 
 /// What loading `symbols`' daily bars from `from_ms` will cost. A symbol not held back to `from_ms`
-/// costs one request per `window_days` of span; a held one whose newest bar is more than a day old
-/// is counted as one more (a top-up) — an upper bound, since a weekend or holiday needs none.
+/// costs one request per `window_days` of span, at the historical endpoint's pace (`gap_ms`). A held
+/// one whose newest bar is more than a day old needs only a top-up: batched into groups of
+/// `quote_batch` and priced at the quote endpoint's far cheaper pace (`quote_gap_ms`), as
+/// `pyapi::data::sync_daily` actually fetches it — not a historical request each, which is what made
+/// this estimate promise minutes for a run that now takes seconds. Both counts are upper bounds: a
+/// weekend, a holiday, or (for the quote path) a rejected snapshot can need fewer than this.
+#[allow(clippy::too_many_arguments)]
 pub fn estimate(
     conn: &Connection,
     symbols: &[String],
@@ -101,25 +111,29 @@ pub fn estimate(
     now_ms: i64,
     window_days: i64,
     gap_ms: u64,
+    quote_batch: usize,
+    quote_gap_ms: u64,
 ) -> rusqlite::Result<Estimate> {
     let per_symbol = ((now_ms - from_ms).max(DAY_MS) + window_days * DAY_MS - 1) / (window_days * DAY_MS);
-    let (mut stored, mut requests) = (0usize, 0usize);
+    let (mut stored, mut requests, mut topups) = (0usize, 0usize, 0usize);
     for symbol in symbols {
         match research_bars::coverage(conn, symbol, "D")? {
             Some(c) if c.from_ms <= from_ms => {
                 stored += 1;
                 if c.to_ms < now_ms - DAY_MS {
-                    requests += 1;
+                    topups += 1;
                 }
             }
             _ => requests += per_symbol as usize,
         }
     }
+    let quote_requests = topups.div_ceil(quote_batch.max(1));
     Ok(Estimate {
         symbols: symbols.len(),
         stored,
         requests,
-        seconds: requests as f64 * gap_ms as f64 / 1000.0,
+        quote_requests,
+        seconds: requests as f64 * gap_ms as f64 / 1000.0 + quote_requests as f64 * quote_gap_ms as f64 / 1000.0,
     })
 }
 
@@ -198,15 +212,44 @@ mod tests {
         ]
         .map(String::from)
         .to_vec();
-        let e = estimate(&conn, &symbols, from, now, 2000, 350).unwrap();
+        let e = estimate(&conn, &symbols, from, now, 2000, 350, 200, 1100).unwrap();
         assert_eq!(
-            (e.symbols, e.stored, e.requests),
-            (4, 2, 3),
-            "OLD tops up, SHORT and NEW fetch"
+            (e.symbols, e.stored, e.requests, e.quote_requests),
+            (4, 2, 2, 1),
+            "OLD tops up via one batched quote; SHORT and NEW need the historical endpoint"
         );
-        assert!((e.seconds - 1.05).abs() < 1e-9);
+        assert!((e.seconds - (2.0 * 0.35 + 1.0 * 1.1)).abs() < 1e-9);
         // A span longer than one request's window costs a request per window.
-        let long = estimate(&conn, &symbols[3..], now - 4_500 * DAY_MS, now, 2000, 350).unwrap();
+        let long = estimate(&conn, &symbols[3..], now - 4_500 * DAY_MS, now, 2000, 350, 200, 1100).unwrap();
         assert_eq!(long.requests, 3);
+    }
+
+    #[test]
+    fn many_stale_but_stored_symbols_batch_into_quote_requests_not_one_each() {
+        let db = Database::open_in_memory().unwrap();
+        let conn = db.conn.lock().unwrap();
+        let now = 3_000 * DAY_MS;
+        let from = now - 1_500 * DAY_MS;
+        let symbols: Vec<String> = (0..450).map(|i| format!("zerodha:NSE:S{i}")).collect();
+        for symbol in &symbols {
+            research_bars::extend_coverage(
+                &conn,
+                symbol,
+                "D",
+                Range {
+                    from_ms: from,
+                    to_ms: now - 5 * DAY_MS,
+                },
+                now,
+            )
+            .unwrap();
+        }
+        let e = estimate(&conn, &symbols, from, now, 2000, 350, 200, 1100).unwrap();
+        assert_eq!(
+            (e.stored, e.requests, e.quote_requests),
+            (450, 0, 3),
+            "450 stale symbols need 3 batches of up to 200, not 450 historical requests"
+        );
+        assert!((e.seconds - 3.3).abs() < 1e-9, "3 quote batches at 1.1s each");
     }
 }

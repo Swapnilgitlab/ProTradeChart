@@ -11,7 +11,7 @@
 //! carries several packets: a 2-byte packet count, then for each packet a
 //! 2-byte length and its bytes. The packet layouts are from Kite's docs.
 //!
-//! Unlike Dhan's feed, this one refuses a bad key or token during the HTTP
+//! This feed refuses a bad key or token during the HTTP
 //! handshake (status 400, with a JSON message), so a credential problem is
 //! reported precisely instead of being inferred from repeated hang-ups.
 

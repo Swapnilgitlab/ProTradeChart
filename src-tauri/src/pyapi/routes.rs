@@ -20,11 +20,12 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use subtle::ConstantTimeEq;
 
-use super::data::{BarsData, BarsRequest, MAX_LIMIT};
+use super::data::{BarsData, BarsRequest, PanelRequest, PanelSeries, SyncReport, SyncRequest, MAX_LIMIT};
 use super::valid_run_id;
 use super::wire::{
-    bars_body, error_json, InstrumentRow, ProviderStatus, ResultPost, WatchlistContent, WatchlistInfo, WatchlistSync,
-    WatchlistUpdate, MAX_TITLE_CHARS, PNG_BASE64_PREFIX, RESULT_KINDS,
+    bars_body, error_json, panel_body, sync_report_body, InstrumentRow, PanelPost, ProviderStatus, ResultPost,
+    SyncPost, WatchlistContent, WatchlistInfo, WatchlistSync, WatchlistUpdate, MAX_TITLE_CHARS, PNG_BASE64_PREFIX,
+    RESULT_KINDS,
 };
 use super::ApiError;
 use crate::store::instrument_list::Filter;
@@ -44,6 +45,12 @@ pub trait Backend: Send + Sync {
     fn watchlists(&self) -> Result<Vec<WatchlistInfo>, ApiError>;
     fn watchlist(&self, which: &WatchlistSel) -> Result<WatchlistContent, ApiError>;
     fn bars<'a>(&'a self, request: BarsRequest) -> BoxFuture<'a, Result<BarsData, ApiError>>;
+    /// Brings many symbols' daily coverage up to date from a batched broker quote where that's
+    /// safe (`store::day_topup`), ahead of the caller's own per-symbol `bars` reads. Never fails
+    /// outright — a broker problem is reported per symbol in the result, not as an error here.
+    fn sync_bars<'a>(&'a self, request: SyncRequest) -> BoxFuture<'a, Result<SyncReport, ApiError>>;
+    /// Many symbols' stored bars, from the research store alone: never a broker call.
+    fn panel<'a>(&'a self, request: PanelRequest) -> BoxFuture<'a, Result<Vec<PanelSeries>, ApiError>>;
     /// Shows a result a script posted, in the app. The one thing here that isn't a read, and it
     /// only ever reaches the app's own window.
     fn publish(&self, post: ResultPost) -> Result<(), ApiError>;
@@ -56,7 +63,7 @@ pub const MAX_WATCHLIST_SYMBOLS: usize = 2_000;
 const MAX_WATCHLIST_NAME: usize = 100;
 const MAX_SYMBOL_CHARS: usize = 64;
 /// Where a symbol's data comes from; a script can't put one on a list from anywhere else.
-const WATCHLIST_PROVIDERS: [&str; 6] = ["zerodha", "dhan", "binance", "coinbase", "hyperliquid", "csv"];
+const WATCHLIST_PROVIDERS: [&str; 5] = ["zerodha", "binance", "coinbase", "hyperliquid", "csv"];
 
 /// A `watchlist` result's data checked and made canonical: `{name, symbols, mode}`, mode `replace`
 /// (the default) or `append`. A broker symbol without an exchange is on NSE, as everywhere else in
@@ -116,7 +123,7 @@ fn canonical_symbol(raw: &str) -> Option<String> {
     if !WATCHLIST_PROVIDERS.contains(&provider.as_str()) || ticker.is_empty() {
         return None;
     }
-    if provider == "zerodha" || provider == "dhan" {
+    if provider == "zerodha" {
         let ticker = ticker.to_ascii_uppercase();
         let ticker = if ticker.contains(':') {
             ticker
@@ -157,9 +164,18 @@ pub struct Req {
 
 pub struct Resp {
     pub status: u16,
-    /// Always JSON.
+    pub content_type: &'static str,
     pub body: Vec<u8>,
 }
+
+/// An answer's body: JSON, or the panel's binary columns.
+pub enum Body {
+    Json(Vec<u8>),
+    Binary(Vec<u8>),
+}
+
+pub const JSON: &str = "application/json";
+const BINARY: &str = "application/octet-stream";
 
 pub struct Ctx {
     pub backend: Arc<dyn Backend>,
@@ -170,9 +186,19 @@ pub struct Ctx {
 
 pub async fn dispatch(ctx: &Ctx, req: &Req) -> Resp {
     match route(ctx, req).await {
-        Ok(body) => Resp { status: 200, body },
+        Ok(Body::Json(body)) => Resp {
+            status: 200,
+            content_type: JSON,
+            body,
+        },
+        Ok(Body::Binary(body)) => Resp {
+            status: 200,
+            content_type: BINARY,
+            body,
+        },
         Err(e) => Resp {
             status: e.status,
+            content_type: JSON,
             body: error_json(&e),
         },
     }
@@ -220,7 +246,7 @@ pub fn authorize(ctx: &Ctx, req: &Req) -> Result<(), ApiError> {
     Ok(())
 }
 
-async fn route(ctx: &Ctx, req: &Req) -> Result<Vec<u8>, ApiError> {
+async fn route(ctx: &Ctx, req: &Req) -> Result<Body, ApiError> {
     authorize(ctx, req)?;
     let (path, query) = split_target(&req.target);
     if path == "/v1/results" {
@@ -232,6 +258,26 @@ async fn route(ctx: &Ctx, req: &Req) -> Result<Vec<u8>, ApiError> {
             ));
         }
         return post_result(ctx, req);
+    }
+    if path == "/v1/bars/sync" {
+        if !req.method.eq_ignore_ascii_case("POST") {
+            return Err(ApiError::new(
+                405,
+                "method_not_allowed",
+                "A sync is posted; this route only answers POST.",
+            ));
+        }
+        return post_sync(ctx, req).await;
+    }
+    if path == "/v1/panel" {
+        if !req.method.eq_ignore_ascii_case("POST") {
+            return Err(ApiError::new(
+                405,
+                "method_not_allowed",
+                "A panel is posted (its symbol list is too long for a URL); this route only answers POST.",
+            ));
+        }
+        return post_panel(ctx, req).await;
     }
     if !req.method.eq_ignore_ascii_case("GET") {
         return Err(ApiError::new(
@@ -258,7 +304,7 @@ async fn route(ctx: &Ctx, req: &Req) -> Result<Vec<u8>, ApiError> {
 
 /// A script showing something in the app. Checked only as far as forwarding it is safe: the
 /// webview owns the shape of the content and validates it before drawing.
-fn post_result(ctx: &Ctx, req: &Req) -> Result<Vec<u8>, ApiError> {
+fn post_result(ctx: &Ctx, req: &Req) -> Result<Body, ApiError> {
     let is_json = req
         .content_type
         .as_deref()
@@ -310,6 +356,144 @@ fn post_result(ctx: &Ctx, req: &Req) -> Result<Vec<u8>, ApiError> {
     json(&serde_json::json!({ "ok": true }))
 }
 
+/// Brings many symbols' daily coverage up to date, ahead of the per-symbol `/v1/bars` reads that
+/// follow — never a read itself (it writes to the research store), so it's posted like a result.
+async fn post_sync(ctx: &Ctx, req: &Req) -> Result<Body, ApiError> {
+    let is_json = req
+        .content_type
+        .as_deref()
+        .is_some_and(|t| t.trim().to_ascii_lowercase().starts_with("application/json"));
+    if !is_json {
+        return Err(ApiError::new(
+            415,
+            "unsupported_media_type",
+            "Post a sync as application/json.",
+        ));
+    }
+    if req.body.len() > MAX_BODY_BYTES {
+        return Err(too_large());
+    }
+    let post: SyncPost = serde_json::from_slice(&req.body)
+        .map_err(|e| ApiError::bad_request(format!("That isn't a sync request: {e}")))?;
+    let request = sync_request(post)?;
+    let report = ctx.backend.sync_bars(request).await?;
+    json(&sync_report_body(&report))
+}
+
+/// The most symbols one sync call covers.
+const MAX_SYNC_SYMBOLS: usize = 5_000;
+/// The most symbols one panel read covers: every NSE stock and index, with room to spare.
+const MAX_PANEL_SYMBOLS: usize = 5_000;
+
+/// Many symbols' stored daily bars in one binary answer (`wire::panel_body`). A read, posted only
+/// because a whole market's symbol list doesn't fit in a URL.
+async fn post_panel(ctx: &Ctx, req: &Req) -> Result<Body, ApiError> {
+    let is_json = req
+        .content_type
+        .as_deref()
+        .is_some_and(|t| t.trim().to_ascii_lowercase().starts_with("application/json"));
+    if !is_json {
+        return Err(ApiError::new(
+            415,
+            "unsupported_media_type",
+            "Post a panel request as application/json.",
+        ));
+    }
+    if req.body.len() > MAX_BODY_BYTES {
+        return Err(too_large());
+    }
+    let post: PanelPost = serde_json::from_slice(&req.body)
+        .map_err(|e| ApiError::bad_request(format!("That isn't a panel request: {e}")))?;
+    let request = panel_request(post)?;
+    let series = ctx.backend.panel(request.clone()).await?;
+    Ok(Body::Binary(panel_body(&request.interval, &series)))
+}
+
+fn panel_request(post: PanelPost) -> Result<PanelRequest, ApiError> {
+    if post.symbols.len() > MAX_PANEL_SYMBOLS {
+        return Err(ApiError::bad_request(format!(
+            "A panel can cover at most {MAX_PANEL_SYMBOLS} symbols at once."
+        )));
+    }
+    let symbols = checked_symbols(&post.symbols)?;
+    let interval = parse_interval(post.interval.as_deref().unwrap_or("D"))?;
+    if interval != "D" {
+        return Err(ApiError::bad_request("A panel holds daily bars (interval D)."));
+    }
+    if let (Some(from), Some(to)) = (post.from, post.to) {
+        if from > to {
+            return Err(ApiError::bad_request("from is after to"));
+        }
+    }
+    let limit = match post.bars {
+        None => None,
+        Some(n) if (1..=MAX_LIMIT).contains(&n) => Some(n),
+        Some(_) => {
+            return Err(ApiError::bad_request(format!(
+                "bars must be a whole number from 1 to {MAX_LIMIT}"
+            )))
+        }
+    };
+    Ok(PanelRequest {
+        symbols,
+        interval,
+        from_ms: post.from,
+        to_ms: post.to,
+        limit,
+    })
+}
+
+fn checked_symbols(raw: &[String]) -> Result<Vec<String>, ApiError> {
+    raw.iter()
+        .map(|raw| {
+            let symbol = raw.trim();
+            if symbol.is_empty() || symbol.len() > MAX_SYMBOL_CHARS || super::split_symbol(symbol).is_none() {
+                return Err(ApiError::bad_request(format!(
+                    "'{symbol}' is not a symbol: write it as provider:TICKER, like zerodha:NSE:RELIANCE"
+                )));
+            }
+            Ok(symbol.to_string())
+        })
+        .collect()
+}
+
+fn sync_request(post: SyncPost) -> Result<SyncRequest, ApiError> {
+    if post.symbols.is_empty() {
+        return Err(ApiError::bad_request("symbols must name at least one symbol."));
+    }
+    if post.symbols.len() > MAX_SYNC_SYMBOLS {
+        return Err(ApiError::bad_request(format!(
+            "A sync can cover at most {MAX_SYNC_SYMBOLS} symbols at once."
+        )));
+    }
+    let symbols = checked_symbols(&post.symbols)?;
+    let interval = parse_interval(post.interval.as_deref().unwrap_or("D"))?;
+    if interval != "D" {
+        return Err(ApiError::bad_request("A sync only covers daily bars (interval D)."));
+    }
+    if let (Some(from), Some(to)) = (post.from, post.to) {
+        if from > to {
+            return Err(ApiError::bad_request("from is after to"));
+        }
+    }
+    let limit = match post.limit {
+        None => None,
+        Some(n) if (1..=MAX_LIMIT).contains(&n) => Some(n),
+        Some(_) => {
+            return Err(ApiError::bad_request(format!(
+                "limit must be a whole number from 1 to {MAX_LIMIT}"
+            )))
+        }
+    };
+    Ok(SyncRequest {
+        symbols,
+        interval,
+        from_ms: post.from,
+        to_ms: post.to,
+        limit,
+    })
+}
+
 /// The answer for a body over [`MAX_BODY_BYTES`], shared with the server.
 pub fn too_large() -> ApiError {
     ApiError::new(
@@ -322,8 +506,10 @@ pub fn too_large() -> ApiError {
     )
 }
 
-fn json<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, ApiError> {
-    serde_json::to_vec(value).map_err(|e| ApiError::internal(format!("could not encode the answer: {e}")))
+fn json<T: serde::Serialize>(value: &T) -> Result<Body, ApiError> {
+    serde_json::to_vec(value)
+        .map(Body::Json)
+        .map_err(|e| ApiError::internal(format!("could not encode the answer: {e}")))
 }
 
 // ---- Parameters ------------------------------------------------------------
@@ -395,7 +581,7 @@ fn instrument_query(query: &HashMap<String, String>) -> Result<InstrumentQuery, 
         .get("provider")
         .map(|p| p.trim().to_lowercase())
         .filter(|p| !p.is_empty())
-        .ok_or_else(|| ApiError::bad_request("provider is required: zerodha or dhan"))?;
+        .ok_or_else(|| ApiError::bad_request("provider is required: zerodha"))?;
     let limit = match query.get("limit") {
         None => DEFAULT_INSTRUMENTS,
         Some(text) => text
@@ -480,6 +666,7 @@ pub mod testing {
 
     use super::*;
     use crate::models::Bar;
+    use crate::pyapi::data::{SyncResult, SyncStatus};
 
     #[derive(Default)]
     pub struct FakeBackend {
@@ -495,6 +682,13 @@ pub mod testing {
         pub watchlist_updates: Mutex<Vec<WatchlistUpdate>>,
         /// How many daily bars a request gets back: one, unless a test wants a history to work on.
         pub bar_count: Mutex<usize>,
+        pub last_sync: Mutex<Option<SyncRequest>>,
+        pub fail_sync_with: Mutex<Option<ApiError>>,
+        /// The status every symbol gets back from `sync_bars`, unless overridden per-symbol.
+        pub sync_status: Mutex<SyncStatus>,
+        pub last_panel: Mutex<Option<PanelRequest>>,
+        /// Symbols the panel reports as not held, so the caller reads them through `bars`.
+        pub panel_missing: Mutex<Vec<String>>,
     }
 
     /// `n` consecutive daily bars from 2022-01-03 (IST midnight) for `symbol`.
@@ -612,6 +806,64 @@ pub mod testing {
                     covered_to_ms: 2_000,
                     limited_from_ms: None,
                 })
+            })
+        }
+
+        fn sync_bars<'a>(&'a self, request: SyncRequest) -> BoxFuture<'a, Result<SyncReport, ApiError>> {
+            Box::pin(async move {
+                let symbols = request.symbols.clone();
+                *self.last_sync.lock().unwrap() = Some(request);
+                if let Some(e) = self.fail_sync_with.lock().unwrap().clone() {
+                    return Err(e);
+                }
+                let status = *self.sync_status.lock().unwrap();
+                Ok(SyncReport {
+                    results: symbols
+                        .into_iter()
+                        .map(|symbol| SyncResult {
+                            symbol,
+                            status,
+                            reason: None,
+                        })
+                        .collect(),
+                })
+            })
+        }
+
+        /// The same history `bars` serves (the newest `limit` of it), as held and current — except
+        /// `panel_missing`, which the store doesn't have.
+        fn panel<'a>(&'a self, request: PanelRequest) -> BoxFuture<'a, Result<Vec<PanelSeries>, ApiError>> {
+            Box::pin(async move {
+                *self.last_panel.lock().unwrap() = Some(request.clone());
+                let n = *self.bar_count.lock().unwrap();
+                let missing = self.panel_missing.lock().unwrap().clone();
+                Ok(request
+                    .symbols
+                    .iter()
+                    .map(|symbol| {
+                        if n == 0 || missing.contains(symbol) {
+                            return PanelSeries {
+                                symbol: symbol.clone(),
+                                bars: vec![],
+                                coverage: None,
+                                current: false,
+                            };
+                        }
+                        let all = history(n, symbol);
+                        let keep = request.limit.unwrap_or(n).min(n);
+                        let bars = all[n - keep..].to_vec();
+                        PanelSeries {
+                            symbol: symbol.clone(),
+                            coverage: Some(crate::store::research_bars::Coverage {
+                                from_ms: all[0].time,
+                                to_ms: all[n - 1].time,
+                                synced_at: all[n - 1].time,
+                            }),
+                            bars,
+                            current: true,
+                        }
+                    })
+                    .collect())
             })
         }
 
@@ -907,7 +1159,7 @@ mod tests {
             &ctx,
             &post(&watchlist(serde_json::json!({
                 "name": "  Momentum ",
-                "symbols": ["zerodha:NSE:TCS", "zerodha:infy", "DHAN:BSE:RELIANCE", "binance:BTCUSDT", "zerodha:NSE:TCS"],
+                "symbols": ["zerodha:NSE:TCS", "zerodha:infy", "ZERODHA:BSE:RELIANCE", "binance:BTCUSDT", "zerodha:NSE:TCS"],
             }))),
         )
         .await;
@@ -923,7 +1175,7 @@ mod tests {
                 symbols: vec![
                     "zerodha:NSE:TCS".into(),
                     "zerodha:NSE:INFY".into(),
-                    "dhan:BSE:RELIANCE".into(),
+                    "zerodha:BSE:RELIANCE".into(),
                     "binance:BTCUSDT".into()
                 ],
                 replace: true,
@@ -945,6 +1197,7 @@ mod tests {
             serde_json::json!({ "name": "L", "symbols": "zerodha:NSE:TCS" }),
             serde_json::json!({ "name": "L", "symbols": ["TCS"] }),
             serde_json::json!({ "name": "L", "symbols": ["yahoo:AAPL"] }),
+            serde_json::json!({ "name": "L", "symbols": ["dhan:NSE:TCS"] }),
             serde_json::json!({ "name": "L", "symbols": ["zerodha:"] }),
             serde_json::json!({ "name": "L", "symbols": [7] }),
             serde_json::json!({ "name": "L", "symbols": [format!("zerodha:NSE:{}", "A".repeat(80))] }),
@@ -1037,9 +1290,9 @@ mod tests {
     #[tokio::test]
     async fn the_interval_defaults_to_daily_and_minutes_are_normalised() {
         let (ctx, backend) = ctx();
-        ask(&ctx, &get("/v1/bars?symbol=dhan:NSE:TCS")).await;
+        ask(&ctx, &get("/v1/bars?symbol=zerodha:NSE:TCS")).await;
         assert_eq!(backend.last_bars.lock().unwrap().clone().unwrap().interval, "D");
-        ask(&ctx, &get("/v1/bars?symbol=dhan:NSE:TCS&interval=15minute")).await;
+        ask(&ctx, &get("/v1/bars?symbol=zerodha:NSE:TCS&interval=15minute")).await;
         assert_eq!(backend.last_bars.lock().unwrap().clone().unwrap().interval, "15");
         ask(&ctx, &get("/v1/bars?symbol=csv:X&interval=W")).await;
         assert_eq!(backend.last_bars.lock().unwrap().clone().unwrap().interval, "W");
@@ -1102,17 +1355,17 @@ mod tests {
     #[tokio::test]
     async fn an_instrument_listing_has_a_default_and_a_ceiling() {
         let (ctx, backend) = ctx();
-        ask(&ctx, &get("/v1/instruments?provider=dhan")).await;
+        ask(&ctx, &get("/v1/instruments?provider=zerodha")).await;
         assert_eq!(
             backend.last_instruments.lock().unwrap().clone().unwrap().limit,
             DEFAULT_INSTRUMENTS
         );
-        ask(&ctx, &get("/v1/instruments?provider=dhan&limit=9999999")).await;
+        ask(&ctx, &get("/v1/instruments?provider=zerodha&limit=9999999")).await;
         assert_eq!(
             backend.last_instruments.lock().unwrap().clone().unwrap().limit,
             MAX_INSTRUMENTS
         );
-        assert_eq!(ask(&ctx, &get("/v1/instruments?provider=dhan&limit=0")).await.0, 400);
+        assert_eq!(ask(&ctx, &get("/v1/instruments?provider=zerodha&limit=0")).await.0, 400);
     }
 
     #[tokio::test]
@@ -1171,5 +1424,53 @@ mod tests {
         assert_eq!(percent_decode("%zz%4"), "%zz%4");
         assert_eq!(percent_decode("%E2%82%B9"), "₹");
         assert_eq!(percent_decode("%2B"), "+", "an escaped plus stays a plus");
+    }
+
+    // ---- The panel -----------------------------------------------------------
+
+    fn panel(body: &Value) -> Req {
+        Req {
+            target: "/v1/panel".into(),
+            ..post(body)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_panel_is_posted_and_answered_in_binary_columns() {
+        let (ctx, backend) = ctx();
+        *backend.bar_count.lock().unwrap() = 10;
+        let resp = dispatch(
+            &ctx,
+            &panel(&serde_json::json!({ "symbols": ["zerodha:NSE:A", " zerodha:NSE:B "], "bars": 4 })),
+        )
+        .await;
+        assert_eq!((resp.status, resp.content_type), (200, "application/octet-stream"));
+        let request = backend.last_panel.lock().unwrap().clone().unwrap();
+        assert_eq!(request.symbols, ["zerodha:NSE:A", "zerodha:NSE:B"]);
+        assert_eq!((request.interval.as_str(), request.limit), ("D", Some(4)));
+
+        let head_len = u32::from_le_bytes(resp.body[..4].try_into().unwrap()) as usize;
+        let head: Value = serde_json::from_slice(&resp.body[4..4 + head_len]).unwrap();
+        assert_eq!(head["count"], 8);
+        assert_eq!(head["series"][1]["symbol"], "zerodha:NSE:B");
+        assert_eq!(resp.body.len(), (4 + head_len).div_ceil(8) * 8 + 8 * 48);
+    }
+
+    #[tokio::test]
+    async fn a_panel_is_not_read_by_get_and_its_request_is_checked() {
+        let (ctx, backend) = ctx();
+        let (status, body) = ask(&ctx, &get("/v1/panel")).await;
+        assert_eq!((status, code(&body)), (405, "method_not_allowed"));
+        for bad in [
+            serde_json::json!({ "symbols": ["RELIANCE"] }),
+            serde_json::json!({ "symbols": ["zerodha:NSE:A"], "interval": "5" }),
+            serde_json::json!({ "symbols": ["zerodha:NSE:A"], "bars": 0 }),
+            serde_json::json!({ "symbols": ["zerodha:NSE:A"], "from": 10, "to": 5 }),
+            serde_json::json!({ "symbols": vec!["zerodha:NSE:A"; MAX_PANEL_SYMBOLS + 1] }),
+        ] {
+            let (status, body) = ask(&ctx, &panel(&bad)).await;
+            assert_eq!((status, code(&body)), (400, "bad_request"), "{bad}");
+        }
+        assert!(backend.last_panel.lock().unwrap().is_none());
     }
 }

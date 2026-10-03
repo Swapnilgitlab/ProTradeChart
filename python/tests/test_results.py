@@ -419,7 +419,7 @@ class UniverseTests(Case):
 
     def setUp(self):
         self.lists = {}  # name -> symbols
-        self.usable = {"zerodha": True, "dhan": False}
+        self.usable = {"zerodha": True, "binance": True}
         self.routes = {
             "/v1/watchlists": lambda q: (200, [{"id": i, "name": n, "count": len(s)} for i, (n, s) in enumerate(self.lists.items())]),
             "/v1/watchlist": self.watchlist_route,
@@ -434,9 +434,9 @@ class UniverseTests(Case):
         return 200, {"id": 1, "name": name, "symbols": [{"symbol": s, "name": None} for s in self.lists[name]]}
 
     def test_a_named_watchlist_is_used_and_says_so(self):
-        self.lists["Nifty 50"] = ["zerodha:NSE:TCS", "binance:BTCUSDT", "dhan:NSE:INFY"]
+        self.lists["Nifty 50"] = ["zerodha:NSE:TCS", "binance:BTCUSDT", "dhan:NSE:INFY", "zerodha:NSE:INFY"]
         u = pt.universe("Nifty 50")
-        self.assertEqual(list(u), ["zerodha:NSE:TCS", "dhan:NSE:INFY"], "only symbols a script can read")
+        self.assertEqual(list(u), ["zerodha:NSE:TCS", "zerodha:NSE:INFY"], "only symbols a script can read, not a retired source's")
         self.assertEqual(u.source, "the watchlist 'Nifty 50'")
         self.assertIsInstance(u, list)
 
@@ -447,7 +447,7 @@ class UniverseTests(Case):
 
     def test_a_named_watchlist_with_nothing_readable_on_it_is_an_error(self):
         self.lists["Crypto"] = ["binance:BTCUSDT"]
-        with self.assertRaisesRegex(pt.NotFoundError, "no zerodha or dhan symbols"):
+        with self.assertRaisesRegex(pt.NotFoundError, "no zerodha symbols"):
             pt.universe("Crypto")
 
     def test_without_a_name_the_first_watchlist_with_readable_symbols_is_used(self):
@@ -466,14 +466,15 @@ class UniverseTests(Case):
         self.assertEqual(u.source, "a sample of large NSE stocks")
 
     def test_the_brokers_are_tried_in_the_order_given(self):
-        self.usable = {"zerodha": True, "dhan": True}
+        self.usable = {"zerodha": True, "other": True}
         self.assertTrue(pt.universe()[0].startswith("zerodha:"))
-        self.assertTrue(pt.universe(providers=("dhan", "zerodha"))[0].startswith("dhan:"))
-        self.usable = {"zerodha": False, "dhan": True}
-        self.assertTrue(pt.universe()[0].startswith("dhan:"))
+        self.assertTrue(pt.universe(providers=("other", "zerodha"))[0].startswith("other:"))
+        self.usable = {"zerodha": False, "other": True}
+        with self.assertRaises(pt.NotConfiguredError):
+            pt.universe()
 
     def test_with_no_broker_set_up_it_says_what_to_do(self):
-        self.usable = {"zerodha": False, "dhan": False}
+        self.usable = {"zerodha": False}
         with self.assertRaisesRegex(pt.NotConfiguredError, "Data providers"):
             pt.universe()
 

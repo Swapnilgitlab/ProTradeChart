@@ -124,5 +124,74 @@ class ConditionTests(unittest.TestCase):
         self.assertEqual(list(feat.evaluate(f, feat.parse_condition("return_1 > -5"))), [False, True, True])
 
 
+class PriceChangeAndGapTests(unittest.TestCase):
+    def setUp(self):
+        days = pd.bdate_range("2024-01-01", periods=3)
+        self.f = feat.Features(
+            pd.DataFrame(
+                {"open": [100.0, 103.0, 98.0], "high": [101.0, 104.0, 99.0], "low": [99.0, 102.0, 97.0], "close": [100.0, 102.0, 99.0], "volume": [1.0, 1.0, 1.0]},
+                index=days,
+            )
+        )
+
+    def test_a_gap_is_the_open_against_the_previous_close(self):
+        np.testing.assert_allclose(self.f.get("gap").to_numpy()[1:], [0.03, 98 / 102 - 1])
+        self.assertTrue(math.isnan(self.f.get("gap").iloc[0]))
+        np.testing.assert_allclose(self.f.get("gap_up").to_numpy()[1:], [0.03, 0.0])
+        np.testing.assert_allclose(self.f.get("gap_down").to_numpy()[1:], [0.0, 1 - 98 / 102])
+        self.assertTrue(math.isnan(self.f.get("gap_down").iloc[0]))
+
+    def test_price_change_is_in_rupees(self):
+        np.testing.assert_allclose(self.f.get("change_1").to_numpy()[1:], [2.0, -3.0])
+        np.testing.assert_allclose(self.f.get("change_2").to_numpy()[2:], [-1.0])
+
+
+class IntervalTests(unittest.TestCase):
+    def setUp(self):
+        # Mon 1 Jan 2024 to Wed 17 Jan: two whole weeks, then three days of a third.
+        days = pd.bdate_range("2024-01-01", "2024-01-17")
+        closes = np.arange(len(days), dtype=float) + 100
+        self.days = days
+        self.f = feat.Features(
+            pd.DataFrame({"open": closes - 0.5, "high": closes + 1, "low": closes - 1, "close": closes, "volume": np.ones(len(days))}, index=days)
+        )
+
+    def test_names_carry_an_interval_and_daily_is_bare(self):
+        self.assertEqual(feat.canonical("RSI_14@w"), "rsi_14@W")
+        self.assertEqual(feat.canonical("close@D"), "close")
+        self.assertEqual((feat.interval("ema_50@M"), feat.base("ema_50@M")), ("M", "ema_50"))
+        self.assertEqual(feat.warmup("ema_50@W"), 250)
+        with self.assertRaises(feat.FeatureError):
+            feat.canonical("close@H")
+
+    def test_a_week_ends_on_friday_and_each_day_reads_its_weeks_bar(self):
+        weekly_close = self.f.get("close@W")
+        self.assertEqual(weekly_close[self.days[0]], 104.0, "the first week's Friday close")
+        self.assertEqual(weekly_close[self.days[-1]], 112.0, "the week still forming, as of its latest day")
+        self.assertEqual(self.f.get("volume@W")[self.days[0]], 5.0)
+        self.assertEqual(self.f.get("high@M")[self.days[-1]], 113.0)
+
+    def test_a_weekly_cross_is_this_week_against_last_week(self):
+        crossed = feat.evaluate(self.f, feat.parse_condition("close@W crosses_above 106"))
+        self.assertFalse(crossed[self.days[0]])
+        self.assertTrue(crossed[self.days[5]] and crossed[self.days[9]], "the whole second week")
+        self.assertFalse(crossed[self.days[-1]], "already above last week")
+
+
+class RangeConditionTests(unittest.TestCase):
+    def test_between_includes_its_ends_and_outside_excludes_them(self):
+        f = feat.Features(frame([10, 20, 30, 40]))
+        self.assertEqual(list(feat.evaluate(f, {"left": "close", "op": "between", "right": [20, 30]})), [False, True, True, False])
+        self.assertEqual(list(feat.evaluate(f, {"left": "close", "op": "outside", "right": [20, 30]})), [True, False, False, True])
+
+    def test_a_range_needs_two_numbers_low_first(self):
+        self.assertEqual(feat.parse_condition({"left": "rsi_14", "op": "between", "right": [40, 60]})["right"], [40, 60])
+        for right in (50, [60, 40], [40], ["a", 1], "ema_50"):
+            with self.assertRaises(feat.FeatureError, msg=right):
+                feat.parse_condition({"left": "rsi_14", "op": "between", "right": right})
+        with self.assertRaises(feat.FeatureError):
+            feat.parse_condition({"left": "rsi_14", "op": ">", "right": [40, 60]})
+
+
 if __name__ == "__main__":
     unittest.main()

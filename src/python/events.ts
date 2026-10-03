@@ -11,7 +11,7 @@ import type {
  *  straight away: `listen` is asynchronous, so leaving before it has registered still
  *  removes the listener. Tauri sends these events to every window; a caller that only
  *  wants its own run's output filters on `runId`. */
-function subscribe<T>(event: string, callback: (payload: T) => void): () => void {
+export function subscribe<T>(event: string, callback: (payload: T) => void): () => void {
   let cancelled = false;
   let unlisten: (() => void) | null = null;
   void listen<T>(event, (e) => {

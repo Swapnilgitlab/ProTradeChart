@@ -2,7 +2,7 @@
  *  The same facts, and the same wording for them, as a Study's readiness (`studies/readiness.ts`). */
 
 import { splitSymbol } from '../lib/symbols';
-import { formatDuration, TRIAL_SYMBOLS, type ReadinessFacts, type UniverseEstimate } from '../studies/readiness';
+import { formatCost, TRIAL_SYMBOLS, type ReadinessFacts, type UniverseEstimate } from '../studies/readiness';
 import type { ScreenSpec } from './spec';
 
 export interface ScreenCheck {
@@ -22,7 +22,7 @@ export interface ScreenReadiness {
 /** Above this many minutes of fetching, a trial run is offered. */
 const LONG_FETCH_MINUTES = 3;
 
-const label = (id: string) => (id === 'zerodha' ? 'Zerodha' : id === 'dhan' ? 'Dhan' : id);
+const label = (id: string) => (id === 'zerodha' ? 'Zerodha' : id);
 
 export function screenReadiness(spec: ScreenSpec, facts: Omit<ReadinessFacts, 'today'>): ScreenReadiness {
   const checks: ScreenCheck[] = [];
@@ -40,10 +40,10 @@ export function screenReadiness(spec: ScreenSpec, facts: Omit<ReadinessFacts, 't
   }
   // A watchlist's sources are only known when it runs; the engine leaves out what it can't read.
   const sources = u.source === 'instruments' ? [u.provider] : u.source === 'symbols' ? [...new Set(u.symbols.map((s) => splitSymbol(s).provider))] : [];
-  const unsupported = sources.filter((p) => p !== 'zerodha' && p !== 'dhan');
-  const missing = sources.filter((p) => (p === 'zerodha' || p === 'dhan') && !usable.has(p));
+  const unsupported = sources.filter((p) => p !== 'zerodha');
+  const missing = sources.filter((p) => p === 'zerodha' && !usable.has(p));
   if (unsupported.length) {
-    checks.push({ ok: false, blocking: true, text: `The Screener reads Zerodha and Dhan data only, not ${unsupported.join(', ')}.` });
+    checks.push({ ok: false, blocking: true, text: `The Screener reads Zerodha data only, not ${unsupported.join(', ')}.` });
   } else if (missing.length) {
     checks.push({ ok: false, blocking: true, text: `${missing.map(label).join(' and ')} isn't set up and switched on (Data providers).` });
   }
@@ -58,7 +58,7 @@ export function screenReadiness(spec: ScreenSpec, facts: Omit<ReadinessFacts, 't
     const parts = [
       `${e.symbols.toLocaleString()} symbol${e.symbols === 1 ? '' : 's'}`,
       `${e.stored.toLocaleString()} already stored`,
-      e.requests === 0 ? 'nothing to fetch' : `${e.requests.toLocaleString()} broker requests, ${formatDuration(e.seconds)} at the broker's limit`,
+      formatCost(e),
     ];
     checks.push(
       e.symbols === 0

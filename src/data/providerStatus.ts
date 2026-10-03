@@ -1,5 +1,5 @@
 import { getPreference, listProviders, setPreference, type ProviderInfo } from '../lib/ipc';
-import { DEFAULT_PROVIDER, type ProviderId } from '../lib/symbols';
+import { DEFAULT_PROVIDER, isSupportedProvider, type ProviderId } from '../lib/symbols';
 
 /** A live snapshot of which data providers are switched on and set up, and
  *  which one is the default. Data code — search, quotes, the providers
@@ -36,13 +36,14 @@ export function subscribeProviderState(listener: () => void): () => void {
 export const providerInfo = (id: string): ProviderInfo | undefined => state.providers.find((p) => p.id === id);
 
 /** Providers that need the user's own account: never assumed ready. */
-const OPT_IN = new Set<string>(['dhan', 'zerodha']);
+const OPT_IN = new Set<string>(['zerodha']);
 
 /** Enabled and fully set up. Before the first load, only what needs no setup
- *  counts, so an account-backed source is never assumed to be ready. */
+ *  counts, so an account-backed source is never assumed to be ready, and a removed
+ *  one (a saved `dhan:` symbol) never is. */
 export function isProviderUsable(id: string): boolean {
   const info = providerInfo(id);
-  if (!info) return !state.loaded && !OPT_IN.has(id);
+  if (!info) return !state.loaded && !OPT_IN.has(id) && isSupportedProvider(id);
   return info.enabled && info.configured;
 }
 

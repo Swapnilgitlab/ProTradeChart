@@ -1,7 +1,7 @@
 import { useId } from 'react';
 import { ArrowDown, ArrowUp, Plus, X } from 'lucide-react';
 import { canonicalFeature, featureLabel, featureUnit, SUGGESTED_METRICS } from '../../studies/metrics';
-import { OPS, type Condition, type Op } from '../../studies/spec';
+import { OPS, withOp, type Condition, type Op } from '../../studies/spec';
 
 const OP_LABELS: Record<Op, string> = {
   '>': '>',
@@ -10,6 +10,8 @@ const OP_LABELS: Record<Op, string> = {
   '<=': '≤',
   crosses_above: 'crosses above',
   crosses_below: 'crosses below',
+  between: 'between',
+  outside: 'outside',
 };
 
 /** Features offered in the pickers: the suggested ones and the price itself. */
@@ -73,13 +75,26 @@ export function ConditionList<T extends Condition>({ items, onChange, make, with
               title={featureLabel(c.left)}
               onChange={(e) => update(i, { left: e.currentTarget.value.trim() } as Partial<T>)}
             />
-            <select className="python-input" value={c.op} aria-label="Operator" onChange={(e) => update(i, { op: e.currentTarget.value as Op } as Partial<T>)}>
+            <select
+              className="python-input"
+              value={c.op}
+              aria-label="Operator"
+              onChange={(e) => onChange(items.map((x, k) => (k === i ? withOp(x, e.currentTarget.value as Op) : x)))}
+            >
               {OPS.map((op) => (
                 <option key={op} value={op}>
                   {OP_LABELS[op]}
                 </option>
               ))}
             </select>
+            {Array.isArray(c.right) && (
+              <RangeInputs
+                range={c.right}
+                percent={percent}
+                onChange={(right) => update(i, { right } as Partial<T>)}
+              />
+            )}
+            {!Array.isArray(c.right) && (
             <select
               className="python-input study-cond-kind"
               value={rightIsFeature ? 'feature' : 'number'}
@@ -89,7 +104,8 @@ export function ConditionList<T extends Condition>({ items, onChange, make, with
               <option value="number">value</option>
               <option value="feature">feature</option>
             </select>
-            {rightIsFeature ? (
+            )}
+            {Array.isArray(c.right) ? null : rightIsFeature ? (
               <input
                 className="python-input study-cond-feature"
                 list={listId}
@@ -148,5 +164,31 @@ export function ConditionList<T extends Condition>({ items, onChange, make, with
         {addLabel}
       </button>
     </div>
+  );
+}
+
+/** A range condition's low and high, typed as percentages for a percentage feature. */
+function RangeInputs({ range, percent, onChange }: { range: [number, number]; percent: boolean; onChange: (range: [number, number]) => void }) {
+  const scale = percent ? 100 : 1;
+  return (
+    <span className="study-cond-number">
+      {([0, 1] as const).map((end) => (
+        <input
+          key={end}
+          className="python-input"
+          type="number"
+          step="any"
+          value={Number.isFinite(range[end]) ? Number((range[end] * scale).toPrecision(10)) : ''}
+          aria-label={end === 0 ? 'Low' : 'High'}
+          onChange={(e) => {
+            const v = e.currentTarget.valueAsNumber;
+            const next: [number, number] = [range[0], range[1]];
+            next[end] = Number.isFinite(v) ? v / scale : Number.NaN;
+            onChange(next);
+          }}
+        />
+      ))}
+      {percent && <span className="muted">%</span>}
+    </span>
   );
 }

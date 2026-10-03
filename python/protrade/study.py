@@ -43,14 +43,18 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 import pandas as pd
 
-from . import api, client, features as feat, measures as msr, results, stats_tests as tests_mod
+from . import api, client, features as feat, measures as msr, results, stats_tests as tests_mod, wide
+from .wide import WideFeatures
 
 SPEC_VERSION = 1
 # 1.1: measures (what a Study reads over a window of bars) and the Study's question.
 ENGINE_VERSION = "1.1"
 RESULT_FORMAT = 1
 
-PROVIDERS = ("zerodha", "dhan")
+PROVIDERS = ("zerodha",)
+# Dhan is no longer a data source. A Study or screen saved with it lists the same shares from Zerodha's
+# instrument list, as `currentProvider` in `studies/spec.ts` does, rather than refusing to open.
+RETIRED_PROVIDERS = {"dhan": "zerodha"}
 EXCHANGES = ("NSE", "BSE")
 UNIVERSE_SOURCES = ("instruments", "watchlist", "symbols")
 # Which listings of an instrument list count as stocks: ordinary shares ("EQ"), the trade-for-trade
@@ -78,6 +82,9 @@ MAX_FINDINGS = 10
 # Requests kept in flight to the app. It paces the broker itself; this only has to be enough that
 # a request is always waiting at that pace, whatever each round trip costs.
 LOAD_WORKERS = 8
+# Symbols per read from the market-data store: a few years of a few hundred symbols is a few MB, and
+# the features detection needs are computed for each batch together.
+PANEL_BATCH = 400
 
 
 class SpecError(ValueError):
@@ -180,6 +187,7 @@ def normalize_spec(spec: dict) -> dict:
     if source not in UNIVERSE_SOURCES:
         raise SpecError(f"universe.source must be one of {', '.join(UNIVERSE_SOURCES)}.")
     provider = raw.get("provider", "zerodha")
+    provider = RETIRED_PROVIDERS.get(provider, provider) if isinstance(provider, str) else provider
     if provider not in PROVIDERS:
         raise SpecError(f"universe.provider must be one of {', '.join(PROVIDERS)}.")
     exchanges = raw.get("exchanges", ["NSE"])
@@ -294,6 +302,10 @@ def normalize_spec(spec: dict) -> dict:
         },
         "output": {"max_events": _int(output.get("max_events"), "output.max_events", 1, MAX_EVENTS, default=DEFAULT_MAX_EVENTS)},
     }
+    # On a past day, that week's or month's bar includes the days after it: a look-ahead.
+    periodic = [n for n in required_features(normalized) if feat.interval(n) != "D"]
+    if periodic:
+        raise SpecError(f"{', '.join(periodic)}: weekly and monthly features are for the Screener; a Study reads daily bars.")
     if normalized["benchmark"] is None:
         needing = [n for n in required_features(normalized) if feat.needs_benchmark(n)]
         if needing:
@@ -573,7 +585,7 @@ class ResearchStudy:
                     if row.get("name"):
                         self.names[row["symbol"]] = row["name"]
             if not chosen:
-                raise client.NotFoundError(f"The watchlist {u['watchlist']!r} has no Zerodha or Dhan symbols on it.")
+                raise client.NotFoundError(f"The watchlist {u['watchlist']!r} has no Zerodha symbols on it.")
             self.warn("hindsight_universe", "The universe is a watchlist chosen today, so it may carry hindsight (survivorship or selection bias).")
         else:
             rows = []
@@ -609,12 +621,16 @@ class ResearchStudy:
     def load(self, symbols, on_symbol=None) -> dict[str, feat.Features]:
         """Daily bars for each symbol (and the benchmark), from the study's first needed date.
 
-        ``on_symbol(symbol, features)`` is called as each symbol arrives, while the rest are still
-        being fetched; a falsy answer leaves that symbol out of the result (it can never be used)."""
+        Symbols the app's market-data store holds come in batches, one read each, with the features
+        event detection needs computed for the whole batch at once; only the rest are fetched one by
+        one. ``on_symbol(symbol, features)`` is called as each symbol arrives; a falsy answer leaves
+        that symbol out of the result (it can never be used). The result is in universe order, so
+        nothing downstream depends on which fetch finished first."""
         spec = self.spec
         start, end = fetch_start(spec), spec["period"]["end"]
         symbols = list(dict.fromkeys(symbols))
         self.requested = self.requested or len(symbols)
+
         if spec["benchmark"]:
             try:
                 bench = api.bars(spec["benchmark"], "D", start=start, end=end, naive=True)
@@ -632,45 +648,96 @@ class ResearchStudy:
         last_report = 0.0
         done = 0
 
-        def fetch(symbol: str) -> pd.DataFrame:
-            return api.bars(symbol, "D", start=start, end=end, naive=True)
+        def accept(symbol: str, frame: pd.DataFrame | None, computed: dict | None = None) -> None:
+            if frame is None or not len(frame):
+                return
+            self._series_info[symbol] = (frame.index[0], frame.index[-1], len(frame), float(frame["close"].iloc[-1]))
+            features = feat.Features(frame, self.benchmark_close)
+            features._cache.update(computed or {})
+            if on_symbol is None or on_symbol(symbol, features):
+                data[symbol] = features
 
-        # One pool over the whole universe, so the app always has requests queued at the broker's
-        # pace (it paces them itself); whatever arrives is processed while the rest is fetched.
-        pool = ThreadPoolExecutor(max_workers=LOAD_WORKERS)
-        try:
-            futures = {pool.submit(fetch, s): s for s in symbols}
-            for future in as_completed(futures):
-                symbol = futures[future]
-                done += 1
-                try:
-                    frame = future.result()
-                except client.FATAL:
-                    raise
-                except client.ProTradeError as e:
-                    self.failed[symbol] = str(e)
-                    frame = None
-                if frame is not None and len(frame):
-                    self._series_info[symbol] = (frame.index[0], frame.index[-1], len(frame), float(frame["close"].iloc[-1]))
-                    features = feat.Features(frame, self.benchmark_close)
-                    if on_symbol is None or on_symbol(symbol, features):
-                        data[symbol] = features
-                now = time.monotonic()
-                if now - last_report >= 1.0 or done == total:
-                    last_report = now
-                    line = f"Loading historical data ({done}/{total})"
-                    pace = api._pace(done, total, now - started)
-                    if pace:
-                        line += f" · {pace[0]:.1f}/s, about {api._duration(pace[1])} left"
-                    self.progress(2 + int(70 * done / max(total, 1)), line)
-        finally:
-            pool.shutdown(wait=False, cancel_futures=True)
+        def report(stage: str) -> None:
+            nonlocal last_report
+            now = time.monotonic()
+            if now - last_report >= 1.0 or done == total:
+                last_report = now
+                line = f"{stage} ({done}/{total})"
+                pace = api._pace(done, total, now - started)
+                if pace:
+                    line += f" · {pace[0]:.1f}/s, about {api._duration(pace[1])} left"
+                self.progress(2 + int(70 * done / max(total, 1)), line)
+
+        missing: list[str] = []
+        for i in range(0, total, PANEL_BATCH):
+            batch = symbols[i : i + PANEL_BATCH]
+            frames, lacking = api._from_panel(batch, start, end, None, naive=True)
+            missing += lacking
+            computed = self._detection_features(frames)
+            for symbol in batch:
+                if symbol in frames:
+                    accept(symbol, frames[symbol], computed.get(symbol))
+                    done += 1
+            report("Reading historical data")
+
+        if missing:
+            topup = api._top_up(missing, start=start, end=end)
+            if topup:
+                ready = topup["current"] + topup["updated"]
+                if ready:
+                    self.progress(2, f"{ready} of {len(missing)} symbols already up to date")
+
+            def fetch(symbol: str) -> pd.DataFrame:
+                return api.bars(symbol, "D", start=start, end=end, naive=True)
+
+            # One pool over everything the store lacks, so the app always has requests queued at the
+            # broker's pace (it paces them itself); whatever arrives is processed while the rest is
+            # fetched.
+            pool = ThreadPoolExecutor(max_workers=LOAD_WORKERS)
+            try:
+                futures = {pool.submit(fetch, s): s for s in missing}
+                for future in as_completed(futures):
+                    symbol = futures[future]
+                    done += 1
+                    try:
+                        frame = future.result()
+                    except client.FATAL:
+                        raise
+                    except client.ProTradeError as e:
+                        self.failed[symbol] = str(e)
+                        frame = None
+                    accept(symbol, frame)
+                    report("Loading historical data")
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
+        data = {s: data[s] for s in symbols if s in data}
         self.timings["load"] = round(time.monotonic() - started, 1)
         if self.failed:
             self.warn("load_failed", f"{len(self.failed)} of {total} symbols couldn't be loaded and are left out.")
         if not self._series_info:
             raise StudyDataError("No symbol in the universe had any daily data to study.")
         return data
+
+    def _detection_features(self, frames: dict[str, pd.DataFrame]) -> dict[str, dict[str, pd.Series]]:
+        """The features event detection reads (its conditions, the pre-event filters, liquidity and
+        price), for a batch of symbols at once: ``{symbol: {feature: series on its own dates}}``.
+        The same numbers ``Features`` would compute one symbol at a time (``tests/test_wide.py``)."""
+        if not frames:
+            return {}
+        spec = self.spec
+        names = {"close", LIQUIDITY_FEATURE}
+        for condition in [*spec["event"]["conditions"], *spec["pre_event_filters"]]:
+            names.update(feat.condition_features(condition))
+        table = WideFeatures(frames, self.benchmark_close)
+        rows = len(table)
+        out: dict[str, dict[str, pd.Series]] = {s: {} for s in frames}
+        for name in names:
+            key = feat.canonical(name)
+            values = table.get(key)
+            for symbol, frame in frames.items():
+                n = len(frame)
+                out[symbol][key] = pd.Series(values[symbol].to_numpy()[rows - n :], index=frame.index)
+        return out
 
     # -- 3. events
 
@@ -1333,7 +1400,7 @@ def engine_build() -> str:
     ran an out-of-date copy is plain to see."""
     digest = hashlib.sha256()
     # Every module a Study's numbers depend on: a new one belongs here as well as in client_files.rs.
-    for module in (__file__, feat.__file__, msr.__file__):
+    for module in (__file__, feat.__file__, msr.__file__, wide.__file__):
         try:
             with open(module, "rb") as f:
                 digest.update(f.read().replace(b"\r\n", b"\n"))

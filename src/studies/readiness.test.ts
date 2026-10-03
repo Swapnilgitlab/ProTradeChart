@@ -6,7 +6,7 @@ import { fromTemplate } from './templates';
 const facts = (over: Partial<ReadinessFacts> = {}): ReadinessFacts => ({
   providers: [
     { id: 'zerodha', usable: true },
-    { id: 'dhan', usable: false },
+    { id: 'binance', usable: false },
   ],
   pythonReady: true,
   watchlists: ['Nifty 50'],
@@ -53,7 +53,7 @@ describe('checkReadiness', () => {
 
   it('offers to drop the benchmark when its source isn’t set up, and the result still validates', () => {
     const spec = fromTemplate('winners_100');
-    spec.benchmark = 'dhan:IDX:NIFTY500';
+    spec.benchmark = 'binance:BTCUSDT';
     const r = checkReadiness(spec, facts());
     expect(item(r, 'Index data')).toMatchObject({ status: 'unavailable', blocking: false, fix: { id: 'drop_benchmark' } });
     const dropped = applyFix(spec, 'drop_benchmark');
@@ -92,7 +92,7 @@ describe('checkReadiness', () => {
   it('says what the data will cost and offers a trial run when it is long', () => {
     const spec = fromTemplate('winners_100');
     spec.universe.exchanges = ['NSE', 'BSE'];
-    const r = checkReadiness(spec, facts({ estimate: { symbols: 4200, stored: 200, requests: 4000, seconds: 1400, listingsSkipped: 9000 } }));
+    const r = checkReadiness(spec, facts({ estimate: { symbols: 4200, stored: 200, requests: 4000, quoteRequests: 0, seconds: 1400, listingsSkipped: 9000 } }));
     const cost = item(r, 'Data to load');
     expect(cost.status).toBe('warning');
     expect(cost.detail).toContain('4,200 symbols');
@@ -106,11 +106,36 @@ describe('checkReadiness', () => {
   });
 
   it('calls a quick load quick and an empty universe a problem', () => {
-    const quick = checkReadiness(fromTemplate('winners_100'), facts({ estimate: { symbols: 2000, stored: 2000, requests: 0, seconds: 0, listingsSkipped: 0 } }));
+    const quick = checkReadiness(
+      fromTemplate('winners_100'),
+      facts({ estimate: { symbols: 2000, stored: 2000, requests: 0, quoteRequests: 0, seconds: 0, listingsSkipped: 0 } }),
+    );
     expect(item(quick, 'Data to load')).toMatchObject({ status: 'available', fix: undefined });
     expect(item(quick, 'Data to load').detail).toContain('nothing to fetch');
-    const empty = checkReadiness(fromTemplate('winners_100'), facts({ estimate: { symbols: 0, stored: 0, requests: 0, seconds: 0, listingsSkipped: 12 } }));
+    const empty = checkReadiness(
+      fromTemplate('winners_100'),
+      facts({ estimate: { symbols: 0, stored: 0, requests: 0, quoteRequests: 0, seconds: 0, listingsSkipped: 12 } }),
+    );
     expect(empty.ready).toBe(false);
+  });
+
+  it('prices an already-synced universe at the quote top-up, not a broker request each', () => {
+    const r = checkReadiness(
+      fromTemplate('winners_100'),
+      facts({ estimate: { symbols: 2000, stored: 2000, requests: 0, quoteRequests: 1, seconds: 1.1, listingsSkipped: 0 } }),
+    );
+    const detail = item(r, 'Data to load').detail;
+    expect(detail).toContain('1 quick quote check');
+    expect(detail).not.toContain('nothing to fetch');
+    expect(detail).not.toContain('broker request');
+
+    const mixed = checkReadiness(
+      fromTemplate('winners_100'),
+      facts({ estimate: { symbols: 2000, stored: 1990, requests: 10, quoteRequests: 1, seconds: 4.6, listingsSkipped: 0 } }),
+    );
+    const mixedDetail = item(mixed, 'Data to load').detail;
+    expect(mixedDetail).toContain('10 broker requests');
+    expect(mixedDetail).toContain('1 quick quote check');
   });
 
   it('writes durations as people read them', () => {

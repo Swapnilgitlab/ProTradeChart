@@ -79,7 +79,7 @@ question's shape, don't approximate it with something that can: say so in `unava
 question in `question`, in the trader's words, and mark the one to three measures that answer it as `headline`.
 
 The data it has is daily open, high, low, close and volume for NSE and BSE stocks and indices, from the user's broker \
-(Zerodha or Dhan), and every feature is computed from those bars. It does not have market capitalisation, sector or \
+(Zerodha), and every feature is computed from those bars. It does not have market capitalisation, sector or \
 industry, fundamentals, news, a point-in-time universe (stocks delisted before today are missing), or adjustment for \
 splits and bonuses. When a question needs any of these, don't approximate it inside the spec: leave that part out and \
 say in `unavailable` what couldn't be studied and why. If an alternative exists that the user might accept (average \

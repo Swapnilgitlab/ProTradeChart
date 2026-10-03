@@ -47,6 +47,7 @@
 }
 
 .home-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -67,9 +68,44 @@
 .home-card svg {
   color: var(--accent);
 }
+
+/* A setup step worth tracking: done fades into the grid, pending stands out from it. */
+.home-card-pending {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.home-card-status {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  line-height: 1.5;
+}
+.home-card-status.done {
+  color: var(--profit);
+  background: color-mix(in srgb, var(--profit) 15%, transparent);
+}
+.home-card-status.done svg {
+  color: var(--profit);
+}
+.home-card-status.pending {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
 .home-card-title {
   font-weight: 600;
   color: var(--text-primary);
+}
+.home-card-title .default-star {
+  margin-left: 4px;
+  vertical-align: -1px;
 }
 .home-card-description {
   color: var(--text-secondary);
@@ -86,27 +122,4 @@
 }
 .home-card-control .theme-select {
   margin-top: 4px;
-}
-
-.home-layouts {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.home-layout-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 10px;
-  border: none;
-  border-radius: var(--r-md);
-  background: transparent;
-  color: var(--text-secondary);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.home-layout-row:hover {
-  background: var(--surface-hover);
-  color: var(--text-primary);
 }

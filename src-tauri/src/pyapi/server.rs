@@ -16,7 +16,7 @@ use hyper_util::rt::{TokioIo, TokioTimer};
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
 
-use super::routes::{authorize, dispatch, too_large, Backend, Ctx, Req, Resp, MAX_BODY_BYTES};
+use super::routes::{authorize, dispatch, too_large, Backend, Ctx, Req, Resp, JSON, MAX_BODY_BYTES};
 use super::wire::error_json;
 use super::ApiError;
 
@@ -172,6 +172,7 @@ async fn respond(ctx: &Ctx, request: Request<Incoming>) -> Response<Full<Bytes>>
 fn refusal(e: &ApiError) -> Resp {
     Resp {
         status: e.status,
+        content_type: JSON,
         body: error_json(e),
     }
 }
@@ -179,7 +180,7 @@ fn refusal(e: &ApiError) -> Resp {
 fn build(answer: Resp) -> Response<Full<Bytes>> {
     Response::builder()
         .status(answer.status)
-        .header(CONTENT_TYPE, "application/json")
+        .header(CONTENT_TYPE, answer.content_type)
         // Market data for one script run; nothing should keep a copy.
         .header(CACHE_CONTROL, "no-store")
         .header("X-Content-Type-Options", "nosniff")

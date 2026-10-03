@@ -11,5 +11,6 @@ export function openNewWindow(): void {
     height: 860,
     minWidth: 900,
     minHeight: 600,
+    decorations: false,
   });
 }

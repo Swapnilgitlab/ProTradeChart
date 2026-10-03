@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS watchlist_sections (
 );
 CREATE INDEX IF NOT EXISTS idx_watchlist_sections_list ON watchlist_sections(watchlist_id);
 
--- Read-through cache of the brokers' bars (keys start `dhan:` / `zerodha:`), used only as an
+-- Read-through cache of the brokers' bars (keys start `zerodha:`), used only as an
 -- offline fallback.
 CREATE TABLE IF NOT EXISTS bars_cache (
   symbol    TEXT NOT NULL,
@@ -100,6 +100,18 @@ CREATE TABLE IF NOT EXISTS research_coverage (
   to_ts      INTEGER NOT NULL,
   synced_at  INTEGER NOT NULL,
   PRIMARY KEY (symbol, interval)
+) WITHOUT ROWID;
+
+-- The symbols the market-data store keeps daily history for (`store/market_symbols.rs`).
+-- Unlike the brokers' instrument tables, which each refresh replaces, a row here outlives
+-- its listing: a new one is a new listing (an IPO) and a stale `last_seen` a delisting.
+CREATE TABLE IF NOT EXISTS market_symbols (
+  symbol        TEXT PRIMARY KEY,
+  kind          TEXT NOT NULL,
+  name          TEXT,
+  first_seen    INTEGER NOT NULL,
+  last_seen     INTEGER NOT NULL,
+  refetched_at  INTEGER
 ) WITHOUT ROWID;
 
 -- User-imported OHLCV datasets (CSV), chartable as `csv:<TICKER>`.
@@ -139,21 +151,7 @@ CREATE TABLE IF NOT EXISTS provider_secrets_fallback (
   PRIMARY KEY (provider, key)
 ) WITHOUT ROWID;
 
--- Dhan's instrument master, trimmed to what can be charted (equities, indices,
--- futures). `ticker` is the chart symbol without its provider, e.g. NSE:RELIANCE.
-CREATE TABLE IF NOT EXISTS dhan_instruments (
-  ticker       TEXT PRIMARY KEY,
-  exchange     TEXT NOT NULL,
-  segment      INTEGER NOT NULL,
-  security_id  INTEGER NOT NULL,
-  instrument   TEXT NOT NULL,
-  symbol       TEXT NOT NULL,
-  name         TEXT,
-  expiry       TEXT
-) WITHOUT ROWID;
-CREATE INDEX IF NOT EXISTS idx_dhan_instruments_id ON dhan_instruments(segment, security_id);
-
--- Zerodha's instrument master, trimmed the same way. `ticker` is the chart
+-- Zerodha's instrument master, trimmed to what can be charted (equities, indices, futures). `ticker` is the chart
 -- symbol without its provider, e.g. NSE:RELIANCE or NSE:NIFTY_50; `symbol` is the
 -- trading symbol as Kite spells it, which quote requests need.
 CREATE TABLE IF NOT EXISTS zerodha_instruments (

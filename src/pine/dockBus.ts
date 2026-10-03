@@ -1,11 +1,11 @@
-/** How things outside the React tree (a Vela legend button, a keyboard shortcut) ask the
- *  Pine dock to do something. Vela's contribution registries take plain callbacks with no
- *  access to React state, so they publish here and the dock subscribes. */
+/** How things outside the React tree (a Vela legend button, the Script Editor tab) ask the
+ *  Strategy Tester dock or the workspace to do something. Vela's contribution registries take
+ *  plain callbacks with no access to React state, so they publish here and React subscribes. */
 
 export type DockRequest =
-  | { type: 'toggle' }
+  | { type: 'toggle-tester' }
   | { type: 'open-tester' }
-  /** Open a chart indicator's source in the editor. `indicatorId` is what the legend row
+  /** Open a chart indicator's source in the Script Editor tab. `indicatorId` is what the legend row
    *  carries; `source`/`name` let the editor show it even if the library script is gone. */
   | { type: 'edit-indicator'; indicatorId: string; source: string; name: string };
 

@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::data::BarsData;
+use super::data::{BarsData, SyncReport, SyncStatus};
 use super::ApiError;
 
 /// What a script posts to show in the app: a table, a backtest report or a figure. Rust checks
@@ -45,6 +45,139 @@ pub struct WatchlistSync {
     pub added: usize,
     pub removed: usize,
     pub total: usize,
+}
+
+/// A `POST /v1/bars/sync` request, before [`super::routes::sync_request`] checks it.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct SyncPost {
+    pub symbols: Vec<String>,
+    #[serde(default)]
+    pub interval: Option<String>,
+    pub from: Option<i64>,
+    pub to: Option<i64>,
+    pub limit: Option<usize>,
+}
+
+/// A posted panel request: many symbols' stored bars in one answer (`POST /v1/panel`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PanelPost {
+    pub symbols: Vec<String>,
+    #[serde(default)]
+    pub interval: Option<String>,
+    pub from: Option<i64>,
+    pub to: Option<i64>,
+    /// The newest this many bars per symbol.
+    pub bars: Option<usize>,
+}
+
+/// What a panel answer's JSON header says about each series; its bars follow in the arrays.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PanelSeriesHead<'a> {
+    symbol: &'a str,
+    count: usize,
+    current: bool,
+    covered_from: Option<i64>,
+    covered_to: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PanelHead<'a> {
+    format: u32,
+    interval: &'a str,
+    timezone: &'static str,
+    count: usize,
+    series: Vec<PanelSeriesHead<'a>>,
+}
+
+/// The panel's binary format, version 1 (`python/protrade/panels.py` reads it):
+///
+/// ```text
+/// u32 LE   length of the JSON header
+/// bytes    the JSON header: {format, interval, timezone, count, series: [{symbol, count, current,
+///          coveredFrom, coveredTo}]}
+/// zeros    padding to a multiple of 8 bytes
+/// i64 LE × count   time (epoch ms)        — every series' bars back to back, in header order,
+/// f64 LE × count   open                     each series oldest first
+/// f64 LE × count   high
+/// f64 LE × count   low
+/// f64 LE × count   close
+/// f64 LE × count   volume (NaN where there is none, as for an index)
+/// ```
+///
+/// Columns rather than rows so a reader takes each one as an array without a copy, and binary
+/// because a whole market's five years is millions of numbers that JSON would triple in size.
+pub fn panel_body(interval: &str, series: &[super::data::PanelSeries]) -> Vec<u8> {
+    let count: usize = series.iter().map(|s| s.bars.len()).sum();
+    let head = PanelHead {
+        format: 1,
+        interval,
+        timezone: "Asia/Kolkata",
+        count,
+        series: series
+            .iter()
+            .map(|s| PanelSeriesHead {
+                symbol: &s.symbol,
+                count: s.bars.len(),
+                current: s.current,
+                covered_from: s.coverage.map(|c| c.from_ms),
+                covered_to: s.coverage.map(|c| c.to_ms),
+            })
+            .collect(),
+    };
+    let head = serde_json::to_vec(&head).unwrap_or_default();
+    let padded = (4 + head.len()).div_ceil(8) * 8;
+    let mut out = Vec::with_capacity(padded + count * 48);
+    out.extend_from_slice(&(head.len() as u32).to_le_bytes());
+    out.extend_from_slice(&head);
+    out.resize(padded, 0);
+    let bars = || series.iter().flat_map(|s| s.bars.iter());
+    bars().for_each(|b| out.extend_from_slice(&b.time.to_le_bytes()));
+    for field in [
+        |b: &crate::models::Bar| b.open,
+        |b: &crate::models::Bar| b.high,
+        |b: &crate::models::Bar| b.low,
+        |b: &crate::models::Bar| b.close,
+        |b: &crate::models::Bar| b.volume.unwrap_or(f64::NAN),
+    ] {
+        bars().for_each(|b| out.extend_from_slice(&field(b).to_le_bytes()));
+    }
+    out
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncResultBody {
+    pub symbol: String,
+    /// `current`, `updated`, `fetch` or `skipped`.
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SyncReportBody {
+    pub results: Vec<SyncResultBody>,
+}
+
+pub fn sync_report_body(report: &SyncReport) -> SyncReportBody {
+    SyncReportBody {
+        results: report
+            .results
+            .iter()
+            .map(|r| SyncResultBody {
+                symbol: r.symbol.clone(),
+                status: match r.status {
+                    SyncStatus::Current => "current",
+                    SyncStatus::Updated => "updated",
+                    SyncStatus::Fetch => "fetch",
+                    SyncStatus::Skipped => "skipped",
+                },
+                reason: r.reason.clone(),
+            })
+            .collect(),
+    }
 }
 
 #[derive(Debug, Serialize)]

@@ -7,6 +7,67 @@ project uses [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- **Screener results as charts.** **Charts**, beside **Table** above a screen's results, shows the matches as daily
+  candlestick charts, 1 × 1 up to 2 × 2 at a time, in the table's order; the arrows page through them and a stock's name
+  opens it in a chart tab. **1M**, **3M**, **6M**, **1Y**, **5Y** and **All** pick how much history each chart shows. The
+  **Filters** and **Columns** sections fold to a one-line summary while the charts are shown (click a heading to open it
+  again).
+- **The Script Editor has a tab of its own.** Like the Python tab: your scripts, the bundled ones and examples are listed on
+  the left, the editor and its console beside them, so there's room to write. `Ctrl+E` or the rail's **</>** opens it, and a
+  legend row's pencil opens that script there. **Add to chart** uses the chart you last looked at, named in the toolbar (click
+  it to go there). The Strategy Tester stays under the chart, with its own rail button and `Ctrl+Shift+E`; adding a strategy
+  opens it.
+- **TradingView-style Screener filters.** **+** now opens a grouped, searchable list — Price (price, price change in ₹,
+  change %, gap %, gap up %, gap down %, 52-week high and low), Volume (volume, relative volume, average volume, average
+  traded value), Moving averages, Oscillators, Performance and Volatility. A filter's editor picks its length or period and
+  its interval — **1 day**, **1 week** or **1 month** — under the title, conditions now include **Between** and **Outside**
+  (Studies too), and comparing with another indicator is a pick of indicator, length and interval rather than typing a
+  name. Chips read like `Chg > 2%` or `Price ≥ EMA, 50`.
+
+- **Market data on this computer.** Data providers → **Market data** downloads five years of daily prices for every NSE
+  stock and index once (about 10–15 minutes at the broker's pace; it can be stopped and resumed), then keeps them
+  current by itself after each trading day while the app is open: the latest prices, new listings (IPOs), and a stock's
+  whole history again after a split or bonus, so old and adjusted prices are never mixed. Charts always go ahead of it
+  at the broker, and it never runs during startup. The Home tab's **Market data** card shows whether it's done.
+- **A whole-market Screener in a couple of seconds.** With the market data downloaded, a screen reads every stock's
+  history from the store in one go and computes its filters for all of them at once — the same numbers as before, far
+  faster (a 52-week-high screen over ~2,700 symbols measured about 15 seconds before). Studies read the store in
+  batches the same way, and daily, weekly and monthly charts of a stored stock draw from it, fetching only today's bar.
+- **`pt.panel` for Python scripts.** Reads many symbols' stored daily bars in one request (`.frame(symbol)` for one
+  symbol's DataFrame, `.wide("close")` for a dates × symbols table). `pt.bars_many` uses it automatically for daily
+  bars, fetching only what the store doesn't hold. A new example, `screen_six_month_momentum.py`, shows it.
+- **A much faster Screener and Study, after the first run.** The very first screen or Study over a whole exchange still
+  fetches every stock's full history at the broker's rate limit (about 12 minutes for NSE through Zerodha). Every run
+  after that — including a new trading day's first — now brings each stock's latest bar up to date with one batched
+  broker quote instead of a rate-limited history fetch per stock, cutting a daily re-run from minutes to seconds. A quote
+  that can't be trusted (it doesn't agree with yesterday's stored close, say after a corporate action) falls back to the
+  slower, exact fetch automatically, so results are never affected, only how long they take.
+- **Screener filters as chips.** A filter is now a chip showing its condition at a glance (`RSI 14 < 30`), like a
+  TradingView screen; click one to open its own editor — a period where the feature has one (1 month, 3 months…), a
+  friendlier condition word (**Above**, **Below**, **Crosses above**…) and a value or another feature to compare with —
+  instead of every filter's full row always being expanded. A chip's own **×** removes it; **+** picks a new one from a
+  list rather than typing a feature's name.
+- **A roomier Screener.** Filters and columns now use the full width: the name, universe form and **Before it runs**
+  checklist that used to sit in a fixed column beside them are tucked behind a **More options** toggle next to the
+  universe pills, open only when you need them. **My screens** can collapse to a thin strip for more room too. Adding a
+  column is now a **+** button with a pick-from-a-list menu, not typing a name.
+- **A quicker Screener toolbar.** The screen's name is now a dropdown, so switching between saved screens no longer needs
+  the side list. A refresh icon reruns the current screen, and the universe and exchange are now quick pills right in
+  the toolbar (**Broker instruments / Watchlist / Symbol list**, then **NSE**/**BSE** when instruments are picked) —
+  shortcuts into the same universe settings **More options** has in full.
+- **The Home tab's Setup section tracks your progress.** Data providers, AI providers, Import data, Python setup and
+  Market data each show **Done** once you've completed them, or a highlighted **Pending** while you haven't —
+  a broker connected, an AI key saved, a dataset imported, Python ready, or the market data downloaded.
+- **The chart's own symbol search now finds NSE stocks.** Clicking a chart's symbol name, or typing while it's focused,
+  is Vela's own built-in search — it previously had nothing indexed for Zerodha, so it came back empty for
+  Indian equities. It now knows every NSE equity (~2,000 symbols) from Zerodha once it is connected. The app's own
+  search box (`Ctrl+K`, the tab bar) already searched everything and is unchanged.
+- **A merged title bar.** The window's title bar and the tab bar are now one: the logo sits at the left of the tab bar, and
+  minimize, maximize and close sit at its right, instead of a separate native title bar above it. Drag the logo or the
+  empty space beside the tabs to move the window; double-click either to maximize or restore.
+- **A tidier tab bar.** Import data, New window and About moved to the right rail, alongside Data providers, AI providers
+  and Help. The tab bar now holds only the tabs, the Layout menu, the symbol search and the theme selector. The search
+  box's source dropdown is gone too — it now always searches every source that's switched on.
 - **A Home tab.** A house icon in the right rail opens an overview of the application — starting a chart or opening a
   saved layout, the watchlist and alerts, Ask AI, Python, Studies and the Screener, connecting data and AI providers,
   importing your own data, the theme and keyboard shortcuts, and About and Help — one click from each other.
@@ -34,7 +95,7 @@ project uses [Semantic Versioning](https://semver.org).
 - **Quick-access watchlists.** Star up to five lists: they sit as buttons across the top of the watchlist panel and appear in
   the chart's right-click menu.
 - **Browse all watchlists.** A dialog listing every watchlist, to search, open, star, rename, delete and create them.
-- **Indices watchlist.** One click builds a watchlist of Indian indices from your Zerodha or Dhan instrument list, grouped as
+- **Indices watchlist.** One click builds a watchlist of Indian indices from your Zerodha instrument list, grouped as
   Broad market, Sectors (Nifty Bank, IT, Pharma, Auto, FMCG, Metal…) and Themes.
 - **Resizable side panel.** Drag the left edge of the watchlist, alerts or Ask AI panel to change its width (double-click to
   reset); the width is remembered.
@@ -78,7 +139,7 @@ project uses [Semantic Versioning](https://semver.org).
   by tick; the rest refresh every 20 seconds.
 - **Python for screening and research.** A Python tab (`Ctrl+Shift+Y`) beside your charts, with a script list, an editor,
   a console and a results view, runs your
-  own scripts against your Zerodha or Dhan data. Scripts `import protrade as pt` for DataFrames of bars
+  own scripts against your Zerodha data. Scripts `import protrade as pt` for DataFrames of bars
   (`pt.bars`, `pt.bars_many`), instrument lists, watchlists and `pt.resample`, and can use any library you install beside them.
   It uses your own Python 3.10+ in a private environment the app creates (or an interpreter you name); nothing is bundled.
   Scripts are plain `.py` files you can edit anywhere, run only when you press Run, and stop with everything they started.
@@ -151,6 +212,7 @@ project uses [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
+- A condition on RSI was described with its threshold as a percentage ("RSI 14 below +3000%").
 - **Charts no longer leave a stock at all-time highs sitting well below the top of the pane.** Vela's own autoscale padded
   every chart by nearly 29% above the highest visible price and 14% below the lowest, with no setting to change it; a small
   patch to the bundled library (`patches/`, applied automatically) brings both down to 10%.
@@ -212,10 +274,7 @@ project uses [Semantic Versioning](https://semver.org).
   the first time a tab grows into a grid, a hint explains how to change one chart's symbol.
 - **Data providers.** A settings screen to turn each data source on or off, enter and test broker credentials, and choose
   the default provider for symbols typed without one. Search can be scoped to a single source.
-- **Dhan** as the first broker provider: exchange-grade history (1/5/15/25/60-minute and daily bars, built up to other
-  timeframes), a live tick feed shared across all charts and windows, watchlist quotes, and symbol search over Dhan's
-  instrument list. Credentials are kept in the OS keychain and used only by the Rust backend.
-- Watchlist import maps NSE/BSE symbols to your broker (Dhan or Zerodha) when you have one set up.
+- Watchlist import maps NSE/BSE symbols to your Zerodha account when you have one set up.
 
 ### Fixed
 
@@ -251,16 +310,20 @@ project uses [Semantic Versioning](https://semver.org).
   Worker with no access to the page or the backend.
 - **Binance is the default data source.** New charts, symbols typed without a provider, and the starter watchlist (crypto
   pairs from Binance, Coinbase and Hyperliquid) use sources that need no account. Importing a watchlist sends a bare
-  ticker to the default provider, NSE/BSE symbols to your Dhan or Zerodha account when one is set up, and reports any
+  ticker to the default provider, NSE/BSE symbols to your Zerodha account when one is set up, and reports any
   symbol no source can chart as skipped.
 
 ### Removed
 
 - **Yahoo Finance is no longer a data source.** The provider, its rate limiter, the opt-in terms dialog and the first-run
   intro are gone, and the app makes no request to Yahoo. US and world stocks, FX, indices and futures are no longer available
-  (Indian markets remain available through Dhan or Zerodha). Watchlists, layouts and alerts you saved with `yahoo:`
+  (Indian markets remain available through Zerodha). Watchlists, layouts and alerts you saved with `yahoo:`
   symbols are left as they are — a layout opened with such a tab swaps it for Bitcoin and says so — and the cached Yahoo
   bars and settings are deleted once, on first launch.
+- **Dhan is no longer a data source.** Zerodha is now the only broker for Indian markets. Dhan's provider, live feed,
+  symbol search and settings panel are gone. `dhan:` symbols saved in watchlists, layouts and alerts stay but can't be
+  loaded (a layout swaps such a tab for Bitcoin and says so); Dhan's saved credentials, instrument list, cached bars and
+  market-data history are deleted once, on first launch. A screen or Study saved with Dhan as its broker opens with Zerodha.
 
 ## [0.1.0] — initial release
 

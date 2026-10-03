@@ -27,6 +27,7 @@ pub const FILES: &[(&str, &str)] = &[
         "protrade/measures.py",
         include_str!("../../../python/protrade/measures.py"),
     ),
+    ("protrade/panels.py", include_str!("../../../python/protrade/panels.py")),
     (
         "protrade/results.py",
         include_str!("../../../python/protrade/results.py"),
@@ -46,6 +47,7 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../../../python/protrade/stats_tests.py"),
     ),
     ("protrade/study.py", include_str!("../../../python/protrade/study.py")),
+    ("protrade/wide.py", include_str!("../../../python/protrade/wide.py")),
 ];
 
 /// A file of the package as this build writes it. A release build writes what it embedded. A debug

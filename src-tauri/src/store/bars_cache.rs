@@ -1,4 +1,4 @@
-//! Read-through cache of the brokers' bars (`dhan:…`, `zerodha:…`). It is only
+//! Read-through cache of the broker's bars (`zerodha:…`). It is only
 //! consulted when the network request fails, so the chart still draws something
 //! offline.
 
@@ -101,14 +101,14 @@ mod tests {
         let mut conn = db.conn.lock().unwrap();
         put(
             &mut conn,
-            "dhan:NSE:RELIANCE",
+            "zerodha:NSE:RELIANCE",
             "1D",
             &[bar(1000, 1.0), bar(2000, 2.0), bar(3000, 3.0)],
         )
         .unwrap();
-        put(&mut conn, "dhan:NSE:RELIANCE", "1D", &[bar(3000, 9.0)]).unwrap();
+        put(&mut conn, "zerodha:NSE:RELIANCE", "1D", &[bar(3000, 9.0)]).unwrap();
 
-        let bars = get(&conn, "dhan:NSE:RELIANCE", "1D", None, None, None).unwrap();
+        let bars = get(&conn, "zerodha:NSE:RELIANCE", "1D", None, None, None).unwrap();
         assert_eq!(bars.iter().map(|b| b.time).collect::<Vec<_>>(), [1000, 2000, 3000]);
         assert_eq!(bars[2].close, 9.0);
     }
@@ -172,7 +172,7 @@ mod tests {
         let now = 100 * DAY_MS;
         put(
             &mut conn,
-            "dhan:NSE:TCS",
+            "zerodha:NSE:INFY",
             "5",
             &[bar(now - 10 * DAY_MS, 1.0), bar(now - 50 * DAY_MS, 1.0)],
         )
@@ -180,7 +180,7 @@ mod tests {
 
         prune_intraday(&conn, now).unwrap();
 
-        let left = get(&conn, "dhan:NSE:TCS", "5", None, None, None).unwrap();
+        let left = get(&conn, "zerodha:NSE:INFY", "5", None, None, None).unwrap();
         assert_eq!(left.iter().map(|b| b.time).collect::<Vec<_>>(), [now - 10 * DAY_MS]);
     }
 }

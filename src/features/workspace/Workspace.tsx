@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AppWindow, Bell, ChevronLeft, ChevronRight, CircleHelp, Code, Database, FlaskConical, Home, Info, KeyRound, List, ListFilter, Plug, Plus, Sparkles, SquareTerminal, X } from 'lucide-react';
+import { AppWindow, Bell, ChartNoAxesCombined, ChevronLeft, ChevronRight, CircleHelp, Code, Database, FlaskConical, Home, Info, KeyRound, List, ListFilter, Plug, Plus, Sparkles, SquareTerminal, X } from 'lucide-react';
 import type { VelaWorkspace, WorkspaceState } from '@luxalgo/vela/workspace';
 import { startAlertEngine } from '../../alerts/engine';
 import { onOpenAlerts, openAlerts } from '../../alerts/ui';
@@ -20,7 +20,7 @@ import {
 } from '../../lib/ipc';
 import { displayTicker, isSupportedSymbol } from '../../lib/symbols';
 import { openNewWindow } from '../../lib/windows';
-import { publishDockRequest } from '../../pine/dockBus';
+import { publishDockRequest, subscribeDockRequests, type DockRequest } from '../../pine/dockBus';
 import { AboutDialog } from '../about/AboutDialog';
 import { HelpDialog } from '../help/HelpDialog';
 import { HomePage } from '../home/HomePage';
@@ -31,6 +31,7 @@ import { startBackgroundUpdates } from '../../updates/service';
 import { useUpdateState } from '../../updates/useUpdateState';
 import { ImportDataDialog } from '../datasets/ImportDataDialog';
 import { PineDock } from '../pine/PineDock';
+import { PineEditor } from '../pine/PineEditor';
 import { PythonPanel } from '../python/PythonPanel';
 import { ScreenerPanel } from '../screener/ScreenerPanel';
 import { StudiesPanel } from '../studies/StudiesPanel';
@@ -58,6 +59,7 @@ import { AddToWatchlistDialog } from '../python/AddToWatchlistDialog';
 import { TabQuote } from './TabQuote';
 import { useTabStrip } from './tabStrip';
 import { useTabQuotes } from './useTabQuotes';
+import { WindowControls } from './WindowControls';
 import {
   activeChartIndex,
   activeChartTab,
@@ -66,6 +68,7 @@ import {
   homeTab,
   isChartTab,
   pythonTab,
+  pineTab,
   screenerTab,
   studiesTab,
   tabAfterClosing,
@@ -268,6 +271,40 @@ export function Workspace() {
     setActiveTabId(created.id);
   }, [tabs]);
 
+  /** Opens the Script Editor tab, or shows it when it is already open. */
+  const openPine = useCallback(() => {
+    const existing = pineTab(tabs);
+    if (existing) {
+      setActiveTabId(existing.id);
+      return;
+    }
+    const created: Tab = { kind: 'pine', id: crypto.randomUUID() };
+    setTabs((prev) => [...prev, created]);
+    setActiveTabId(created.id);
+  }, [tabs]);
+  /** A chart legend's "Edit script": the Script Editor tab opens on that script. */
+  const [pineEditRequest, setPineEditRequest] = useState<Extract<DockRequest, { type: 'edit-indicator' }> | null>(null);
+  const openPineRef = useRef(openPine);
+  openPineRef.current = openPine;
+  useEffect(
+    () =>
+      subscribeDockRequests((request) => {
+        if (request.type !== 'edit-indicator') return;
+        setPineEditRequest(request);
+        openPineRef.current();
+      }),
+    [],
+  );
+  /** Shows the Strategy Tester: on the chart it reports on, switching to that chart's tab if another is showing. */
+  const toggleTester = useCallback(() => {
+    if (activeTab && isChartTab(activeTab)) {
+      publishDockRequest({ type: 'toggle-tester' });
+    } else if (chartTab) {
+      showTab(chartTab.id);
+      publishDockRequest({ type: 'open-tester' });
+    }
+  }, [activeTab, chartTab, showTab]);
+
   /** Opens the Python workspace, or shows it when it is already open. */
   const openPython = useCallback(() => {
     const existing = pythonTab(tabs);
@@ -279,7 +316,13 @@ export function Workspace() {
     setTabs((prev) => [...prev, created]);
     setActiveTabId(created.id);
   }, [tabs]);
-
+  /** Bumped to tell the (possibly freshly-opened) Python tab to show its settings popover —
+   *  the Home tab's "Python setup" card. */
+  const [pythonSettingsRequest, setPythonSettingsRequest] = useState(0);
+  const openPythonSettings = useCallback(() => {
+    openPython();
+    setPythonSettingsRequest((n) => n + 1);
+  }, [openPython]);
   /** Opens the Studies workspace, or shows it when it is already open. */
   const openStudies = useCallback(() => {
     const existing = studiesTab(tabs);
@@ -458,6 +501,8 @@ export function Workspace() {
       else if (key === 'k' && !e.shiftKey) searchRef.current?.focus();
       else if (key === 'n' && e.shiftKey) openNewWindow();
       else if (key === 'y' && e.shiftKey) openPython();
+      else if (key === 'e' && !e.shiftKey) openPine();
+      else if (key === 'e' && e.shiftKey) toggleTester();
       else if (e.key === 'PageDown') stepTab(1);
       else if (e.key === 'PageUp') stepTab(-1);
       else return;
@@ -465,7 +510,7 @@ export function Workspace() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [openTab, closeTab, stepTab, openPython, toggleRailPanel, openHelp, activeTabId, chartSymbol]);
+  }, [openTab, closeTab, stepTab, openPython, openPine, toggleTester, toggleRailPanel, openHelp, activeTabId, chartSymbol]);
 
   /** Never silently drops the save. A tab that was never shown has no live
    *  chart (see ChartView), so it falls back to its own last-known state —
@@ -521,10 +566,18 @@ export function Workspace() {
     {
       id: 'script-editor',
       label: 'Script Editor',
-      title: 'Script Editor and Strategy Tester (Ctrl+E)',
+      title: 'Script Editor: write Pine Script indicators and strategies (Ctrl+E)',
       icon: Code,
+      pressed: activeTab?.kind === 'pine',
+      onClick: openPine,
+    },
+    {
+      id: 'strategy-tester',
+      label: 'Strategy Tester',
+      title: "Strategy Tester: a strategy's backtest on the chart (Ctrl+Shift+E)",
+      icon: ChartNoAxesCombined,
       pressed: dockOpen && !!activeTab && isChartTab(activeTab),
-      onClick: () => publishDockRequest({ type: 'toggle' }),
+      onClick: toggleTester,
     },
     {
       id: 'python',
@@ -552,9 +605,19 @@ export function Workspace() {
     },
   ];
   const railFooter: RailAction[] = [
+    { id: 'import-data', label: 'Import data', title: 'Import your own data (CSV)', icon: Database, onClick: () => setImportOpen(true) },
+    { id: 'new-window', label: 'New window', title: 'New window (Ctrl+Shift+N)', icon: AppWindow, onClick: openNewWindow },
     { id: 'data-providers', label: 'Data providers', title: 'Data providers: where prices come from', icon: Plug, onClick: () => setProvidersOpen(true) },
     { id: 'ai-providers', label: 'AI providers', title: 'AI providers: API keys for Claude, GPT and which one to use', icon: KeyRound, onClick: () => setAiProvidersOpen(true) },
     { id: 'help', label: 'Help', title: 'Help: how every part of the app works (F1)', icon: CircleHelp, pressed: helpOpen, onClick: () => openHelp() },
+    {
+      id: 'about',
+      label: 'About',
+      title: updateWaiting ? 'About & shortcuts — an update is available' : 'About & shortcuts',
+      icon: Info,
+      dot: updateWaiting,
+      onClick: () => setAboutOpen(true),
+    },
   ];
 
   async function handleDeleteLayout(id: string) {
@@ -575,6 +638,11 @@ export function Workspace() {
   return (
     <div className="app">
       <div className="tab-bar">
+        {/* The window's own title bar (decorations: false — see WindowControls.tsx): the brand mark and
+            the spacer further along are what's draggable, so tabs and buttons still work normally. */}
+        <div className="tab-brand" data-tauri-drag-region>
+          <img src="/favicon-32.png" alt="ProTradeChart" />
+        </div>
         {/* As wide as its tabs, up to the room there is; the arrows sit over its edges, so showing them
             never takes room from the tabs. */}
         <div className="tab-strip">
@@ -596,6 +664,7 @@ export function Workspace() {
                 onAuxClick={(e) => e.button === 1 && closeTab(tab.id)}
               >
                 {tab.kind === 'home' && <Home size={13} aria-hidden="true" />}
+                {tab.kind === 'pine' && <Code size={13} aria-hidden="true" />}
                 {tab.kind === 'python' && <SquareTerminal size={13} aria-hidden="true" />}
                 {tab.kind === 'studies' && <FlaskConical size={13} aria-hidden="true" />}
                 {tab.kind === 'screener' && <ListFilter size={13} aria-hidden="true" />}
@@ -633,6 +702,7 @@ export function Workspace() {
         <button type="button" className="icon-button tab-new" aria-label="New chart tab" title="New tab (Ctrl+T)" onClick={() => openTab()}>
           <Plus size={15} />
         </button>
+        <div className="tab-bar-drag" data-tauri-drag-region />
 
         <div className="tab-bar-actions">
           <LayoutMenu
@@ -649,24 +719,9 @@ export function Workspace() {
           />
           <SymbolSearchBox ref={searchRef} onSelect={(picked) => goToSymbol(picked.symbol)} />
           <span className="tab-bar-divider" />
-          <button type="button" className="icon-button" aria-label="Import data" title="Import your own data (CSV)" onClick={() => setImportOpen(true)}>
-            <Database size={15} />
-          </button>
-          <button type="button" className="icon-button" aria-label="New window" title="New window (Ctrl+Shift+N)" onClick={openNewWindow}>
-            <AppWindow size={15} />
-          </button>
           <ThemeSelect />
-          <button
-            type="button"
-            className="icon-button bell-button"
-            aria-label="About"
-            title={updateWaiting ? 'About & shortcuts — an update is available' : 'About & shortcuts'}
-            onClick={() => setAboutOpen(true)}
-          >
-            <Info size={15} />
-            {updateWaiting && <span className="update-dot" aria-hidden="true" />}
-          </button>
         </div>
+        <WindowControls />
       </div>
 
       <div className="app-body" style={{ "--side-panel-width": `${panelWidth}px` } as React.CSSProperties}>
@@ -689,6 +744,7 @@ export function Workspace() {
                 ) : tab.kind === 'home' ? (
                   <HomePage
                     layouts={layouts.map(toSummary)}
+                    aiProviders={aiProviders}
                     onNewChart={() => openTab()}
                     onNewWindow={openNewWindow}
                     onOpenLayout={(id) => {
@@ -698,7 +754,9 @@ export function Workspace() {
                     onOpenWatchlist={() => showRailPanel('watchlist')}
                     onOpenAlerts={() => showRailPanel('alerts')}
                     onOpenAskAi={() => showRailPanel('assistant')}
+                    onOpenScriptEditor={openPine}
                     onOpenPython={openPython}
+                    onOpenPythonSetup={openPythonSettings}
                     onOpenStudies={openStudies}
                     onOpenScreener={openScreener}
                     onOpenDataProviders={() => setProvidersOpen(true)}
@@ -706,6 +764,15 @@ export function Workspace() {
                     onOpenImportData={() => setImportOpen(true)}
                     onOpenAbout={() => setAboutOpen(true)}
                     onOpenHelp={openHelp}
+                  />
+                ) : tab.kind === 'pine' ? (
+                  // Stays mounted, so the script being written is still there when you come back.
+                  <PineEditor
+                    workspace={chartTab ? (workspaces[chartTab.id] ?? null) : null}
+                    chartLabel={chartTab ? displayTicker(chartTab.symbol) : null}
+                    editRequest={pineEditRequest}
+                    onStrategyAdded={() => publishDockRequest({ type: 'open-tester' })}
+                    onShowChart={() => chartTab && showTab(chartTab.id)}
                   />
                 ) : tab.kind === 'screener' ? (
                   // Stays mounted, like Studies, so a running screen keeps going while charts are looked at.
@@ -716,13 +783,21 @@ export function Workspace() {
                 ) : (
                   // Stays mounted while another tab shows, so a run keeps going and its console
                   // and results are still there when you come back.
-                  <PythonPanel visible={tab.id === activeTabId} onOpenSymbol={goToSymbol} />
+                  <PythonPanel visible={tab.id === activeTabId} onOpenSymbol={goToSymbol} openSettings={pythonSettingsRequest} />
                 )}
               </div>
             ))}
           </div>
-          {/* The Pine dock belongs to a chart, so it is hidden while a workspace tab is showing. */}
-          {activeTab && isChartTab(activeTab) && <PineDock workspace={workspaces[activeTab.id] ?? null} onOpenChange={setDockOpen} />}
+          {/* The Strategy Tester belongs to a chart: hidden while a workspace tab is showing, but kept mounted
+              on the last chart so a strategy added from the Script Editor tab is still reported. */}
+          {chartTab && (
+            <PineDock
+              workspace={workspaces[chartTab.id] ?? null}
+              visible={!!activeTab && isChartTab(activeTab)}
+              onOpenEditor={openPine}
+              onOpenChange={setDockOpen}
+            />
+          )}
         </div>
         {railPanel !== null && (
           <PanelResizer

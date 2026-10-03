@@ -245,7 +245,8 @@ class ManyTests(Case):
         result = pt.bars_many(symbols + symbols[:3], progress=False)
         self.assertEqual(list(result), symbols)
         self.assertTrue(all(len(df) == 2 for df in result.values()))
-        self.assertEqual(len(self.stub.requests), 12, "repeats were fetched once")
+        bar_reads = [r for r in self.stub.requests if r["path"] == "/v1/bars"]
+        self.assertEqual(len(bar_reads), 12, "repeats were fetched once")
 
     def test_the_first_failure_stops_the_run_by_default(self):
         with self.assertRaises(pt.NotFoundError):
@@ -307,6 +308,69 @@ class ManyTests(Case):
         self.assertEqual(self.stub.requests, [])
 
 
+class TopUpTests(Case):
+    """``api._top_up``: the daily quote top-up a screen asks for ahead of its own fetch loop."""
+
+    def setUp(self):
+        super().setUp()
+        self.stub.posts["/v1/bars/sync"] = lambda payload: (
+            200,
+            {"results": [{"symbol": s, "status": "current", "reason": None} for s in payload["symbols"]]},
+        )
+
+    def test_fewer_than_two_symbols_makes_no_call(self):
+        self.assertIsNone(api._top_up(["zerodha:NSE:X"]))
+        self.assertEqual(self.stub.posted("/v1/bars/sync"), [])
+
+    def test_a_non_daily_interval_makes_no_call(self):
+        self.assertIsNone(api._top_up(["zerodha:NSE:X", "zerodha:NSE:Y"], interval="5"))
+        self.assertEqual(self.stub.posted("/v1/bars/sync"), [])
+
+    def test_disabled_by_its_environment_variable(self):
+        os.environ[client.NO_TOPUP_ENV] = "1"
+        self.assertIsNone(api._top_up(["zerodha:NSE:X", "zerodha:NSE:Y"]))
+        self.assertEqual(self.stub.posted("/v1/bars/sync"), [])
+
+    def test_the_request_carries_the_span_symbols_and_interval(self):
+        api._top_up(["zerodha:NSE:X", "zerodha:NSE:Y", "zerodha:NSE:X"], start="2024-01-01", end="2024-01-31", limit=50)
+        posted = self.stub.posted("/v1/bars/sync")
+        self.assertEqual(len(posted), 1)
+        self.assertEqual(posted[0]["symbols"], ["zerodha:NSE:X", "zerodha:NSE:Y"], "no repeats, order kept")
+        self.assertEqual(posted[0]["interval"], "D")
+        self.assertEqual(posted[0]["from"], ms("2024-01-01"))
+        self.assertEqual(posted[0]["to"], ms("2024-01-31") + 24 * 3600 * 1000 - 1)
+        self.assertEqual(posted[0]["limit"], 50)
+
+    def test_counts_are_tallied_by_status(self):
+        self.stub.posts["/v1/bars/sync"] = lambda payload: (
+            200,
+            {
+                "results": [
+                    {"symbol": "zerodha:NSE:A", "status": "current", "reason": None},
+                    {"symbol": "zerodha:NSE:B", "status": "updated", "reason": None},
+                    {"symbol": "zerodha:NSE:C", "status": "fetch", "reason": "no quote for it"},
+                    {"symbol": "zerodha:NSE:D", "status": "skipped", "reason": "not a symbol a quote top-up covers"},
+                ]
+            },
+        )
+        counts = api._top_up(["zerodha:NSE:A", "zerodha:NSE:B", "zerodha:NSE:C", "zerodha:NSE:D"])
+        self.assertEqual(counts, {"current": 1, "updated": 1, "fetch": 1, "skipped": 1})
+
+    def test_a_missing_or_broken_route_is_swallowed_not_raised(self):
+        del self.stub.posts["/v1/bars/sync"]  # as an older app build with no such route would 404
+        self.assertIsNone(api._top_up(["zerodha:NSE:X", "zerodha:NSE:Y"]))
+
+        self.stub.posts["/v1/bars/sync"] = lambda payload: error(401, "auth", "token expired")
+        self.assertIsNone(api._top_up(["zerodha:NSE:X", "zerodha:NSE:Y"]))
+
+    def test_more_symbols_than_one_batch_are_sent_as_several_calls(self):
+        with mock.patch.object(api, "_SYNC_BATCH", 2):
+            counts = api._top_up(["zerodha:NSE:A", "zerodha:NSE:B", "zerodha:NSE:C"])
+        posted = self.stub.posted("/v1/bars/sync")
+        self.assertEqual([p["symbols"] for p in posted], [["zerodha:NSE:A", "zerodha:NSE:B"], ["zerodha:NSE:C"]])
+        self.assertEqual(counts, {"current": 3, "updated": 0, "fetch": 0, "skipped": 0})
+
+
 class ListingTests(Case):
     def test_instruments_are_a_frame_whose_symbol_column_feeds_bars(self):
         self.stub.routes["/v1/instruments"] = lambda q: (
@@ -319,18 +383,18 @@ class ListingTests(Case):
 
     def test_an_empty_listing_still_has_its_columns(self):
         self.stub.routes["/v1/instruments"] = lambda q: (200, [])
-        self.assertEqual(list(pt.instruments("dhan").columns), ["symbol", "name", "exchange", "kind", "expiry"])
+        self.assertEqual(list(pt.instruments("zerodha").columns), ["symbol", "name", "exchange", "kind", "expiry"])
 
     def test_a_watchlist_is_found_by_name_or_by_id_and_can_be_filtered_to_readable_sources(self):
         content = {"id": 3, "name": "Mixed", "symbols": [
             {"symbol": "zerodha:NSE:RELIANCE", "name": None},
             {"symbol": "binance:BTCUSDT", "name": None},
-            {"symbol": "dhan:NSE:TCS", "name": None},
+            {"symbol": "csv:MY_DATA", "name": None},
         ]}
         self.stub.routes["/v1/watchlist"] = lambda q: (200, content)
         self.assertEqual(len(pt.watchlist("Mixed")), 3)
         self.assertEqual(self.stub.requests[-1]["query"], {"name": "Mixed"})
-        self.assertEqual(pt.watchlist(3, providers=("zerodha", "Dhan")), ["zerodha:NSE:RELIANCE", "dhan:NSE:TCS"])
+        self.assertEqual(pt.watchlist(3, providers=("zerodha", "CSV")), ["zerodha:NSE:RELIANCE", "csv:MY_DATA"])
         self.assertEqual(self.stub.requests[-1]["query"], {"id": "3"})
 
     def test_watchlists_and_providers_are_frames(self):

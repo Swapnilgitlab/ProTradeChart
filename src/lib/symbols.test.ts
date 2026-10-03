@@ -105,11 +105,12 @@ describe('the symbol a chart is given', () => {
 describe('symbols from a source the app no longer has', () => {
   it('are recognised as unsupported, so callers can say so instead of loading a blank chart', () => {
     expect(isSupportedSymbol('binance:BTCUSDT')).toBe(true);
-    expect(isSupportedSymbol('dhan:NSE:RELIANCE')).toBe(true);
     expect(isSupportedSymbol('csv:MY_DATA')).toBe(true);
     expect(isSupportedSymbol('yahoo:AAPL')).toBe(false);
+    expect(isSupportedSymbol('dhan:NSE:RELIANCE')).toBe(false);
     expect(isSupportedSymbol('nonsense:X')).toBe(false);
     expect(isSupportedProvider('yahoo')).toBe(false);
+    expect(isSupportedProvider('dhan')).toBe(false);
     expect(isSupportedProvider('zerodha')).toBe(true);
   });
 });
@@ -133,26 +134,26 @@ describe('resolveTypedSymbol', () => {
 });
 
 describe('resolveTypedSymbol with a default provider', () => {
-  it('sends a bare ticker to the default provider, naming NSE for Dhan', () => {
-    expect(resolveTypedSymbol('reliance', 'dhan')).toBe('dhan:NSE:RELIANCE');
+  it('sends a bare ticker to the default provider, naming NSE for Zerodha', () => {
+    expect(resolveTypedSymbol('reliance', 'zerodha')).toBe('zerodha:NSE:RELIANCE');
     expect(resolveTypedSymbol('btc-usd', 'coinbase')).toBe('coinbase:BTC-USD');
     expect(resolveTypedSymbol('btcusdt', 'binance')).toBe('binance:BTCUSDT');
   });
 
   it('keeps an exchange the user named, which is not a provider prefix', () => {
-    expect(resolveTypedSymbol('bse:reliance', 'dhan')).toBe('dhan:BSE:RELIANCE');
-    expect(resolveTypedSymbol('idx:nifty', 'dhan')).toBe('dhan:IDX:NIFTY');
+    expect(resolveTypedSymbol('bse:reliance', 'zerodha')).toBe('zerodha:BSE:RELIANCE');
+    expect(resolveTypedSymbol('nfo:nifty26octfut', 'zerodha')).toBe('zerodha:NFO:NIFTY26OCTFUT');
   });
 
   it('still honours an explicit provider over the default', () => {
-    expect(resolveTypedSymbol('binance:btcusdt', 'dhan')).toBe('binance:BTCUSDT');
-    expect(resolveTypedSymbol('dhan:nse:infy', 'binance')).toBe('dhan:NSE:INFY');
-    expect(resolveTypedSymbol('dhan:infy', 'binance')).toBe('dhan:NSE:INFY');
+    expect(resolveTypedSymbol('binance:btcusdt', 'zerodha')).toBe('binance:BTCUSDT');
+    expect(resolveTypedSymbol('zerodha:nse:infy', 'binance')).toBe('zerodha:NSE:INFY');
+    expect(resolveTypedSymbol('zerodha:infy', 'binance')).toBe('zerodha:NSE:INFY');
   });
 
-  it('knows Dhan as a provider', () => {
-    expect(providerLabel('dhan')).toBe('Dhan');
-    expect(splitSymbol('dhan:NSE:RELIANCE')).toEqual({ provider: 'dhan', ticker: 'NSE:RELIANCE' });
+  it('no longer knows Dhan, whose saved symbols still read short in a watchlist', () => {
+    expect(providerLabel('dhan')).toBe('dhan');
+    expect(resolveTypedSymbol('dhan:infy', 'binance')).toBe('binance:DHAN:INFY');
     expect(displayTicker('dhan:NSE:RELIANCE')).toBe('RELIANCE');
   });
 });

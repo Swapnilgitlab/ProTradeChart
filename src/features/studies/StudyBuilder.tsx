@@ -145,10 +145,9 @@ export function StudyBuilder({ draft, onChange, problem, readiness, onApplyFix, 
               <>
                 <label className="study-field">
                   <span>Broker</span>
-                  <select className="python-input" value={u.provider} onChange={(e) => setUniverse({ provider: e.currentTarget.value as 'zerodha' | 'dhan' })}>
+                  <select className="python-input" value={u.provider} onChange={(e) => setUniverse({ provider: e.currentTarget.value as 'zerodha' })}>
                     <option value="zerodha">Zerodha</option>
-                    <option value="dhan">Dhan</option>
-                  </select>
+                                      </select>
                 </label>
                 <fieldset className="study-field study-checks">
                   <legend>Exchanges</legend>
