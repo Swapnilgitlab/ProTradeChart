@@ -298,7 +298,7 @@ project uses [Semantic Versioning](https://semver.org).
   party you never chose to contact. The web view no longer loads images from the internet at all.
 - The README, About and third-party notices now spell out each data source's terms: the crypto exchanges' own terms, and
   broker data being licensed to you alone.
-- **About** now credits the developer, Swapnil Pawar of ProTradeJournal, with links to their X and GitHub profiles.
+- **About** now credits the developer, Swapnil Pawar, with links to their X and GitHub profiles, and lists Credits before Shortcuts.
 - **New logo and app icon.** A single candlestick in a green rounded tile, with the wordmark in Geist and "Trade" in
   green. The README carries the full logo, and the app icon (window, taskbar, installers), the favicon and the About
   dialog use the tile; the smallest sizes are drawn with a thicker candle so they stay sharp at 16px.
