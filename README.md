@@ -155,15 +155,6 @@ time,open,high,low,close,volume
 
 A few things worth knowing:
 
-- **Zerodha is the only broker, and the only live data source.** Binance, Coinbase and Hyperliquid were removed as
-  data sources; Indian markets come through Zerodha alone. Symbols saved as `binance:…`, `coinbase:…` or
-  `hyperliquid:…` stay in your watchlists, layouts and alerts but can't be loaded, and a layout that holds one opens on a
-  starter NSE symbol instead and says so; saving the layout again drops the old symbol.
-- **US and world markets** (stocks, ETFs, FX and their indices) have no data source: import your own OHLCV file
-  (*Import data*) to chart them.
-- A chart opens with about 500 bars (two years of daily candles). **Scroll or zoom back and older candles load
-  automatically**, for as long as the source has them. Nothing extra to click.
-- Recently loaded broker bars are cached locally so a chart still draws if you go offline.
 - **Broker data is yours alone.** Data from a Zerodha account is licensed to you for your own use under your
   broker's and the exchanges' rules: don't rebroadcast it (on a public stream or website, say). The app only reads market
   data from your account; it never places orders.
