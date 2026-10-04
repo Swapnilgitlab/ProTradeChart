@@ -5,6 +5,8 @@ project uses [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-04
+
 ### Added
 
 - **Log in to Zerodha from the Home tab, and get asked when it has expired.** The Home tab opens with a **Zerodha** row
@@ -214,22 +216,6 @@ project uses [Semantic Versioning](https://semver.org).
   settings are folded under **Event-day snapshot**. Two new templates, **How Winners Got There** and **After the Breakout**,
   and measures on 100% Winners, 200% Winners and Breakout Winners.
 
-### Fixed
-
-- A condition on RSI was described with its threshold as a percentage ("RSI 14 below +3000%").
-- **Charts no longer leave a stock at all-time highs sitting well below the top of the pane.** Vela's own autoscale padded
-  every chart by nearly 29% above the highest visible price and 14% below the lowest, with no setting to change it; a small
-  patch to the bundled library (`patches/`, applied automatically) brings both down to 10%.
-- **Asking Claude to draft or change a Study no longer fails** with "The compiled grammar is too large": the answer's schema is
-  now small, and the Study Specification comes back as JSON text that the app validates as before.
-- **Cached daily bars no longer vanish.** The offline cache trimmed old intraday data by comparing against interval names the
-  brokers never use, so every broker daily bar older than 45 days was deleted each time the app started. Charts fell back to
-  much less data than they should have when a request failed.
-- **Broker requests no longer read the OS credential store every time.** Each request used to make three lookups in Windows
-  Credential Manager (or the equivalent), each while holding the database lock the rest of the app waits on: thousands over one
-  large watchlist or Python screen, and thousands of lines in the debug log. Credentials are now remembered in memory for up to a
-  minute; saving or removing one takes effect at once.
-
 - **Zerodha logs in with one click.** Set your Kite app's redirect URL to `http://127.0.0.1:47821` (shown, with a
   Copy button, next to the login button) and *Log in with Zerodha* now collects the access token itself — no copying
   the address out of the browser. Pasting it by hand is still there for Kite apps that redirect elsewhere.
@@ -252,7 +238,7 @@ project uses [Semantic Versioning](https://semver.org).
   your level, once or every time. The bell in the tab bar lists, pauses, edits and deletes alerts and badges the ones that
   fired while you were away. Works with every data source; a level crossed while the app was closed still fires when it
   next opens. Alert levels aren't drawn on the chart yet.
-- **Zerodha** as a second broker provider: Kite Connect history (1/3/5/10/15/30/60-minute and daily candles, built up to
+- **Zerodha** as the broker provider: Kite Connect history (1/3/5/10/15/30/60-minute and daily candles, built up to
   other timeframes), a live tick feed shared across all charts and windows, watchlist quotes, and symbol search over
   Zerodha's public instrument lists (about 24,000 equities, indices and futures). Kite tokens expire every morning, so the
   Data providers screen has an in-app login: open Zerodha's page, paste the address it redirects to, and the token is
@@ -282,6 +268,19 @@ project uses [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
+- A condition on RSI was described with its threshold as a percentage ("RSI 14 below +3000%").
+- **Charts no longer leave a stock at all-time highs sitting well below the top of the pane.** Vela's own autoscale padded
+  every chart by nearly 29% above the highest visible price and 14% below the lowest, with no setting to change it; a small
+  patch to the bundled library (`patches/`, applied automatically) brings both down to 10%.
+- **Asking Claude to draft or change a Study no longer fails** with "The compiled grammar is too large": the answer's schema is
+  now small, and the Study Specification comes back as JSON text that the app validates as before.
+- **Cached daily bars no longer vanish.** The offline cache trimmed old intraday data by comparing against interval names the
+  brokers never use, so every broker daily bar older than 45 days was deleted each time the app started. Charts fell back to
+  much less data than they should have when a request failed.
+- **Broker requests no longer read the OS credential store every time.** Each request used to make three lookups in Windows
+  Credential Manager (or the equivalent), each while holding the database lock the rest of the app waits on: thousands over one
+  large watchlist or Python screen, and thousands of lines in the debug log. Credentials are now remembered in memory for up to a
+  minute; saving or removing one takes effect at once.
 - **Forget credentials** in *Data providers* now works as soon as anything is saved. It used to need a complete setup, so
   a wrong Zerodha API key and secret, saved before the first login, could not be cleared.
 

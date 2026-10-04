@@ -46,20 +46,20 @@ dropped connection, and not altered on the way. Compare yours:
 - **Windows** (PowerShell), in the folder you downloaded to:
 
   ```powershell
-  (Get-FileHash .\ProTradeChart_0.1.0_x64-setup.exe -Algorithm SHA256).Hash
+  (Get-FileHash .\ProTradeChart_0.2.0_x64-setup.exe -Algorithm SHA256).Hash
   ```
 
   Then check that it equals the hash on that file's line in `SHA256SUMS` (upper or lower case doesn't matter).
 - **macOS**, with `SHA256SUMS` in the same folder as the download:
 
   ```sh
-  grep ' ProTradeChart_0.1.0_aarch64.dmg$' SHA256SUMS | shasum -a 256 -c
+  grep ' ProTradeChart_0.2.0_aarch64.dmg$' SHA256SUMS | shasum -a 256 -c
   ```
 
 - **Linux:**
 
   ```sh
-  grep ' ProTradeChart_0.1.0_amd64.deb$' SHA256SUMS | sha256sum -c
+  grep ' ProTradeChart_0.2.0_amd64.deb$' SHA256SUMS | sha256sum -c
   ```
 
 Both Unix commands print `<file name>: OK` when it matches and `FAILED` when it doesn't; if it fails, delete the file and download it
