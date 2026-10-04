@@ -156,29 +156,11 @@ time,open,high,low,close,volume
 
 | Source | Covers | Timeframes | Live? |
 | --- | --- | --- | --- |
-| **Binance** | Spot and perpetual crypto | 1 minute to monthly | Live stream |
-| **Coinbase** | Spot crypto | 1 minute to monthly | Live stream |
-| **Hyperliquid** | Perpetual and spot crypto | 1 minute to monthly | Live stream |
 | **Zerodha** *(your account)* | Indian equities, indices, futures, commodities | 1, 3, 5, 10, 15, 30, 60 minutes and daily natively; 2h/4h, weekly, monthly and others built from those | Live tick feed |
 | **Imported CSV** | Anything you bring | Your file's bar size and coarser | No |
 
 A few things worth knowing:
 
-- **Dhan is no longer a data source.** It was removed; Indian markets come through Zerodha. Symbols saved as `dhan:…`
-  stay in your watchlists, layouts and alerts but can't be loaded, and a layout that holds one opens on Bitcoin instead,
-  as below. The app deletes the Dhan credentials, instrument list and cached bars it kept, once. A screen or Study saved
-  with Dhan as its broker opens with Zerodha.
-- **Yahoo Finance is no longer a data source.** It was removed, and with it the app's only source for US and most world
-  stocks, ETFs, FX and indices. To chart those, import your own OHLCV file (*Import data*). Symbols saved earlier as
-  `yahoo:…` stay in your watchlists and layouts but can't be loaded; opening a layout that holds one moves that tab to
-  Bitcoin and says so, and saving the layout again drops the old symbol.
-- A chart opens with about 500 bars (two years of daily candles). **Scroll or zoom back and older candles load
-  automatically**, for as long as the source has them. Nothing extra to click.
-- Recently loaded broker bars are cached locally so a chart still draws if you go offline.
-- **Crypto** comes from the exchanges' public market-data APIs, under their own terms
-  ([Binance](https://www.binance.com/en/terms), [Coinbase](https://www.coinbase.com/legal/market_data),
-  [Hyperliquid](https://app.hyperliquid.xyz/terms)). The app only reads prices — it never trades. Where binance.com is
-  blocked it uses Binance.US; some sources simply aren't available in some countries, and the app doesn't work around that.
 - **Broker data is yours alone.** Data from a Zerodha account is licensed to you for your own use under your
   broker's and the exchanges' rules: don't rebroadcast it (on a public stream or website, say). The app only reads market
   data from your account; it never places orders.
