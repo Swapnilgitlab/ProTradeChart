@@ -12,10 +12,9 @@ volunteer project, so please allow some time.
 ## What the app does and doesn't do
 
 - It has **no accounts, no telemetry and no server of its own.** Nothing you do is sent anywhere except the market-data
-  requests needed to draw charts (Binance, Coinbase and Hyperliquid, and — only if you connect your own account —
-  Zerodha): the symbol you're looking at, and what you type into the search box. The app loads no images, fonts or
-  scripts from the internet (coin logos, which Vela would fetch from Ledger's
-  icon server, are switched off). The one other request is the **update check**: about once a day (and when you press
+  requests needed to draw charts — and those go only to Zerodha, only if you connect your own account: the symbol
+  you're looking at, and what you type into the search box. The app loads no images, fonts or scripts from the
+  internet. The one other request is the **update check**: about once a day (and when you press
   *Check for updates*) the app asks GitHub for the latest release's manifest, which reveals your IP address to GitHub like
   any download. You can switch it off in *About → Updates*.
 - **Updates are signed.** An update is only installed if it verifies against a public key built into the app

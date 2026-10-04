@@ -51,6 +51,7 @@ import {
 import { AiProvidersDialog, useAiProviders } from '../ai/AiProvidersDialog';
 import { AskAiPanel } from '../ai/AskAiPanel';
 import { DataProvidersDialog } from '../providers/DataProvidersDialog';
+import { ZerodhaLoginPrompt } from '../providers/ZerodhaLogin';
 import { parseLayout, serializeLayout, withoutUnsupportedSymbols, type LayoutDocument } from '../layouts/layoutDocument';
 import { SymbolSearchBox } from '../search/SymbolSearchBox';
 import { WatchlistPanel } from '../watchlist/WatchlistPanel';
@@ -99,6 +100,7 @@ function toSummary(row: ChartLayoutRow): LayoutSummary {
  *  whole tab set as one named session. The theme is not part of a layout. */
 export function Workspace() {
   const toast = useToast();
+  const isMainWindow = getCurrentWindow().label === 'main';
   const [tabs, setTabs] = useState<Tab[]>(() => [createTab()]);
   const [activeTabId, setActiveTabId] = useState<string>(() => tabs[0].id);
   /** The chart tab last looked at, so the watchlist, alerts and the Pine dock keep talking about
@@ -188,7 +190,7 @@ export function Workspace() {
       const { doc: usable, replaced } = withoutUnsupportedSymbols(doc, starterSymbol());
       if (replaced > 0) {
         toast(
-          `${replaced} tab${replaced === 1 ? '' : 's'} used Yahoo Finance, which is no longer a data source, and now show ${displayTicker(starterSymbol())}. The saved layout is unchanged until you save it again.`,
+          `${replaced} tab${replaced === 1 ? '' : 's'} used a data source the app no longer has, and now show ${displayTicker(starterSymbol())}. The saved layout is unchanged until you save it again.`,
           'info',
         );
       }
@@ -368,7 +370,7 @@ export function Workspace() {
   const goToSymbol = useCallback(
     (symbol: string) => {
       if (!isSupportedSymbol(symbol)) {
-        // e.g. a watchlist row saved when Yahoo Finance was a source: nothing can load it.
+        // e.g. a watchlist row saved from a data source the app no longer has: nothing can load it.
         toast(`${displayTicker(symbol)} came from a data source that is no longer available.`, 'info');
         return;
       }
@@ -849,6 +851,8 @@ export function Workspace() {
         />
       )}
       {providersOpen && <DataProvidersDialog onClose={() => setProvidersOpen(false)} />}
+      {/* Once per launch, and only in the main window, so extra windows don't each ask again. */}
+      {isMainWindow && <ZerodhaLoginPrompt onOpenDataProviders={() => setProvidersOpen(true)} />}
       {aiProvidersOpen && <AiProvidersDialog providers={aiProviders} onClose={() => setAiProvidersOpen(false)} onChanged={reloadAiProviders} say={toast} />}
       {alertForm && <AlertFormDialog seed={alertForm} onClose={() => setAlertForm(null)} />}
     </div>

@@ -138,7 +138,7 @@ mod tests {
 
     /// The brokers cache under the upper-cased interval the chart asked for: `D` for daily
     /// (and for week and month, which are built from daily) and a minute count for the rest.
-    /// Pruning once compared against Yahoo's lower-case spellings (`1d`), so it deleted every
+    /// Pruning once compared against lower-case spellings (`1d`), so it deleted every
     /// broker daily bar older than 45 days on each launch.
     #[test]
     fn prune_drops_old_minute_bars_but_keeps_a_brokers_daily_history() {

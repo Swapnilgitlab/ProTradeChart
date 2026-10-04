@@ -48,7 +48,7 @@ export type WatchlistFlag = (typeof WATCHLIST_FLAGS)[number];
 
 export interface WatchlistItem {
   id: number;
-  /** Fully-qualified chart symbol, e.g. `binance:BTCUSDT`. */
+  /** Fully-qualified chart symbol, e.g. `zerodha:NSE:RELIANCE`. */
   symbol: string;
   name: string | null;
   /** Where the row sits among the list's symbols and sections: they share one sequence. */
@@ -273,8 +273,8 @@ export interface ProviderInfo {
   id: string;
   label: string;
   description: string;
-  /** `free` (no setup), `broker` (needs your own account) or `local`. */
-  category: 'free' | 'broker' | 'local';
+  /** `broker` (needs your own account) or `local`. */
+  category: 'broker' | 'local';
   fields: ProviderField[];
   enabled: boolean;
   configured: boolean;

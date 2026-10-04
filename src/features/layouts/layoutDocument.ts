@@ -122,8 +122,7 @@ export function parseLayout(json: string): LayoutDocument | null {
   return { version: 1, tabs, activeTabIndex: Math.min(Math.max(index, 0), tabs.length - 1) };
 }
 
-/** A layout can hold symbols from a data source the app no longer has (Yahoo Finance was
- *  removed); they can't load, and would leave a chart blank with no explanation. Each tab —
+/** A layout can hold symbols from a data source the app no longer has; they can't load, and would leave a chart blank with no explanation. Each tab —
  *  and each chart of its grid — holding one is moved to `fallback`. `replaced` counts the
  *  tabs changed, so the user can be told. Nothing stored is rewritten: this is applied to the
  *  layout being opened, and a saved layout keeps its old symbols until it is saved again. */

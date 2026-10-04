@@ -107,17 +107,15 @@ are used to build and test the project and are not distributed in the app.
 
 ## Market data
 
-Price data is fetched at runtime, directly from the user's computer, from
-third-party services: Binance, Coinbase and Hyperliquid; and Zerodha, with
-the user's own account and credentials, only if they connect one. No market
-data is bundled with the app or passes through any server of this project, and
-each service's terms apply to how its data is used. See the data-source notes in
-the [README](README.md#data-sources).
+Price data is fetched at runtime, directly from the user's computer, from a
+third-party service: Zerodha, with the user's own account and credentials,
+only if they connect one. No market data is bundled with the app or passes
+through any server of this project, and the service's terms apply to how its
+data is used. See the data-source notes in the [README](README.md#data-sources).
 
-Binance, Coinbase, Hyperliquid, Zerodha and Kite
-Connect are trademarks of their respective owners. ProTradeChart is not
-affiliated with, endorsed by or sponsored by any of them; their names are used
-only to say where data comes from.
+Zerodha and Kite Connect are trademarks of their respective owners.
+ProTradeChart is not affiliated with, endorsed by or sponsored by either of
+them; their names are used only to say where data comes from.
 
 The exact versions of every dependency are pinned in `package-lock.json` and
 `src-tauri/Cargo.lock`.

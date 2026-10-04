@@ -6,7 +6,7 @@
  *  Study's. Field names are snake_case because the document is shared with Python. Pure. */
 
 import { BARS_PER_INTERVAL, canonicalFeature, featureInterval, needsBenchmark } from '../studies/metrics';
-import { currentProvider, parseCondition, SERIES, SpecError, type Condition, type Exchange, type Series, type StudyProvider, type UniverseSource } from '../studies/spec';
+import { parseCondition, SERIES, SpecError, type Condition, type Exchange, type Series, type StudyProvider, type UniverseSource } from '../studies/spec';
 
 export const SCREEN_VERSION = 1;
 
@@ -68,7 +68,7 @@ export function normalizeScreen(input: unknown): ScreenSpec {
   const u = isRecord(input.universe) ? input.universe : {};
   const source = (u.source ?? 'instruments') as UniverseSource;
   if (!['instruments', 'watchlist', 'symbols'].includes(source)) throw new ScreenError('universe.source must be instruments, watchlist or symbols.');
-  const provider = currentProvider(u.provider ?? 'zerodha') as StudyProvider;
+  const provider = (u.provider ?? 'zerodha') as StudyProvider;
   if (provider !== 'zerodha') throw new ScreenError('universe.provider must be zerodha.');
   const exchanges = u.exchanges ?? ['NSE'];
   if (!Array.isArray(exchanges) || exchanges.length === 0 || exchanges.some((e) => e !== 'NSE' && e !== 'BSE')) {

@@ -476,16 +476,15 @@ pub fn set_section_collapsed(conn: &Connection, id: i64, collapsed: bool) -> rus
 
 const SEEDED_PREF: &str = "watchlists_seeded";
 
-/// The starter list shown on a fresh install — a spread across the crypto sources
-/// that need no account, so a new user has something to click straight away. Runs once per database: deleting the list later doesn't bring it back.
+/// The starter list shown on a fresh install — well-known NSE names through Zerodha, so a
+/// new user has something to click straight away once their account is connected. Runs once
+/// per database: deleting the list later doesn't bring it back.
 const STARTER_SYMBOLS: &[(&str, &str)] = &[
-    ("binance:BTCUSDT", "Bitcoin / TetherUS"),
-    ("binance:ETHUSDT", "Ethereum / TetherUS"),
-    ("binance:SOLUSDT", "Solana / TetherUS"),
-    ("binance:BNBUSDT", "BNB / TetherUS"),
-    ("coinbase:BTC-USD", "Bitcoin / US Dollar"),
-    ("coinbase:ETH-USD", "Ethereum / US Dollar"),
-    ("hyperliquid:BTC", "Bitcoin perpetual"),
+    ("zerodha:NSE:RELIANCE", "Reliance Industries"),
+    ("zerodha:NSE:TCS", "Tata Consultancy Services"),
+    ("zerodha:NSE:HDFCBANK", "HDFC Bank"),
+    ("zerodha:NSE:INFY", "Infosys"),
+    ("zerodha:NSE:NIFTY_50", "Nifty 50"),
 ];
 
 pub fn seed_starter_list_once(conn: &mut Connection) -> rusqlite::Result<()> {

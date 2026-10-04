@@ -59,8 +59,8 @@ describe('parseLayout', () => {
   });
 
   it('normalises bare tickers to the default provider', () => {
-    const parsed = parseLayout(JSON.stringify({ version: 1, tabs: [{ symbol: 'BTCUSDT' }], activeTabIndex: 0 }));
-    expect(parsed?.tabs[0].symbol).toBe('binance:BTCUSDT');
+    const parsed = parseLayout(JSON.stringify({ version: 1, tabs: [{ symbol: 'RELIANCE' }], activeTabIndex: 0 }));
+    expect(parsed?.tabs[0].symbol).toBe('zerodha:NSE:RELIANCE');
   });
 
   it('clamps an out-of-range or missing active tab index', () => {
@@ -155,9 +155,9 @@ describe('a chosen canvas background belongs to the layout', () => {
 });
 
 describe('withoutUnsupportedSymbols', () => {
-  const FALLBACK = 'binance:BTCUSDT';
+  const FALLBACK = 'zerodha:NSE:RELIANCE';
   const gridState = (...symbols: string[]) =>
-    ({ version: 1, layout: '2x1', charts: symbols.map((symbol, i) => ({ id: `c${i + 1}`, symbol, provider: 'yahoo', timeframe: 'D' })) }) as unknown as WorkspaceState;
+    ({ version: 1, layout: '2x1', charts: symbols.map((symbol, i) => ({ id: `c${i + 1}`, symbol, provider: 'nosuch', timeframe: 'D' })) }) as unknown as WorkspaceState;
   const symbolsOf = (state: WorkspaceState) => state.charts.map((c) => c.symbol);
 
   it('leaves a layout of supported symbols exactly as it is', () => {
@@ -169,21 +169,21 @@ describe('withoutUnsupportedSymbols', () => {
 
   it('moves a tab whose symbol comes from a removed source, and counts it', () => {
     const out = withoutUnsupportedSymbols(
-      { version: 1, tabs: [{ symbol: 'yahoo:QPOWER.NS' }, { symbol: 'binance:ETHUSDT' }, { symbol: 'dhan:NSE:TCS' }], activeTabIndex: 0 },
+      { version: 1, tabs: [{ symbol: 'nosuch:QPOWER' }, { symbol: 'csv:MY_DATA' }, { symbol: 'nosuch:NSE:TCS' }], activeTabIndex: 0 },
       FALLBACK,
     );
     expect(out.replaced).toBe(2);
-    expect(out.doc.tabs.map((t) => t.symbol)).toEqual([FALLBACK, 'binance:ETHUSDT', FALLBACK]);
+    expect(out.doc.tabs.map((t) => t.symbol)).toEqual([FALLBACK, 'csv:MY_DATA', FALLBACK]);
   });
 
   it('also moves the charts of a grid, one by one, and counts the tab once', () => {
     const out = withoutUnsupportedSymbols(
-      { version: 1, tabs: [{ symbol: 'yahoo:AAPL', state: gridState('yahoo:AAPL', 'binance:ETHUSDT', 'yahoo:MSFT') }], activeTabIndex: 0 },
+      { version: 1, tabs: [{ symbol: 'nosuch:AAPL', state: gridState('nosuch:AAPL', 'csv:MY_DATA', 'nosuch:MSFT') }], activeTabIndex: 0 },
       FALLBACK,
     );
     expect(out.replaced).toBe(1);
     expect(out.doc.tabs[0].symbol).toBe(FALLBACK);
-    expect(symbolsOf(out.doc.tabs[0].state!)).toEqual([FALLBACK, 'binance:ETHUSDT', FALLBACK]);
+    expect(symbolsOf(out.doc.tabs[0].state!)).toEqual([FALLBACK, 'csv:MY_DATA', FALLBACK]);
     // The old venue recorded beside a replaced symbol would contradict the new one; a chart left alone keeps its own.
     const [first, second, third] = out.doc.tabs[0].state!.charts;
     expect('provider' in first).toBe(false);
@@ -193,16 +193,16 @@ describe('withoutUnsupportedSymbols', () => {
 
   it('fixes a grid cell even when the tab label was on a supported symbol', () => {
     const out = withoutUnsupportedSymbols(
-      { version: 1, tabs: [{ symbol: 'binance:ETHUSDT', state: gridState('binance:ETHUSDT', 'yahoo:TCS.NS') }], activeTabIndex: 0 },
+      { version: 1, tabs: [{ symbol: 'csv:MY_DATA', state: gridState('csv:MY_DATA', 'nosuch:TCS') }], activeTabIndex: 0 },
       FALLBACK,
     );
     expect(out.replaced).toBe(1);
-    expect(out.doc.tabs[0].symbol).toBe('binance:ETHUSDT');
-    expect(symbolsOf(out.doc.tabs[0].state!)).toEqual(['binance:ETHUSDT', FALLBACK]);
+    expect(out.doc.tabs[0].symbol).toBe('csv:MY_DATA');
+    expect(symbolsOf(out.doc.tabs[0].state!)).toEqual(['csv:MY_DATA', FALLBACK]);
   });
 
   it('does not modify the layout it is given', () => {
-    const original: LayoutDocument = { version: 1, tabs: [{ symbol: 'yahoo:AAPL', state: gridState('yahoo:AAPL') }], activeTabIndex: 0 };
+    const original: LayoutDocument = { version: 1, tabs: [{ symbol: 'nosuch:AAPL', state: gridState('nosuch:AAPL') }], activeTabIndex: 0 };
     const before = JSON.stringify(original);
     withoutUnsupportedSymbols(original, FALLBACK);
     expect(JSON.stringify(original)).toBe(before);

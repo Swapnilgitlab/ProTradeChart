@@ -52,9 +52,6 @@ ENGINE_VERSION = "1.1"
 RESULT_FORMAT = 1
 
 PROVIDERS = ("zerodha",)
-# Dhan is no longer a data source. A Study or screen saved with it lists the same shares from Zerodha's
-# instrument list, as `currentProvider` in `studies/spec.ts` does, rather than refusing to open.
-RETIRED_PROVIDERS = {"dhan": "zerodha"}
 EXCHANGES = ("NSE", "BSE")
 UNIVERSE_SOURCES = ("instruments", "watchlist", "symbols")
 # Which listings of an instrument list count as stocks: ordinary shares ("EQ"), the trade-for-trade
@@ -187,7 +184,6 @@ def normalize_spec(spec: dict) -> dict:
     if source not in UNIVERSE_SOURCES:
         raise SpecError(f"universe.source must be one of {', '.join(UNIVERSE_SOURCES)}.")
     provider = raw.get("provider", "zerodha")
-    provider = RETIRED_PROVIDERS.get(provider, provider) if isinstance(provider, str) else provider
     if provider not in PROVIDERS:
         raise SpecError(f"universe.provider must be one of {', '.join(PROVIDERS)}.")
     exchanges = raw.get("exchanges", ["NSE"])

@@ -1,16 +1,11 @@
 import type { DataProvider } from '@luxalgo/vela';
-import { BinanceProvider } from '@luxalgo/vela/providers/binance';
-import { CoinbaseProvider } from '@luxalgo/vela/providers/coinbase';
-import { HyperliquidProvider } from '@luxalgo/vela/providers/hyperliquid';
 import { CsvProvider } from './csv';
 import { ZerodhaProvider } from './zerodha';
 import { joinSymbol, normalizeSymbol, type ProviderId } from '../../lib/symbols';
 import { publishLivePrice } from '../livePrices';
 
 /** One instance of each provider, shared by every chart tab AND by symbol
- *  search / watchlist quotes. Sharing matters: the crypto providers cache
- *  their (large) symbol lists internally, so a second instance would download
- *  them again.
+ *  search / watchlist quotes.
  *
  *  Every provider is always registered with Vela, whether or not it's switched
  *  on: a saved layout can hold a symbol from a provider that has since been
@@ -18,9 +13,6 @@ import { publishLivePrice } from '../livePrices';
  *  fail to resolve. Whether a provider is *offered* — in search, watchlists —
  *  is decided by `data/providerStatus`. */
 const instances: Record<ProviderId, DataProvider> = {
-  binance: withLivePriceTap('binance', withoutRemoteIcons(new BinanceProvider())),
-  coinbase: withLivePriceTap('coinbase', withoutRemoteIcons(new CoinbaseProvider())),
-  hyperliquid: withLivePriceTap('hyperliquid', withoutRemoteIcons(new HyperliquidProvider())),
   csv: new CsvProvider(),
   zerodha: withLivePriceTap('zerodha', new ZerodhaProvider()),
 };
@@ -28,20 +20,9 @@ const instances: Record<ProviderId, DataProvider> = {
 /** Registered with every VelaWorkspace as `providers` — the keys are the
  *  `provider:` prefixes symbols carry. */
 export const providerFactories: Record<ProviderId, () => DataProvider> = {
-  binance: () => instances.binance,
-  coinbase: () => instances.coinbase,
-  hyperliquid: () => instances.hyperliquid,
   csv: () => instances.csv,
   zerodha: () => instances.zerodha,
 };
-
-/** Vela's crypto providers give each coin the logo from Ledger's icon server. Fetching
- *  it would tell a third party the user never chose which coins they look at, so the
- *  symbol shows Vela's two-letter badge instead (the CSP blocks remote images anyway). */
-function withoutRemoteIcons<T extends DataProvider>(provider: T): T {
-  provider.resolveSymbolIcon = () => undefined;
-  return provider;
-}
 
 /** Every bar a provider streams to a chart also goes to `livePrices`, so a tab can show the price of its symbol as it
  *  trades without a request of its own. The chart gets the bar exactly as before. A provider that doesn't stream

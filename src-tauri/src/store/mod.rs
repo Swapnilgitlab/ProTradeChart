@@ -13,7 +13,6 @@ pub mod notebooks;
 pub mod preferences;
 pub mod provider_settings;
 pub mod research_bars;
-pub mod retired;
 pub mod schedules;
 pub mod screeners;
 pub mod scripts;

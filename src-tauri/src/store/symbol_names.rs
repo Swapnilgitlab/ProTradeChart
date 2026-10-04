@@ -51,7 +51,7 @@ mod tests {
             &syms(&[
                 "zerodha:NSE:RELIANCE",
                 "zerodha:NSE:TCS",
-                "dhan:NSE:INFY",
+                "nosuch:NSE:INFY",
                 "binance:BTCUSDT",
             ]),
         )
@@ -59,7 +59,7 @@ mod tests {
         assert_eq!(
             names.len(),
             1,
-            "no name in the list means no name, only the broker has a list, and a retired Dhan symbol has none"
+            "no name in the list means no name, and only the broker has a list"
         );
         assert_eq!(names["zerodha:NSE:RELIANCE"], "RELIANCE INDUSTRIES");
     }
@@ -84,7 +84,7 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
         assert!(known(&conn, &[]).unwrap().is_empty());
-        assert!(known(&conn, &syms(&["dhan:NSE:NOPE", "csv:MY_DATA"]))
+        assert!(known(&conn, &syms(&["nosuch:NSE:NOPE", "csv:MY_DATA"]))
             .unwrap()
             .is_empty());
     }

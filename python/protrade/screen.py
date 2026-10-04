@@ -23,7 +23,7 @@ import pandas as pd
 
 from . import api, client, results
 from . import features as feat
-from .study import EXCHANGES, LOAD_WORKERS, PROVIDERS, RETIRED_PROVIDERS, SERIES, UNIVERSE_SOURCES, pick_listings
+from .study import EXCHANGES, LOAD_WORKERS, PROVIDERS, SERIES, UNIVERSE_SOURCES, pick_listings
 from . import wide
 from .wide import WideFeatures
 
@@ -92,7 +92,6 @@ def normalize_screen(spec) -> dict:
     if source not in UNIVERSE_SOURCES:
         raise ScreenError("universe.source must be instruments, watchlist or symbols.")
     provider = _given(u.get("provider"), "zerodha")
-    provider = RETIRED_PROVIDERS.get(provider, provider) if isinstance(provider, str) else provider
     if provider not in PROVIDERS:
         raise ScreenError("universe.provider must be zerodha.")
     exchanges = _given(u.get("exchanges"), ["NSE"])

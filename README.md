@@ -8,8 +8,8 @@
 # ProTradeChart
 
 **Free, open-source desktop charting.** Fast candlestick charts with indicators and drawing tools, live-updating
-watchlists, saved layouts, and the ability to chart your own data — all running locally, with no account and no
-subscription.
+watchlists, saved layouts, and the ability to chart your own data — all running locally. Charting your own imported
+data needs no account; Indian market data needs your own Zerodha account.
 
 <p align="center">
   <img src="docs/images/screenshot-dark.png" alt="ProTradeChart showing an AAPL daily chart with the watchlist docked on the right" width="900">
@@ -20,9 +20,6 @@ subscription.
 - **Serious charts.** Candles, bars, line, area, baseline and Heikin Ashi; a full drawing toolbar (lines, shapes, text
   annotations and more); 70+ built-in indicators; multiple panes; a WebGL2 renderer with a canvas fallback.
   Drawn by [Vela](https://luxalgo.com/vela).
-- **Crypto out of the box, stocks through your own broker.** Live-streaming crypto from Binance, Coinbase and Hyperliquid
-  works right away, with no account. For Indian equities, indices, futures and commodities, connect your own Zerodha
-  account, or chart your own files (see [Data sources](#data-sources)).
 - **Bring your own broker.** Connect a [Zerodha](#connecting-zerodha) account for
   exchange-grade Indian market data — intraday history and a live tick feed. Credentials go in your operating system's
   keychain. More brokers plug into the same system.
@@ -121,14 +118,11 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib    # backend unit tests
 
 ### Symbols
 
-Every symbol is `provider:TICKER`. Typing a bare ticker means the default source, Binance, unless you make another one
-the default under *Data providers*.
+Every symbol is `provider:TICKER`. Typing a bare ticker means the default source, Zerodha (NSE), unless you make
+another one the default under *Data providers*.
 
 | Prefix | Examples |
 | --- | --- |
-| `binance:` | `binance:BTCUSDT`, `binance:ETHUSDT.P` (perpetual futures) |
-| `coinbase:` | `coinbase:BTC-USD` |
-| `hyperliquid:` | `hyperliquid:BTC` |
 | `zerodha:` | `zerodha:NSE:RELIANCE`, `zerodha:BSE:TCS`, `zerodha:NSE:NIFTY_50`, `zerodha:NFO:BANKNIFTY26OCTFUT` — `EXCHANGE:SYMBOL`, so a bare `RELIANCE` means NSE |
 | `csv:` | `csv:MY_DATA` (your imported files) |
 
@@ -156,29 +150,20 @@ time,open,high,low,close,volume
 
 | Source | Covers | Timeframes | Live? |
 | --- | --- | --- | --- |
-| **Binance** | Spot and perpetual crypto | 1 minute to monthly | Live stream |
-| **Coinbase** | Spot crypto | 1 minute to monthly | Live stream |
-| **Hyperliquid** | Perpetual and spot crypto | 1 minute to monthly | Live stream |
 | **Zerodha** *(your account)* | Indian equities, indices, futures, commodities | 1, 3, 5, 10, 15, 30, 60 minutes and daily natively; 2h/4h, weekly, monthly and others built from those | Live tick feed |
 | **Imported CSV** | Anything you bring | Your file's bar size and coarser | No |
 
 A few things worth knowing:
 
-- **Dhan is no longer a data source.** It was removed; Indian markets come through Zerodha. Symbols saved as `dhan:…`
-  stay in your watchlists, layouts and alerts but can't be loaded, and a layout that holds one opens on Bitcoin instead,
-  as below. The app deletes the Dhan credentials, instrument list and cached bars it kept, once. A screen or Study saved
-  with Dhan as its broker opens with Zerodha.
-- **Yahoo Finance is no longer a data source.** It was removed, and with it the app's only source for US and most world
-  stocks, ETFs, FX and indices. To chart those, import your own OHLCV file (*Import data*). Symbols saved earlier as
-  `yahoo:…` stay in your watchlists and layouts but can't be loaded; opening a layout that holds one moves that tab to
-  Bitcoin and says so, and saving the layout again drops the old symbol.
+- **Zerodha is the only broker, and the only live data source.** Binance, Coinbase and Hyperliquid were removed as
+  data sources; Indian markets come through Zerodha alone. Symbols saved as `binance:…`, `coinbase:…` or
+  `hyperliquid:…` stay in your watchlists, layouts and alerts but can't be loaded, and a layout that holds one opens on a
+  starter NSE symbol instead and says so; saving the layout again drops the old symbol.
+- **US and world markets** (stocks, ETFs, FX and their indices) have no data source: import your own OHLCV file
+  (*Import data*) to chart them.
 - A chart opens with about 500 bars (two years of daily candles). **Scroll or zoom back and older candles load
   automatically**, for as long as the source has them. Nothing extra to click.
 - Recently loaded broker bars are cached locally so a chart still draws if you go offline.
-- **Crypto** comes from the exchanges' public market-data APIs, under their own terms
-  ([Binance](https://www.binance.com/en/terms), [Coinbase](https://www.coinbase.com/legal/market_data),
-  [Hyperliquid](https://app.hyperliquid.xyz/terms)). The app only reads prices — it never trades. Where binance.com is
-  blocked it uses Binance.US; some sources simply aren't available in some countries, and the app doesn't work around that.
 - **Broker data is yours alone.** Data from a Zerodha account is licensed to you for your own use under your
   broker's and the exchanges' rules: don't rebroadcast it (on a public stream or website, say). The app only reads market
   data from your account; it never places orders.
@@ -348,8 +333,8 @@ An alert watches one symbol and fires when its price **crosses** a level — up,
 When one fires you get a system notification (so it reaches you with the app minimised), a toast, and a short chime
 (switch it off in the alerts list). Things worth knowing:
 
-- **Alerts work with any data source**, including your broker accounts and crypto, and are checked about every 20 seconds
-  while the app is open. Prices are sampled, not streamed, so a spike that comes and goes between two checks can be missed.
+- **Alerts work with any data source**, and are checked about every 20 seconds while the app is open. Prices are
+  sampled, not streamed, so a spike that comes and goes between two checks can be missed.
 - **A crossing is measured from the price when you set the alert.** If the price was already past the level, the alert waits
   for it to come back and cross again; if it crossed while the app was closed, it fires when the app next opens.
 - **Alerts are shared by every window.** Only the main window watches prices, so an alert never fires twice.
@@ -360,7 +345,7 @@ When one fires you get a system notification (so it reaches you with the app min
 ```
 src/                     React + TypeScript frontend
   chart/                 The Vela wrapper (a grid of one to sixteen charts per tab)
-  data/                  Data providers (crypto, brokers, CSV), symbol search, watchlist quotes
+  data/                  Data providers (Zerodha, CSV), symbol search, watchlist quotes
   features/              Workspace (chart, Python and Studies tabs), layouts, watchlist, search, providers, import, about, Pine dock
   features/python/       The Python tab: script list, editor, console, results
   features/studies/      The Studies tab: builder, data readiness, results page, Ask Claude

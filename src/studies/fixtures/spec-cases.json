@@ -125,7 +125,7 @@
       "word": "weekly and monthly"
     },
     { "patch": { "event": { "conditions": [{ "left": "rsi_14", "op": "between", "right": [70, 30] }] } }, "word": "low end" },
-    { "patch": { "universe": { "provider": "yahoo" } }, "word": "universe.provider must be" }
+    { "patch": { "universe": { "provider": "nosuch" } }, "word": "universe.provider must be" }
   ],
   "accepted": [
     {

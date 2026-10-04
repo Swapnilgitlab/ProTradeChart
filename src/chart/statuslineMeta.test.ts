@@ -5,7 +5,7 @@ describe('withoutDataSource', () => {
   it('drops the data source and keeps the timeframe', () => {
     expect(withoutDataSource('· ZERODHA · 1D')).toBe('· 1D');
     expect(withoutDataSource('· BINANCE · 5')).toBe('· 5');
-    expect(withoutDataSource('· DHAN · 15m')).toBe('· 15m');
+    expect(withoutDataSource('· IMPORTED · 15m')).toBe('· 15m');
   });
 
   it('leaves a line that already has no source alone', () => {

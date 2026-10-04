@@ -28,6 +28,7 @@ import { ThemeSelect } from '../../components/ThemeSelect';
 import { listDatasets, marketDataStatus, pythonEnvStatus, type AiProviders } from '../../lib/ipc';
 import { isDownloaded } from '../../lib/marketData';
 import { useProviderState } from '../providers/useProviderState';
+import { ZerodhaHomeCard } from '../providers/ZerodhaLogin';
 import type { LayoutSummary } from '../layouts/LayoutMenu';
 
 /** A card worth marking done/pending is a first-time setup step with a real finished state;
@@ -158,6 +159,8 @@ export function HomePage({
         </div>
       </div>
 
+      <ZerodhaHomeCard onOpenDataProviders={onOpenDataProviders} />
+
       <Section
         title="Charts"
         cards={[
@@ -210,7 +213,9 @@ export function HomePage({
           {
             icon: Plug,
             title: 'Data providers',
-            description: brokerConnected ? 'Where prices come from: crypto or Zerodha.' : 'Crypto works already. Connect Zerodha for NSE, BSE, F&O and commodities.',
+            description: brokerConnected
+              ? 'Zerodha and your imported data: switch sources on or off.'
+              : 'Connect Zerodha for NSE, BSE, F&O and commodities.',
             onClick: onOpenDataProviders,
             status: statusOf(brokerConnected),
           },

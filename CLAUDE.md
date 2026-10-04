@@ -25,7 +25,7 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
 
 ## Conventions
 
-- A chart symbol is always `provider:TICKER` (`binance:BTCUSDT`). Use the helpers in `src/lib/symbols.ts`; never split on
+- A chart symbol is always `provider:TICKER` (`zerodha:NSE:RELIANCE`). Use the helpers in `src/lib/symbols.ts`; never split on
   `:` by hand.
 - Pure logic lives in `src/lib/` (TypeScript) or `src-tauri/src/store/` (Rust) and has unit tests. Components
   and Tauri commands stay thin.
@@ -90,8 +90,7 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
 - `THIRD_PARTY_LICENSES.txt` is bundled with the installers and shown in About; it reproduces every dependency's licence.
   Regenerate it (`npm run licenses`) whenever `package-lock.json` or `Cargo.lock` changes. The About dialog also carries
   the AGPL's legal notices (copyright, no warranty, licence, source link): keep them.
-- The web view loads nothing from third-party servers the user didn't choose: the CSP has no remote `img-src`, and Vela's
-  crypto providers have `resolveSymbolIcon` switched off (`data/providers/index.ts`) so no coin logos come from Ledger.
+- The web view loads nothing from third-party servers the user didn't choose: the CSP has no remote `img-src`.
 - Keep `writing` `﻿` and similar invisible characters as escape sequences, not literals.
 - Pine Script runs on PineTS in a **Worker** (`pine/engine.ts`), which is why the CSP has `'unsafe-eval'` — never use the
   in-process `PineEngine`, and don't add other uses of `eval`. `installPineEngine`, `installPinePersistence` and
@@ -106,7 +105,7 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
 - Backtests are approximate (PineTS's broker emulator differs from TradingView's) and cover only the bars the chart has
   loaded. The app is AGPL-3.0 because it bundles PineTS: new dependencies must be compatible with that.
 - Verify a new broker integration against the real service with fake credentials (real error bodies, real socket
-  behaviour) before trusting the docs: a broker's feed may accept the socket and only then drop it on a bad token (Dhan's did).
+  behaviour) before trusting the docs: a broker's feed may accept the socket and only then drop it on a bad token.
 - Zerodha's one-click login (`zerodha/callback.rs`) catches Kite's redirect on `127.0.0.1:47821`, so the port is part of
   the user's Kite app configuration: changing it silently breaks every existing setup. Bind before opening the browser,
   keep it loopback-only, and leave `zerodha_complete_login` (paste the address) working for apps that redirect elsewhere.
@@ -322,16 +321,10 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   its column), which is what makes its numbers equal `Features`'. `features.py`'s maths must work on a Series and a DataFrame alike:
   don't add an `iloc` by position or a `where(..., value)` that turns a row above a symbol's first bar into a value. Keep
   `tests/test_wide.py`, which checks every family, and the Screener fixture, which must not change.
-- **Yahoo Finance is not a data source, and shouldn't come back without the owner's say-so.** It was removed entirely: its
-  provider, backend client and rate limiter, its terms/opt-in UI, and its `yahoo:` symbols. Symbols saved from it stay in
-  users' watchlists, layouts and alerts but can't load: `isSupportedSymbol` (`lib/symbols.ts`) recognises them, and
-  `withoutUnsupportedSymbols` moves a layout's tabs off them when it opens (nothing stored is rewritten). `store/retired.rs`
-  purges its cache and settings once. A bare ticker now means Binance (`DEFAULT_PROVIDER`), which needs no account. Don't add
-  a source that scrapes an unofficial endpoint, and don't leave `yahoo` in any provider list.
-- **Dhan is not a data source either** — removed the same way, at the owner's request: its provider, `dhan/` client and feed,
-  commands, Data providers panel and `dhan_instruments`. `dhan:` symbols stay where users saved them but can't load
-  (`isSupportedSymbol` is false; `BROKERS` in `lib/symbols.ts` keeps `dhan` only so they still *display* short), and
-  `store::retired::purge_dhan_leftovers_once` deletes its keychain secrets (through `Secrets::delete`), settings, cached and
-  research bars, `market_symbols` rows and instrument table once. A screen or Study saved with `universe.provider: "dhan"`
-  normalises to `"zerodha"` (`currentProvider` in `studies/spec.ts`, `RETIRED_PROVIDERS` in `protrade/study.py`) rather than
-  refusing to open. Zerodha is now the only broker: don't reintroduce Dhan without the owner's say-so.
+- **Binance, Coinbase and Hyperliquid are not data sources** — Vela's own bundled crypto providers, free and
+  needing no account, removed at the owner's request so Zerodha is the only live data source. They're hard-deleted:
+  just gone from `ProviderId`/`PROVIDER_LABELS` (`lib/symbols.ts`) and `providers.rs`, with no purge job —
+  `isSupportedSymbol`'s normal handling of an unknown provider covers `binance:`/`coinbase:`/`hyperliquid:` symbols
+  saved before the removal, as it would any provider the app doesn't have. `DEFAULT_PROVIDER` is now `zerodha` (naming
+  NSE), so a bare ticker and the starter watchlist need the user's own Zerodha account connected to actually load — they no longer work with zero setup. Don't bring back a free crypto
+  source without the owner's say-so, and don't add a source that scrapes an unofficial endpoint.

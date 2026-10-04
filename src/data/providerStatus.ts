@@ -39,17 +39,18 @@ export const providerInfo = (id: string): ProviderInfo | undefined => state.prov
 const OPT_IN = new Set<string>(['zerodha']);
 
 /** Enabled and fully set up. Before the first load, only what needs no setup
- *  counts, so an account-backed source is never assumed to be ready, and a removed
- *  one (a saved `dhan:` symbol) never is. */
+ *  counts, so an account-backed source is never assumed to be ready, and one the app
+ *  no longer has (a symbol saved from it) never is. */
 export function isProviderUsable(id: string): boolean {
   const info = providerInfo(id);
   if (!info) return !state.loaded && !OPT_IN.has(id) && isSupportedProvider(id);
   return info.enabled && info.configured;
 }
 
-/** What a brand-new chart shows: a crypto pair, which needs no account or setup. */
+/** What a brand-new chart shows until the user picks something else: a well-known
+ *  NSE name through Zerodha. It still needs the user's own account connected to load. */
 export function starterSymbol(): string {
-  return 'binance:BTCUSDT';
+  return 'zerodha:NSE:RELIANCE';
 }
 
 /** Providers that can be searched right now. */

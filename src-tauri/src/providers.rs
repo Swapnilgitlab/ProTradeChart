@@ -27,7 +27,7 @@ pub struct ProviderSpec {
     pub id: &'static str,
     pub label: &'static str,
     pub description: &'static str,
-    /// `free`, `broker` or `local`.
+    /// `broker` or `local`.
     pub category: &'static str,
     pub fields: &'static [FieldSpec],
     pub can_disable: bool,
@@ -39,45 +39,6 @@ pub struct ProviderSpec {
 }
 
 pub const PROVIDERS: &[ProviderSpec] = &[
-    ProviderSpec {
-        id: "binance",
-        label: "Binance",
-        description: "Spot and perpetual crypto with a live stream. Free, no account.",
-        category: "free",
-        fields: &[],
-        can_disable: true,
-        history: true,
-        live: true,
-        search: true,
-        quotes: true,
-        docs_url: None,
-    },
-    ProviderSpec {
-        id: "coinbase",
-        label: "Coinbase",
-        description: "Spot crypto with a live stream. Free, no account.",
-        category: "free",
-        fields: &[],
-        can_disable: true,
-        history: true,
-        live: true,
-        search: true,
-        quotes: true,
-        docs_url: None,
-    },
-    ProviderSpec {
-        id: "hyperliquid",
-        label: "Hyperliquid",
-        description: "Perpetual and spot crypto with a live stream. Free, no account.",
-        category: "free",
-        fields: &[],
-        can_disable: true,
-        history: true,
-        live: true,
-        search: true,
-        quotes: true,
-        docs_url: None,
-    },
     ProviderSpec {
         id: "csv",
         label: "Imported data",
@@ -139,8 +100,8 @@ fn require_spec(id: &str) -> Result<&'static ProviderSpec, String> {
     spec(id).ok_or_else(|| format!("unknown data provider '{id}'"))
 }
 
-/// Whether a provider is switched on. Free and local providers default to on;
-/// broker providers stay off until the user sets them up and turns them on.
+/// Whether a provider is switched on. Local providers default to on; broker
+/// providers stay off until the user sets them up and turns them on.
 fn is_enabled(conn: &Connection, spec: &ProviderSpec) -> rusqlite::Result<bool> {
     if !spec.can_disable {
         return Ok(true);
@@ -346,10 +307,9 @@ mod tests {
     }
 
     #[test]
-    fn free_providers_start_on_and_brokers_start_off() {
+    fn local_providers_start_on_and_brokers_start_off() {
         let (db, secrets) = setup();
         let conn = db.conn.lock().unwrap();
-        assert!(info(&conn, &secrets, "binance").enabled);
         assert!(info(&conn, &secrets, "csv").enabled);
         let zerodha = info(&conn, &secrets, "zerodha");
         assert!(!zerodha.enabled);
@@ -357,28 +317,17 @@ mod tests {
     }
 
     #[test]
-    fn dhan_is_not_a_data_source() {
-        assert!(
-            spec("dhan").is_none(),
-            "Dhan was removed; nothing should serve or configure it"
-        );
-        let (db, secrets) = setup();
-        let conn = db.conn.lock().unwrap();
-        assert!(is_usable(&conn, &secrets, "dhan").is_err());
-        assert!(describe(&conn, &secrets).unwrap().iter().all(|p| p.id != "dhan"));
-    }
-
-    #[test]
-    fn yahoo_is_not_a_data_source() {
-        assert!(
-            spec("yahoo").is_none(),
-            "Yahoo Finance was removed; nothing should serve or configure it"
-        );
-        let (db, secrets) = setup();
-        let conn = db.conn.lock().unwrap();
-        assert!(is_usable(&conn, &secrets, "yahoo").is_err());
-        assert!(set_enabled(&conn, "yahoo", true).is_err());
-        assert!(describe(&conn, &secrets).unwrap().iter().all(|p| p.id != "yahoo"));
+    fn crypto_providers_are_not_data_sources() {
+        for id in ["binance", "coinbase", "hyperliquid"] {
+            assert!(
+                spec(id).is_none(),
+                "{id} was removed; nothing should serve or configure it"
+            );
+            let (db, secrets) = setup();
+            let conn = db.conn.lock().unwrap();
+            assert!(is_usable(&conn, &secrets, id).is_err());
+            assert!(describe(&conn, &secrets).unwrap().iter().all(|p| p.id != id));
+        }
     }
 
     #[test]
@@ -492,8 +441,8 @@ mod tests {
         set_enabled(&conn, "zerodha", false).unwrap();
         assert!(!is_usable(&conn, &secrets, "zerodha").unwrap());
         assert!(
-            is_usable(&conn, &secrets, "coinbase").unwrap(),
-            "free providers need no setup"
+            is_usable(&conn, &secrets, "csv").unwrap(),
+            "local providers need no setup"
         );
     }
 

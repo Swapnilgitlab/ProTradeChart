@@ -434,9 +434,9 @@ class UniverseTests(Case):
         return 200, {"id": 1, "name": name, "symbols": [{"symbol": s, "name": None} for s in self.lists[name]]}
 
     def test_a_named_watchlist_is_used_and_says_so(self):
-        self.lists["Nifty 50"] = ["zerodha:NSE:TCS", "binance:BTCUSDT", "dhan:NSE:INFY", "zerodha:NSE:INFY"]
+        self.lists["Nifty 50"] = ["zerodha:NSE:TCS", "binance:BTCUSDT", "csv:MY_DATA", "zerodha:NSE:INFY"]
         u = pt.universe("Nifty 50")
-        self.assertEqual(list(u), ["zerodha:NSE:TCS", "zerodha:NSE:INFY"], "only symbols a script can read, not a retired source's")
+        self.assertEqual(list(u), ["zerodha:NSE:TCS", "zerodha:NSE:INFY"], "only symbols a script can read")
         self.assertEqual(u.source, "the watchlist 'Nifty 50'")
         self.assertIsInstance(u, list)
 

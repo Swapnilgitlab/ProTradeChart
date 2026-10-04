@@ -576,7 +576,7 @@ mod tests {
         assert_eq!(futures[0].kind, "FUT");
         assert_eq!(futures[0].expiry.as_deref(), Some("2026-09-29"));
 
-        for retired_or_unknown in ["binance", "dhan"] {
+        for retired_or_unknown in ["binance", "nosuch"] {
             err(
                 400,
                 "bad_request",
@@ -627,7 +627,7 @@ mod tests {
                     name: Some("Reliance".into()),
                 },
                 NewWatchlistItem {
-                    symbol: "dhan:NSE:TCS".into(),
+                    symbol: "zerodha:NSE:TCS".into(),
                     name: None,
                 },
             ],
@@ -638,7 +638,7 @@ mod tests {
         assert_eq!(by_name.id, id);
         assert_eq!(
             by_name.symbols.iter().map(|s| s.symbol.as_str()).collect::<Vec<_>>(),
-            ["zerodha:NSE:RELIANCE", "dhan:NSE:TCS"]
+            ["zerodha:NSE:RELIANCE", "zerodha:NSE:TCS"]
         );
         assert_eq!(
             watchlist_content(&conn, &WatchlistSel::Id(id)).unwrap().name,

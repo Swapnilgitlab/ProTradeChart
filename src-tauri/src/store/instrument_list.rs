@@ -118,7 +118,7 @@ mod tests {
     #[test]
     fn only_zerodha_is_a_source() {
         assert_eq!(Source::parse("zerodha"), Some(Source::Zerodha));
-        assert_eq!(Source::parse("dhan"), None, "Dhan was removed");
+        assert_eq!(Source::parse("nosuch"), None);
         assert_eq!(Source::parse("binance"), None);
         assert_eq!(Source::parse("csv"), None);
     }

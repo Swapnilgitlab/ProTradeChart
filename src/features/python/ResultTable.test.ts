@@ -19,7 +19,7 @@ const render = (t: TableResult) => renderToStaticMarkup(createElement(ResultTabl
 
 describe('ResultTable symbol cells', () => {
   it('read as the ticker alone: no data source and no usual exchange', () => {
-    const html = render(table([['zerodha:NSE:HFCL', 211.27], ['dhan:NSE:RELIANCE', 1226]]));
+    const html = render(table([['zerodha:NSE:HFCL', 211.27], ['zerodha:NSE:RELIANCE', 1226]]));
     expect(html).toContain('>HFCL<');
     expect(html).toContain('>RELIANCE<');
     expect(html).not.toContain('>zerodha:');

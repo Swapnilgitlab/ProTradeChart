@@ -34,28 +34,28 @@ describe('what a proposed action is refused for', () => {
   });
 
   it('a price alert with a bad condition or a non-positive price', () => {
-    expect(prepareAction(action('create_price_alert', { symbol: 'BTCUSDT', condition: 'sideways', price: 100, message: '' }), ctx)).toBeNull();
-    expect(prepareAction(action('create_price_alert', { symbol: 'BTCUSDT', condition: 'crossing_up', price: 0, message: '' }), ctx)).toBeNull();
-    expect(prepareAction(action('create_price_alert', { symbol: 'BTCUSDT', condition: 'crossing_up', price: -5, message: '' }), ctx)).toBeNull();
+    expect(prepareAction(action('create_price_alert', { symbol: 'RELIANCE', condition: 'sideways', price: 100, message: '' }), ctx)).toBeNull();
+    expect(prepareAction(action('create_price_alert', { symbol: 'RELIANCE', condition: 'crossing_up', price: 0, message: '' }), ctx)).toBeNull();
+    expect(prepareAction(action('create_price_alert', { symbol: 'RELIANCE', condition: 'crossing_up', price: -5, message: '' }), ctx)).toBeNull();
   });
 });
 
 describe('a symbol argument', () => {
   it('is resolved the same way the symbol search box would', () => {
-    expect(prepareAction(action('open_symbol', { symbol: 'BTCUSDT' }), ctx)?.summary).toBe('Open binance:BTCUSDT on the chart');
+    expect(prepareAction(action('open_symbol', { symbol: 'RELIANCE' }), ctx)?.summary).toBe('Open zerodha:NSE:RELIANCE on the chart');
     expect(prepareAction(action('open_symbol', { symbol: 'zerodha:hfcl' }), ctx)?.summary).toBe('Open zerodha:NSE:HFCL on the chart');
   });
 });
 
 describe('watchlist actions', () => {
   it('add a symbol once approved, and fail plainly for an unknown watchlist', async () => {
-    const prepared = prepareAction(action('add_watchlist_item', { watchlist: 'Getting started', symbol: 'ETHUSDT' }), ctx);
-    expect(prepared?.summary).toBe('Add binance:ETHUSDT to “Getting started”');
+    const prepared = prepareAction(action('add_watchlist_item', { watchlist: 'Getting started', symbol: 'INFY' }), ctx);
+    expect(prepared?.summary).toBe('Add zerodha:NSE:INFY to “Getting started”');
     const result = await prepared!.run();
-    expect(result).toEqual({ ok: true, message: 'Added binance:ETHUSDT to Getting started.' });
-    expect(addWatchlistItems).toHaveBeenCalledWith(1, [{ symbol: 'binance:ETHUSDT' }]);
+    expect(result).toEqual({ ok: true, message: 'Added zerodha:NSE:INFY to Getting started.' });
+    expect(addWatchlistItems).toHaveBeenCalledWith(1, [{ symbol: 'zerodha:NSE:INFY' }]);
 
-    const missing = prepareAction(action('remove_watchlist_item', { watchlist: 'No such list', symbol: 'ETHUSDT' }), ctx);
+    const missing = prepareAction(action('remove_watchlist_item', { watchlist: 'No such list', symbol: 'INFY' }), ctx);
     expect(await missing!.run()).toEqual({ ok: false, message: 'No watchlist named "No such list".' });
   });
 
@@ -69,9 +69,9 @@ describe('watchlist actions', () => {
 
 describe('chart actions', () => {
   it('open a symbol and change the timeframe through the given callbacks', async () => {
-    const openSymbol = prepareAction(action('open_symbol', { symbol: 'binance:SOLUSDT' }), ctx)!;
-    expect(await openSymbol.run()).toEqual({ ok: true, message: 'Opened binance:SOLUSDT.' });
-    expect(ctx.onOpenSymbol).toHaveBeenCalledWith('binance:SOLUSDT');
+    const openSymbol = prepareAction(action('open_symbol', { symbol: 'zerodha:NSE:TCS' }), ctx)!;
+    expect(await openSymbol.run()).toEqual({ ok: true, message: 'Opened zerodha:NSE:TCS.' });
+    expect(ctx.onOpenSymbol).toHaveBeenCalledWith('zerodha:NSE:TCS');
 
     const setTf = prepareAction(action('set_timeframe', { timeframe: '60' }), ctx)!;
     expect(await setTf.run()).toEqual({ ok: true, message: 'Timeframe set to 60.' });
@@ -91,16 +91,16 @@ describe('chart actions', () => {
 
 describe('a price alert', () => {
   it('is created with no base price, so it judges only crossings from here on', async () => {
-    const prepared = prepareAction(action('create_price_alert', { symbol: 'BTCUSDT', condition: 'crossing_up', price: 95000, message: 'Breakout' }), ctx)!;
-    expect(prepared.summary).toBe('Alert when binance:BTCUSDT crosses above 95000');
-    expect(await prepared.run()).toEqual({ ok: true, message: 'Alert created on binance:BTCUSDT.' });
+    const prepared = prepareAction(action('create_price_alert', { symbol: 'RELIANCE', condition: 'crossing_up', price: 3000, message: 'Breakout' }), ctx)!;
+    expect(prepared.summary).toBe('Alert when zerodha:NSE:RELIANCE crosses above 3000');
+    expect(await prepared.run()).toEqual({ ok: true, message: 'Alert created on zerodha:NSE:RELIANCE.' });
     expect(savePriceAlert).toHaveBeenCalledWith(
-      expect.objectContaining({ symbol: 'binance:BTCUSDT', condition: 'crossing_up', price: 95000, basePrice: null, message: 'Breakout', status: 'active' }),
+      expect.objectContaining({ symbol: 'zerodha:NSE:RELIANCE', condition: 'crossing_up', price: 3000, basePrice: null, message: 'Breakout', status: 'active' }),
     );
   });
 
   it('reads "crosses below" for crossing_down', () => {
-    const prepared = prepareAction(action('create_price_alert', { symbol: 'BTCUSDT', condition: 'crossing_down', price: 50000, message: '' }), ctx)!;
-    expect(prepared.summary).toBe('Alert when binance:BTCUSDT crosses below 50000');
+    const prepared = prepareAction(action('create_price_alert', { symbol: 'RELIANCE', condition: 'crossing_down', price: 2500, message: '' }), ctx)!;
+    expect(prepared.summary).toBe('Alert when zerodha:NSE:RELIANCE crosses below 2500');
   });
 });

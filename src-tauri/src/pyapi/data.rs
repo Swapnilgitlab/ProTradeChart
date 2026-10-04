@@ -903,7 +903,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_quote_failure_marks_its_symbols_fetch_and_a_retired_providers_are_skipped() {
+    async fn a_quote_failure_marks_its_symbols_fetch_and_other_sources_are_skipped() {
         let db = Database::open_in_memory().unwrap();
         let f = fake();
         load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
@@ -911,16 +911,16 @@ mod tests {
         let snaps = FakeSnapshots::default();
         snaps.fail_provider("zerodha", ApiError::new(401, "auth", "token expired"));
 
-        let req = sync_request(vec![SYM.to_string(), "dhan:NSE:TCS".to_string()]);
+        let req = sync_request(vec![SYM.to_string(), "csv:MY_DATA".to_string()]);
         let report = sync_daily(&db, &snaps, &req, evening()).await;
         let by_symbol: HashMap<_, _> = report.results.into_iter().map(|r| (r.symbol.clone(), r)).collect();
 
         assert_eq!(by_symbol[SYM].status, SyncStatus::Fetch);
         assert_eq!(by_symbol[SYM].reason.as_deref(), Some("token expired"));
         assert_eq!(
-            by_symbol["dhan:NSE:TCS"].status,
+            by_symbol["csv:MY_DATA"].status,
             SyncStatus::Skipped,
-            "Dhan was removed"
+            "only the broker's quotes top a series up"
         );
     }
 

@@ -177,10 +177,10 @@ class UniverseTests(unittest.TestCase):
         with self.assertRaises(study.SpecError):
             study.normalize_spec(spec(universe={"series": ["GB"]}))
 
-    def test_a_study_saved_with_dhan_reads_zerodha_now_that_dhan_is_gone(self):
-        self.assertEqual(study.normalize_spec(spec(universe={"provider": "dhan"}))["universe"]["provider"], "zerodha")
+    def test_only_zerodha_is_a_universe_provider(self):
+        self.assertEqual(study.normalize_spec(spec())["universe"]["provider"], "zerodha")
         with self.assertRaisesRegex(study.SpecError, "universe.provider"):
-            study.normalize_spec(spec(universe={"provider": "yahoo"}))
+            study.normalize_spec(spec(universe={"provider": "nosuch"}))
 
 
 class EngineTests(unittest.TestCase):

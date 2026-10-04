@@ -63,7 +63,7 @@ pub const MAX_WATCHLIST_SYMBOLS: usize = 2_000;
 const MAX_WATCHLIST_NAME: usize = 100;
 const MAX_SYMBOL_CHARS: usize = 64;
 /// Where a symbol's data comes from; a script can't put one on a list from anywhere else.
-const WATCHLIST_PROVIDERS: [&str; 5] = ["zerodha", "binance", "coinbase", "hyperliquid", "csv"];
+const WATCHLIST_PROVIDERS: [&str; 2] = ["zerodha", "csv"];
 
 /// A `watchlist` result's data checked and made canonical: `{name, symbols, mode}`, mode `replace`
 /// (the default) or `append`. A broker symbol without an exchange is on NSE, as everywhere else in
@@ -98,7 +98,7 @@ pub fn watchlist_update(data: &serde_json::Value) -> Result<WatchlistUpdate, Api
         let raw = item.as_str().map(str::trim).unwrap_or("");
         let symbol = canonical_symbol(raw).ok_or_else(|| {
             ApiError::bad_request(format!(
-                "'{}' isn't a symbol the app can show: write it like zerodha:NSE:RELIANCE or binance:BTCUSDT.",
+                "'{}' isn't a symbol the app can show: write it like zerodha:NSE:RELIANCE or csv:MY_DATA.",
                 raw.chars().take(MAX_SYMBOL_CHARS).collect::<String>()
             ))
         })?;
@@ -1159,7 +1159,7 @@ mod tests {
             &ctx,
             &post(&watchlist(serde_json::json!({
                 "name": "  Momentum ",
-                "symbols": ["zerodha:NSE:TCS", "zerodha:infy", "ZERODHA:BSE:RELIANCE", "binance:BTCUSDT", "zerodha:NSE:TCS"],
+                "symbols": ["zerodha:NSE:TCS", "zerodha:infy", "ZERODHA:BSE:RELIANCE", "csv:MY_DATA", "zerodha:NSE:TCS"],
             }))),
         )
         .await;
@@ -1176,7 +1176,7 @@ mod tests {
                     "zerodha:NSE:TCS".into(),
                     "zerodha:NSE:INFY".into(),
                     "zerodha:BSE:RELIANCE".into(),
-                    "binance:BTCUSDT".into()
+                    "csv:MY_DATA".into()
                 ],
                 replace: true,
             }
@@ -1196,8 +1196,7 @@ mod tests {
             serde_json::json!({ "name": "A\nB", "symbols": [] }),
             serde_json::json!({ "name": "L", "symbols": "zerodha:NSE:TCS" }),
             serde_json::json!({ "name": "L", "symbols": ["TCS"] }),
-            serde_json::json!({ "name": "L", "symbols": ["yahoo:AAPL"] }),
-            serde_json::json!({ "name": "L", "symbols": ["dhan:NSE:TCS"] }),
+            serde_json::json!({ "name": "L", "symbols": ["nosuch:NSE:TCS"] }),
             serde_json::json!({ "name": "L", "symbols": ["zerodha:"] }),
             serde_json::json!({ "name": "L", "symbols": [7] }),
             serde_json::json!({ "name": "L", "symbols": [format!("zerodha:NSE:{}", "A".repeat(80))] }),

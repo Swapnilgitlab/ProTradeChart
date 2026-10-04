@@ -1,15 +1,12 @@
 /** A chart symbol is always `provider:TICKER` — the provider prefix is what
  *  tells Vela (and this app) which data source serves it. */
 
-export type ProviderId = 'binance' | 'coinbase' | 'hyperliquid' | 'csv' | 'zerodha';
+export type ProviderId = 'csv' | 'zerodha';
 
-/** What a bare ticker means. It needs no account and no setup, so it always works. */
-export const DEFAULT_PROVIDER: ProviderId = 'binance';
+/** What a bare ticker means: NSE, through the user's own Zerodha account. */
+export const DEFAULT_PROVIDER: ProviderId = 'zerodha';
 
 export const PROVIDER_LABELS: Record<ProviderId, string> = {
-  binance: 'Binance',
-  coinbase: 'Coinbase',
-  hyperliquid: 'Hyperliquid',
   csv: 'Imported',
   zerodha: 'Zerodha',
 };
@@ -33,9 +30,8 @@ export function joinSymbol(provider: string, ticker: string): string {
 }
 
 /** The brokers list several exchanges and take the exchange as part of the ticker
- *  (`NSE:RELIANCE`, `BSE:RELIANCE`). Dhan is no longer a data source, but its symbols stay
- *  in users' watchlists, layouts and alerts, and still read as they did there. */
-const BROKERS = new Set(['dhan', 'zerodha']);
+ *  (`NSE:RELIANCE`, `BSE:RELIANCE`). */
+const BROKERS = new Set(['zerodha']);
 
 /** The exchange a broker assumes when a ticker names none — and so the one people
  *  never need to see: `NSE:` is dropped from everything on screen, other exchanges

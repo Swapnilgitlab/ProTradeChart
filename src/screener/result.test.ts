@@ -23,7 +23,7 @@ describe('parseScreenResult', () => {
   it('refuses what it does not recognise rather than guessing', () => {
     const cases: [string, (d: Record<string, any>) => void][] = [
       ['another format', (d) => (d.format = 2)],
-      ['an invalid spec', (d) => (d.spec.universe.provider = 'yahoo')],
+      ['an invalid spec', (d) => (d.spec.universe.provider = 'nosuch')],
       ['columns other than the spec’s', (d) => (d.columns = ['close', 'ema_50', 'return_1'])],
       ['a row missing a value', (d) => d.rows[0].values.pop()],
       ['a value that is not a number', (d) => (d.rows[0].values[0] = '<img src=x>')],

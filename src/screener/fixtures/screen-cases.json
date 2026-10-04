@@ -12,7 +12,7 @@
     { "patch": { "name": "  " }, "word": "needs a name" },
     { "patch": { "version": 2 }, "word": "version 1 screens" },
     { "patch": { "universe": { "source": "everything" } }, "word": "universe.source" },
-    { "patch": { "universe": { "provider": "yahoo" } }, "word": "universe.provider" },
+    { "patch": { "universe": { "provider": "nosuch" } }, "word": "universe.provider" },
     { "patch": { "universe": { "exchanges": [] } }, "word": "universe.exchanges" },
     { "patch": { "universe": { "series": ["XX"] } }, "word": "universe.series" },
     { "patch": { "universe": { "source": "watchlist" } }, "word": "universe.watchlist" },
@@ -66,10 +66,10 @@
       }
     },
     {
-      "about": "a watchlist with no filters and no sort is a plain table; series keep their canonical order; a screen saved with Dhan, no longer a source, reads Zerodha",
+      "about": "a watchlist with no filters and no sort is a plain table; series keep their canonical order",
       "patch": {
         "name": "  My list  ",
-        "universe": { "source": "watchlist", "watchlist": " Swing ", "provider": "dhan", "exchanges": ["BSE", "NSE", "BSE"], "series": ["SME", "EQ"], "max_symbols": 50 },
+        "universe": { "source": "watchlist", "watchlist": " Swing ", "provider": "zerodha", "exchanges": ["BSE", "NSE", "BSE"], "series": ["SME", "EQ"], "max_symbols": 50 },
         "filters": [],
         "columns": ["rs_126"],
         "sort": null,

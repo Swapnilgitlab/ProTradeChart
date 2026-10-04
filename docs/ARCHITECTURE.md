@@ -10,10 +10,9 @@ are drawn by [Vela](https://luxalgo.com/vela).
 │  WatchlistPanel ── quotes ─────────────────────────────────────────────────┐ │   │
 │  SymbolSearchBox ── search ──┐                                              │ │   │
 └──────────────────────────────┼──────────────────────────────────────────────┼─┼───┘
-        Vela's own providers   │      Tauri IPC (lib/ipc.ts)                  │ │
-   (Binance / Coinbase /       │                                              │ │
-    Hyperliquid, over HTTPS    ▼                                              ▼ ▼
-    and WebSocket)        ┌──────────── Rust backend (src-tauri) ────────────────────┐
+                                │      Tauri IPC (lib/ipc.ts)                  │ │
+                                ▼                                              ▼ ▼
+                          ┌──────────── Rust backend (src-tauri) ────────────────────┐
                           │ commands.rs ─ zerodha/              ── broker API         │
                           │      └────── store/* ── SQLite (charting.db)             │
                           └───────────────────────────────────────────────────────────┘
@@ -25,19 +24,17 @@ Zerodha sits behind Rust: its commands live in `zerodha_commands.rs` / `zerodha/
 
 ## Symbols and providers
 
-A chart symbol is always `provider:TICKER` (`binance:BTCUSDT`, `zerodha:NSE:RELIANCE`, `csv:MY_DATA`). The prefix is what
+A chart symbol is always `provider:TICKER` (`zerodha:NSE:RELIANCE`, `csv:MY_DATA`). The prefix is what
 selects the data source: it's Vela's own routing rule, and `lib/symbols.ts` holds the helpers for it.
 
 A provider is a Vela [`DataProvider`](../node_modules/@luxalgo/vela/dist/DataProvider-DLeFs1gE.d.ts): an object with
 `getBars(ticker, timeframe, range)` and, optionally, `subscribe`, `listSymbols` and `info`. `src/data/providers/`
-registers one shared instance of each — shared so the crypto providers' cached symbol lists are downloaded once, and
-so search and watchlist quotes use the same instance the charts do.
+registers one shared instance of each, so search and watchlist quotes use the same instance the charts do.
 
 | Provider | Where | Notes |
 | --- | --- | --- |
 | `zerodha` | `data/providers/zerodha.ts` + `src-tauri/src/zerodha/` | The user's own Kite Connect account. All calls go through Rust, which holds the credentials. |
 | `csv` | `data/providers/csv.ts` + `src-tauri/src/store/datasets.rs` | User-imported files, served from SQLite. |
-| `binance`, `coinbase`, `hyperliquid` | Vela's bundled providers | Fetched directly from the webview; they also stream live. |
 
 ### How a symbol is shown
 
@@ -57,45 +54,46 @@ Vela also prints the data source in the status line (`· ZERODHA · 1D`), from i
 symbol. `chart/statuslineMeta.ts` removes the source and keeps the timeframe, and puts the full symbol in the hover text.
 It watches Vela's `.vela-sl-meta` element, so a Vela upgrade that renames that class only brings the source name back.
 
-### Yahoo Finance was removed
+### Symbols from a source the app no longer has
 
-Yahoo Finance used to be a data source, through its unofficial public endpoints. It was removed entirely — provider,
-backend client, rate limiter and the terms/opt-in UI that existed only for it — so the app has **no source for US and most
-world stocks, ETFs, FX or indices**; those need an imported CSV. What it left behind, and how that is handled:
+A saved watchlist, layout or alert can hold a symbol whose `provider:` the app no longer has. User data isn't rewritten,
+so such symbols stay where they were saved, and the handling is generic, keyed on `PROVIDER_LABELS`:
 
-- **Saved symbols.** Watchlists, layouts and alerts keep their `yahoo:…` symbols (user data isn't rewritten), but nothing
-  can load them. `isSupportedSymbol` (`lib/symbols.ts`) recognises them. Opening a layout moves each affected tab, and
-  each affected cell of a grid, to the starter symbol and says so (`withoutUnsupportedSymbols`, in `Workspace`);
-  clicking such a watchlist row says the source is gone; their quotes and alerts stay empty. Saving the layout again
-  drops the old symbols.
-- **Stored cache and settings.** `store/retired.rs` runs once at startup and deletes what Yahoo put in SQLite: every
-  `bars_cache` row whose key isn't a broker's (`zerodha:…`, or `dhan:…` before Dhan went too), the `symbol_meta` and `symbol_names` tables, its
-  `provider_settings` and the preferences only it used. Nothing the user wrote is touched.
-- **Defaults.** A bare ticker means Binance (`DEFAULT_PROVIDER`), which needs no account; a brand-new chart and the
-  starter watchlist are crypto. The TradingView watchlist importer maps the crypto exchanges and, with a broker set up,
-  NSE/BSE; everything else is reported as skipped.
-- **Company names** now come only from the brokers' instrument lists (`store/symbol_names.rs`); crypto and imported data
-  have none.
+- `isSupportedSymbol` (`lib/symbols.ts`) is false for them. Opening a layout moves each affected tab, and each affected
+  cell of a grid, to the starter symbol and says so (`withoutUnsupportedSymbols`, in `Workspace`); clicking such a
+  watchlist row says the source is gone; their quotes and alerts stay empty. Saving the layout again drops them.
+- **Defaults.** A bare ticker means Zerodha, naming NSE (`DEFAULT_PROVIDER`); a brand-new chart and the starter
+  watchlist are NSE names too, though they need the user's own account connected to load. The TradingView watchlist
+  importer maps NSE/BSE with a broker set up; everything else is reported as skipped.
+- **Company names** come only from the broker's instrument list (`store/symbol_names.rs`); imported data has none.
 
-Don't bring back a source that reads an unofficial endpoint, and keep `yahoo` out of every provider list
-(`providers::spec("yahoo")` is tested to be absent).
+Don't add a source that reads an unofficial endpoint.
 
-### Dhan was removed
+### Binance, Coinbase and Hyperliquid were removed
 
-Dhan was the first broker; it was removed at the owner's request, leaving Zerodha as the only one. Its provider, the
-`dhan/` client, instrument list and feed, its commands, the Data providers panel and `toDhanPlan` went with it. What it
-left behind is handled like Yahoo's:
+The three free crypto providers were Vela's own bundled `DataProvider`s, fetched directly from the webview over HTTPS
+and WebSocket rather than through Rust — the only providers that ever worked that way. They were removed at the
+owner's request, leaving Zerodha as the only live data source (CSV import is still free, but needs a file). They were
+hard-deleted: there's no purge job, and nothing tracks them as a special case.
 
-- **Saved symbols** (`dhan:…`) stay in watchlists, layouts and alerts; `isSupportedSymbol` is false for them, so a layout
-  moves them off on open. `BROKERS` in `lib/symbols.ts` still lists `dhan`, only so such a row reads `RELIANCE`, not
-  `NSE:RELIANCE`.
-- **Stored data.** `store::retired::purge_dhan_leftovers_once` runs once at startup (preference `dhanLeftoversPurged`): it
-  deletes Dhan's keychain secrets through `Secrets::delete`, its `provider_settings` and fallback secrets, its rows in
-  `bars_cache`, `research_bars`, `research_coverage` and `market_symbols`, and the `dhan_instruments` table; it clears a
-  `default_provider` of Dhan, and the market-data store's provider and last-run preferences when the store came from Dhan,
-  so the next download starts from Zerodha (the user's auto-update switch stays).
-- **Saved screens and Studies** with `universe.provider: "dhan"` normalise to `"zerodha"` on both sides (`currentProvider`,
-  `RETIRED_PROVIDERS`) and say so in their Broker field, rather than refusing to open.
+- **Removed.** The imports (`@luxalgo/vela/providers/{binance,coinbase,hyperliquid}`), their shared instances and
+  factories in `data/providers/index.ts`, `withoutRemoteIcons` (only they needed it), the crypto branch of
+  `data/search.ts`'s `searchSymbols`, and the TradingView importer's `BINANCE`/`COINBASE`/`HYPERLIQUID` exchange
+  mapping in `lib/watchlistImport.ts`.
+- **Saved symbols** (`binance:…`, `coinbase:…`, `hyperliquid:…`) fall out of `PROVIDER_LABELS` like any other removed
+  provider, so the existing generic handling picks them up for free: `isSupportedSymbol` is false for them, and
+  `withoutUnsupportedSymbols` moves an affected tab (or grid cell) to the starter symbol when a layout opens (see
+  above). Nothing deletes their old `bars_cache` rows or `provider_settings`; they're just never
+  read again.
+- **Defaults.** `DEFAULT_PROVIDER` moved from `binance` to `zerodha`; `starterSymbol()` (`data/providerStatus.ts`) and
+  the seeded "Getting started" watchlist (`store::watchlists::STARTER_SYMBOLS`) moved from crypto pairs to well-known
+  NSE names — which, unlike the old crypto starter, need the user's own Zerodha account connected before they actually
+  load.
+- **Python.** `pyapi`'s `WATCHLIST_PROVIDERS` (routes.rs) already only ever accepted `zerodha` and `csv`; the free
+  crypto providers were never readable from a script, so nothing there changed.
+
+Don't bring back a free crypto source without the owner's say-so, and don't widen `pyapi`'s `WATCHLIST_PROVIDERS` or
+`ProviderId` beyond `zerodha`/`csv` without updating `DEFAULT_PROVIDER` and the starter symbols to match.
 
 ### History on demand
 
@@ -172,8 +170,8 @@ ProTradeChart updates itself through `tauri-plugin-updater`; the pieces:
    milliseconds. Report failures with `notify('error', …)` from `data/events.ts` (it becomes a toast) and return `[]`.
 2. Add it to `instances` and `providerFactories` in `data/providers/index.ts`, and add its id to `ProviderId` and
    `PROVIDER_LABELS` in `lib/symbols.ts`.
-3. Search: if it can enumerate symbols (`listSymbols`), add its id to `CRYPTO_PROVIDERS` in `data/search.ts` or write a
-   results function beside the others. If it needs the network from Rust (to dodge CORS, or to cache), add a command in
+3. Search: write a results function beside `zerodhaResults`/`importedResults` in `data/search.ts` and call it from
+   `searchSymbols`. If it needs the network from Rust (to dodge CORS, or to cache), add a command in
    `src-tauri/src/commands.rs` and a wrapper in `lib/ipc.ts`.
 4. Add tests for anything that parses or plans a request.
 
@@ -205,8 +203,7 @@ a new provider appears there with no UI work.
 Zerodha is the worked example: `zerodha/` has the layers a broker needs, and its module docs say where Kite is unusual (a
 login every morning, a bad key refused at the WebSocket handshake). Two things are meant to be shared: `throttle.rs`
 (request pacing) and, on the webview side, `data/feedHub.ts` (fans one Rust socket's ticks out to the charts that want
-them). A second streaming broker would be the moment to extract `zerodha/feed.rs`'s connect/backoff/refcount loop. (Dhan
-was the other example until it was removed; its code is in git history.)
+them). A second streaming broker would be the moment to extract `zerodha/feed.rs`'s connect/backoff/refcount loop.
 
 1. **Spec.** Add a `ProviderSpec` to `PROVIDERS` in `providers.rs`: fields (say `apiKey` non-secret, `accessToken` secret),
    `category: "broker"`, and its capabilities. The settings screen now shows it.
@@ -225,8 +222,8 @@ was the other example until it was removed; its code is in git history.)
 6. **Search and quotes.** Add a results function to `data/search.ts` and a batch to `data/quotes.ts`, both gated on
    `isProviderUsable`.
 7. **Verify against the real service** with deliberately fake credentials: real error responses are the cheapest way to
-   catch wrong endpoints, header names and error shapes. (That is how Dhan's "accept the socket, then drop it" behaviour
-   on a bad token was found, when it was a source.)
+   catch wrong endpoints, header names and error shapes. (A broker's feed can accept the socket and only
+   then drop it on a bad token; only the real service shows that.)
 
 ## Timeframes and resampling
 
@@ -520,7 +517,7 @@ use), keeps them, and answers. It is for research — screening, backtesting, an
   daily range selects whole dates (an `end` date includes that day), and the client returns them on a timezone-aware IST index.
   Intraday bars keep their real instant. Only the brokers' native intervals are served (Kite 1, 3, 5, 10, 15, 30, 60 minutes and
   daily); `pt.resample` builds the rest, restarting each bucket at the session open like the charts.
-- **Sources.** Zerodha and imported CSV datasets. The crypto sources are fetched by the webview, not Rust, and are not offered.
+- **Sources.** Zerodha and imported CSV datasets only — the only two providers there are.
   Errors carry a stable `code` (`auth`, `not_configured`, `no_access`, `rate_limited`, `not_found`, `bad_request`, `upstream`) that the
   client turns into an exception class; `auth` and its kin are *fatal* to a batch, since every later symbol would fail the same way.
 - **Python is not a sandbox.** A script has the user's own privileges, as from a terminal, so it could read `charting.db` or the
@@ -822,9 +819,10 @@ properties on `<html>` and persists the choice. To add a theme, append one entry
 ## Security model
 
 - The webview's Content-Security-Policy (`tauri.conf.json`) blocks remote scripts, frames and images, and allows
-  outbound connections (`connect-src https: wss:`), which the crypto providers need. Nothing is loaded from a server the
-  user didn't choose: Vela's crypto providers would show coin logos from Ledger's icon server, so
-  `data/providers/index.ts` turns their `resolveSymbolIcon` off and charts show Vela's initials badge.
+  outbound connections (`connect-src https: wss:`) — broader than either remaining provider needs, since both
+  `zerodha` and `csv` call out through Rust over Tauri IPC rather than fetching from the webview directly. That
+  `connect-src` allowance dates from when Vela's own crypto providers fetched straight from the webview; narrowing it
+  now that they're gone would need testing against a release build (the dev server doesn't enforce the CSP).
 - **`script-src` includes `'unsafe-eval'`, and only for Pine.** PineTS compiles a script to JavaScript with
   `new Function`, which the policy otherwise blocks (checked: without it every script fails to compile). The engine is
   always the worker one (`PineWorkerEngine`): a Worker has no DOM and no Tauri IPC, so a pasted script can't reach the

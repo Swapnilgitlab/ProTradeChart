@@ -15,10 +15,6 @@ export const SPEC_VERSION = 1;
 
 export type UniverseSource = 'instruments' | 'watchlist' | 'symbols';
 export type StudyProvider = 'zerodha';
-/** Dhan is no longer a data source. A Study or screen saved with it lists the same NSE and BSE
- *  shares from Zerodha's instrument list, which its Broker field then shows, rather than
- *  refusing to open. `protrade/study.py`'s `RETIRED_PROVIDERS` does the same. */
-export const currentProvider = (provider: unknown): unknown => (provider === 'dhan' ? 'zerodha' : provider);
 export type Exchange = 'NSE' | 'BSE';
 /** Which listings count as stocks: ordinary shares, the trade-for-trade series (BE/BZ) and the SME
  *  platforms. Bonds, SGBs, G-secs, T-bills and funds on an exchange's "equity" list never do. The
@@ -366,7 +362,7 @@ export function normalizeSpec(input: unknown): StudySpec {
   const u = isRecord(input.universe) ? input.universe : {};
   const source = (u.source ?? 'instruments') as UniverseSource;
   if (!['instruments', 'watchlist', 'symbols'].includes(source)) throw new SpecError('universe.source must be instruments, watchlist or symbols.');
-  const provider = currentProvider(u.provider ?? 'zerodha') as StudyProvider;
+  const provider = (u.provider ?? 'zerodha') as StudyProvider;
   if (provider !== 'zerodha') throw new SpecError('universe.provider must be zerodha.');
   const exchanges = u.exchanges ?? ['NSE'];
   if (!Array.isArray(exchanges) || exchanges.length === 0 || exchanges.some((e) => e !== 'NSE' && e !== 'BSE')) {

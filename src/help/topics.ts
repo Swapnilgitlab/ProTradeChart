@@ -93,7 +93,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             'ProTradeChart is a free, open-source desktop application for charting and researching financial markets. It draws fast candlestick charts with indicators and drawing tools, keeps live watchlists and price alerts, runs Pine Script®-compatible indicators and strategy backtests, and offers research tools — a Screener, Python scripting and historical Studies — for Indian equities through your own broker account.',
           ),
           p(
-            'It needs no account and no subscription of its own. Cryptocurrency data from Binance, Coinbase and Hyperliquid works immediately. Indian equities, indices, futures and commodities are available when you connect your own **Zerodha** account, and you can chart any data of your own by importing a CSV file.',
+            'The application itself needs no account or subscription of its own. Indian equities, indices, futures and commodities are available once you connect your own **Zerodha** account (which needs its own paid Kite Connect subscription), and you can chart any data of your own, free, by importing a CSV file.',
           ),
           note('ProTradeChart is for information and research only. Nothing in it is financial advice, and it never places orders.'),
         ],
@@ -244,9 +244,6 @@ export const HELP_TOPICS: HelpTopic[] = [
           table(
             ['Source', 'Examples'],
             [
-              ['Binance', '`binance:BTCUSDT`, `binance:ETHUSDT.P` (perpetual futures)'],
-              ['Coinbase', '`coinbase:BTC-USD`'],
-              ['Hyperliquid', '`hyperliquid:BTC`'],
               ['Zerodha', '`zerodha:NSE:RELIANCE`, `zerodha:NSE:NIFTY_50`, `zerodha:BSE:TCS`'],
               ['Imported data', '`csv:MY_DATA`'],
             ],
@@ -259,7 +256,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           list(
             'Press `Ctrl+K` or click the search box, then type part of a ticker or a company name.',
             'Results come from every data source that is switched on, grouped by source.',
-            'A ticker typed without a source uses the **default provider**, which is Binance until you choose another in **Data providers** (**Make default**). With Zerodha as the default, typing `RELIANCE` opens the NSE listing.',
+            'A ticker typed without a source uses the **default provider**, Zerodha, so typing `RELIANCE` opens the NSE listing (another default can be chosen in **Data providers** → **Make default**, once more than one source is set up).',
             'Options contracts are not listed (there are too many to search usefully); futures are.',
           ),
         ],
@@ -268,7 +265,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Symbols that can no longer load',
         blocks: [
           p(
-            'Yahoo Finance and Dhan were removed as data sources. Symbols saved from them (`yahoo:…`, `dhan:…`) stay in your watchlists, layouts and alerts but cannot be loaded. To chart an Indian instrument again, add it from Zerodha. Opening a layout that contains one moves that chart to a working symbol and tells you; saving the layout again removes the old symbol. To chart US or other world markets, import your own data file.',
+            'Binance, Coinbase and Hyperliquid were removed as data sources. Symbols saved from them (`binance:…`, `coinbase:…`, `hyperliquid:…`) stay in your watchlists, layouts and alerts but cannot be loaded. Opening a layout that contains one moves that chart to a working symbol and tells you; saving the layout again removes the old symbol. To chart crypto, US or other world markets, import your own data file.',
           ),
         ],
       },
@@ -1090,13 +1087,11 @@ export const HELP_TOPICS: HelpTopic[] = [
           table(
             ['Source', 'Coverage'],
             [
-              ['**Binance**', 'Spot and perpetual crypto; 1 minute to monthly; live stream. No account needed. Binance.US is used where binance.com is unavailable.'],
-              ['**Coinbase**', 'Spot crypto; 1 minute to monthly; live stream. No account needed.'],
-              ['**Hyperliquid**', 'Perpetual and spot crypto; 1 minute to monthly; live stream. No account needed.'],
               ['**Zerodha** (your account)', 'NSE, BSE, NFO and MCX equities, indices, futures and commodities; history and a live tick feed. Needs a paid Kite Connect subscription.'],
               ['**Imported data**', 'Your own CSV files.'],
             ],
           ),
+          note('Zerodha is the only broker today. Binance, Coinbase and Hyperliquid were removed as data sources — see **Symbols that can no longer load**.'),
         ],
       },
       {
@@ -1104,7 +1099,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         blocks: [
           p('Open it from the plug icon at the bottom of the right rail. For each source you can:'),
           list(
-            'Switch it on or off. Crypto sources start on; brokers start off until configured.',
+            'Switch it on or off. Imported data starts on; brokers start off until configured.',
             'Enter credentials and press **Save**. Secret values are stored in your operating system’s credential store and are never shown again.',
             'Press **Test connection** to confirm the credentials work.',
             'Press **Make default** to decide which source a ticker typed without a source uses.',
@@ -1190,7 +1185,10 @@ export const HELP_TOPICS: HelpTopic[] = [
             'Zerodha’s access tokens expire every morning at around 06:00 IST. Each day’s first session needs a fresh login — one button and a few seconds. The dialog shows roughly how long today’s token has left, and charts tell you when it has expired.',
           ),
           p(
-            'If your Kite app must redirect elsewhere, use **Paste the address instead**: sign in, then paste the complete address your browser was sent to (it contains `request_token=`). A request token works once, for a few minutes.',
+            'You can log in from three places: **Data providers → Zerodha**, the **Zerodha** row at the top of the **Home** tab (which also shows how long today’s login has left), or the **Log in to Zerodha** window that appears when you open the application after your login has expired. That window appears once per launch; **Not now** dismisses it until next time. It never appears if you haven’t logged in before or have switched Zerodha off.',
+          ),
+          p(
+            'If your Kite app must redirect elsewhere, use **Paste the address instead** in **Data providers** (the Home tab’s **Other ways to log in** opens it): sign in, then paste the complete address your browser was sent to (it contains `request_token=`). A request token works once, for a few minutes.',
           ),
         ],
       },
@@ -1417,7 +1415,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             'Check that the symbol’s data source is switched on in **Data providers**.',
             'For Zerodha, log in again: tokens expire every morning.',
             'Messages about a plan or subscription mean your broker account does not include market data.',
-            'Symbols beginning `yahoo:` or `dhan:` can no longer be loaded; see **Symbols and searching**.',
+            'Symbols from a data source the app no longer has (`binance:…`, `coinbase:…`, `hyperliquid:…`) can no longer be loaded; see **Symbols and searching**.',
           ),
         ],
       },

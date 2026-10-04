@@ -27,6 +27,7 @@ import {
 import type { ProviderId } from '../../lib/symbols';
 import { MarketDataSection } from '../marketdata/MarketDataSection';
 import { useProviderState } from './useProviderState';
+import { afterBrokerLogin } from './useZerodhaSession';
 
 interface Props {
   onClose: () => void;
@@ -43,10 +44,9 @@ function providerStatus(p: ProviderInfo): { label: string; tone: Tone } {
   return { label: 'Off', tone: 'off' };
 }
 
-const CATEGORY_ORDER: Record<ProviderInfo['category'], number> = { broker: 0, free: 1, local: 2 };
+const CATEGORY_ORDER: Record<ProviderInfo['category'], number> = { broker: 0, local: 1 };
 const CATEGORY_TITLES: Record<ProviderInfo['category'], string> = {
   broker: 'Your broker accounts',
-  free: 'Free sources',
   local: 'On this computer',
 };
 
@@ -200,16 +200,7 @@ function ProviderDetail({ provider, isDefault }: { provider: ProviderInfo; isDef
       }
     });
 
-  /** After a Zerodha login the token is saved and the provider may now be complete. */
-  const afterLogin = async () => {
-    await refreshProviders();
-    const now = getProviderState().providers.find((p) => p.id === provider.id);
-    if (now && now.configured && !now.enabled && now.canDisable) {
-      await setProviderEnabled(provider.id, true);
-      await refreshProviders();
-      refreshInstruments(provider.id);
-    }
-  };
+  const afterLogin = () => afterBrokerLogin(provider.id);
 
   const onTest = () =>
     run('test', async () => {

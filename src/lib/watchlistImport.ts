@@ -29,16 +29,9 @@ const ZERODHA_INDEX: Record<string, string> = {
   BANKNIFTY: 'NIFTY_BANK',
 };
 
-/** Splits a Coinbase pair like `BTCUSD` into Coinbase's `BTC-USD` form. */
-function coinbasePair(ticker: string): string {
-  if (ticker.includes('-')) return ticker;
-  const m = /^(.+?)(USDT|USDC|USD|EUR|GBP|BTC|ETH)$/.exec(ticker);
-  return m ? `${m[1]}-${m[2]}` : ticker;
-}
-
 /** Maps one `EXCHANGE:TICKER` (TradingView) or bare `TICKER` entry to this
  *  app's `provider:TICKER`, or `null` if it can't be charted — an exchange none
- *  of the app's data sources covers (US and most world stocks, FX, futures). */
+ *  of the app's data sources covers (crypto, US and most world stocks, FX, futures). */
 export function mapSymbol(entry: string, options: MapOptions = {}): string | null {
   const raw = entry.trim().replace(/^["']|["']$/g, '');
   if (!raw) return null;
@@ -54,17 +47,11 @@ export function mapSymbol(entry: string, options: MapOptions = {}): string | nul
   const lowerPrefix = prefix.toLowerCase();
   const upper = ticker.toUpperCase();
 
-  // Already one of our own provider:TICKER symbols (e.g. a re-imported
-  // export). Our prefixes are lowercase; TradingView's exchange codes are
-  // uppercase, which is what keeps `coinbase:BTC-USD` and `COINBASE:BTCUSD`
-  // (different ticker conventions) apart.
+  // Already one of our own provider:TICKER symbols (e.g. a re-imported export).
+  // Our prefixes are lowercase; TradingView's exchange codes are uppercase.
   if (prefix === lowerPrefix && PASS_THROUGH_PROVIDERS.has(lowerPrefix)) {
     return joinSymbol(lowerPrefix as ProviderId, lowerPrefix === 'csv' ? upper : ticker);
   }
-
-  if (exchange === 'BINANCE') return joinSymbol('binance', upper);
-  if (exchange === 'COINBASE') return joinSymbol('coinbase', coinbasePair(upper));
-  if (exchange === 'HYPERLIQUID') return joinSymbol('hyperliquid', upper);
 
   if (exchange === 'NSE' || exchange === 'BSE') {
     if (options.indianProvider === 'zerodha') {

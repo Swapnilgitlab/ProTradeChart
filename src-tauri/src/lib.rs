@@ -73,8 +73,6 @@ pub fn run() {
             {
                 let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
                 store::watchlists::seed_starter_list_once(&mut conn)?;
-                store::retired::purge_yahoo_leftovers_once(&mut conn)?;
-                store::retired::purge_dhan_leftovers_once(&mut conn, &secrets)?;
             }
             log::info!("database ready at {}", data_dir.display());
 

@@ -14,42 +14,41 @@ import {
 
 describe('splitSymbol', () => {
   it('splits provider and ticker on the first colon only', () => {
-    expect(splitSymbol('binance:BTCUSDT')).toEqual({ provider: 'binance', ticker: 'BTCUSDT' });
+    expect(splitSymbol('zerodha:NSE:RELIANCE')).toEqual({ provider: 'zerodha', ticker: 'NSE:RELIANCE' });
     expect(splitSymbol('csv:MY:DATA')).toEqual({ provider: 'csv', ticker: 'MY:DATA' });
   });
 
   it('lower-cases the provider but leaves the ticker alone', () => {
-    expect(splitSymbol('BINANCE:BTCUSDT')).toEqual({ provider: 'binance', ticker: 'BTCUSDT' });
+    expect(splitSymbol('ZERODHA:NSE:RELIANCE')).toEqual({ provider: 'zerodha', ticker: 'NSE:RELIANCE' });
   });
 
   it('falls back to the default provider for a bare ticker', () => {
-    expect(splitSymbol('BTCUSDT')).toEqual({ provider: DEFAULT_PROVIDER, ticker: 'BTCUSDT' });
-    expect(splitSymbol(':BTCUSDT')).toEqual({ provider: DEFAULT_PROVIDER, ticker: ':BTCUSDT' });
+    expect(splitSymbol('RELIANCE')).toEqual({ provider: DEFAULT_PROVIDER, ticker: 'RELIANCE' });
+    expect(splitSymbol(':RELIANCE')).toEqual({ provider: DEFAULT_PROVIDER, ticker: ':RELIANCE' });
   });
 });
 
 describe('symbol helpers', () => {
   it('normalize and display', () => {
-    expect(normalizeSymbol('BINANCE:BTCUSDT')).toBe('binance:BTCUSDT');
-    expect(normalizeSymbol('BTCUSDT')).toBe('binance:BTCUSDT');
-    expect(displayTicker('coinbase:BTC-USD')).toBe('BTC-USD');
-    expect(joinSymbol('Binance', 'X')).toBe('binance:X');
+    expect(normalizeSymbol('ZERODHA:NSE:RELIANCE')).toBe('zerodha:NSE:RELIANCE');
+    expect(normalizeSymbol('RELIANCE')).toBe('zerodha:NSE:RELIANCE');
+    expect(displayTicker('csv:MY_DATA')).toBe('MY_DATA');
+    expect(joinSymbol('Zerodha', 'X')).toBe('zerodha:X');
   });
 
   it('label known providers and pass unknown ones through', () => {
-    expect(providerLabel('binance')).toBe('Binance');
+    expect(providerLabel('zerodha')).toBe('Zerodha');
     expect(providerLabel('somenewthing')).toBe('somenewthing');
   });
 
-  it('the default provider needs no account, so a bare ticker always has somewhere to go', () => {
-    expect(DEFAULT_PROVIDER).toBe('binance');
+  it('the default provider is Zerodha, naming NSE for a bare ticker', () => {
+    expect(DEFAULT_PROVIDER).toBe('zerodha');
   });
 });
 
 describe('broker symbols on screen', () => {
   it('hide the data source and the usual exchange', () => {
     expect(displayTicker('zerodha:NSE:HFCL')).toBe('HFCL');
-    expect(displayTicker('dhan:NSE:RELIANCE')).toBe('RELIANCE');
     expect(displayTicker('zerodha:NSE:NIFTY_50')).toBe('NIFTY_50');
     expect(displayTicker('zerodha:nse:hfcl')).toBe('hfcl');
   });
@@ -57,15 +56,13 @@ describe('broker symbols on screen', () => {
   it('keep any other exchange, because BSE:RELIANCE is not NSE:RELIANCE', () => {
     expect(displayTicker('zerodha:BSE:RELIANCE')).toBe('BSE:RELIANCE');
     expect(displayTicker('zerodha:NFO:RELIANCE26OCTFUT')).toBe('NFO:RELIANCE26OCTFUT');
-    expect(displayTicker('dhan:IDX:NIFTY_BANK')).toBe('IDX:NIFTY_BANK');
     expect(displayTicker('zerodha:MCX:CRUDEOIL26OCTFUT')).toBe('MCX:CRUDEOIL26OCTFUT');
   });
 
   it('never strip a ticker down to nothing, or touch a symbol with no exchange to hide', () => {
     expect(displayTicker('zerodha:NSE:')).toBe('NSE:');
     expect(displayTicker('zerodha:HFCL')).toBe('HFCL');
-    expect(displayTicker('binance:BTCUSDT')).toBe('BTCUSDT');
-    expect(displayTicker('coinbase:BTC-USD')).toBe('BTC-USD');
+    expect(displayTicker('csv:MY_DATA')).toBe('MY_DATA');
     expect(displayTicker('csv:NSE:MY_DATA')).toBe('NSE:MY_DATA');
   });
 });
@@ -73,17 +70,17 @@ describe('broker symbols on screen', () => {
 describe('the symbol a chart is given', () => {
   it('drops the usual exchange, so the chart’s own title and status line are short', () => {
     expect(chartSymbol('zerodha:NSE:HFCL')).toBe('zerodha:HFCL');
-    expect(chartSymbol('dhan:NSE:RELIANCE')).toBe('dhan:RELIANCE');
+    expect(chartSymbol('zerodha:NSE:NIFTY_BANK')).toBe('zerodha:NIFTY_BANK');
   });
 
   it('keeps everything a bare ticker could not stand for', () => {
     expect(chartSymbol('zerodha:BSE:RELIANCE')).toBe('zerodha:BSE:RELIANCE');
-    expect(chartSymbol('dhan:IDX:NIFTY')).toBe('dhan:IDX:NIFTY');
-    expect(chartSymbol('binance:BTCUSDT')).toBe('binance:BTCUSDT');
+    expect(chartSymbol('zerodha:MCX:GOLD26OCTFUT')).toBe('zerodha:MCX:GOLD26OCTFUT');
+    expect(chartSymbol('csv:MY_DATA')).toBe('csv:MY_DATA');
   });
 
   it('is undone by normalizeSymbol, so the app has one spelling of each instrument', () => {
-    for (const symbol of ['zerodha:NSE:HFCL', 'zerodha:NSE:NIFTY_50', 'zerodha:BSE:RELIANCE', 'zerodha:NFO:X26OCTFUT', 'dhan:IDX:NIFTY', 'binance:BTCUSDT']) {
+    for (const symbol of ['zerodha:NSE:HFCL', 'zerodha:NSE:NIFTY_50', 'zerodha:BSE:RELIANCE', 'zerodha:NFO:X26OCTFUT', 'zerodha:MCX:GOLD26OCTFUT', 'csv:MY_DATA']) {
       expect(normalizeSymbol(chartSymbol(symbol))).toBe(symbol);
     }
   });
@@ -94,9 +91,8 @@ describe('the symbol a chart is given', () => {
 
   it('is read back as NSE by normalizeSymbol, for brokers only', () => {
     expect(normalizeSymbol('zerodha:HFCL')).toBe('zerodha:NSE:HFCL');
-    expect(normalizeSymbol('DHAN:RELIANCE')).toBe('dhan:NSE:RELIANCE');
+    expect(normalizeSymbol('ZERODHA:RELIANCE')).toBe('zerodha:NSE:RELIANCE');
     expect(normalizeSymbol('zerodha:BSE:RELIANCE')).toBe('zerodha:BSE:RELIANCE');
-    expect(normalizeSymbol('binance:BTCUSDT')).toBe('binance:BTCUSDT');
     expect(normalizeSymbol('csv:MYDATA')).toBe('csv:MYDATA');
     expect(normalizeSymbol('zerodha:')).toBe('zerodha:');
   });
@@ -104,40 +100,38 @@ describe('the symbol a chart is given', () => {
 
 describe('symbols from a source the app no longer has', () => {
   it('are recognised as unsupported, so callers can say so instead of loading a blank chart', () => {
-    expect(isSupportedSymbol('binance:BTCUSDT')).toBe(true);
     expect(isSupportedSymbol('csv:MY_DATA')).toBe(true);
-    expect(isSupportedSymbol('yahoo:AAPL')).toBe(false);
-    expect(isSupportedSymbol('dhan:NSE:RELIANCE')).toBe(false);
+    expect(isSupportedSymbol('binance:BTCUSDT')).toBe(false);
+    expect(isSupportedSymbol('coinbase:BTC-USD')).toBe(false);
+    expect(isSupportedSymbol('hyperliquid:BTC')).toBe(false);
     expect(isSupportedSymbol('nonsense:X')).toBe(false);
-    expect(isSupportedProvider('yahoo')).toBe(false);
-    expect(isSupportedProvider('dhan')).toBe(false);
+    expect(isSupportedProvider('binance')).toBe(false);
     expect(isSupportedProvider('zerodha')).toBe(true);
   });
 });
 
 describe('resolveTypedSymbol', () => {
-  it('upper-cases a bare ticker into the default provider', () => {
-    expect(resolveTypedSymbol(' btcusdt ')).toBe('binance:BTCUSDT');
-    expect(resolveTypedSymbol('ethusdt.p')).toBe('binance:ETHUSDT.P');
+  it('upper-cases a bare ticker into the default provider, naming NSE', () => {
+    expect(resolveTypedSymbol(' reliance ')).toBe('zerodha:NSE:RELIANCE');
+    expect(resolveTypedSymbol('nifty_50')).toBe('zerodha:NSE:NIFTY_50');
   });
 
   it('honours an explicit provider prefix', () => {
-    expect(resolveTypedSymbol('binance:btcusdt')).toBe('binance:BTCUSDT');
-    expect(resolveTypedSymbol('COINBASE:btc-usd')).toBe('coinbase:BTC-USD');
+    expect(resolveTypedSymbol('zerodha:hfcl')).toBe('zerodha:NSE:HFCL');
+    expect(resolveTypedSymbol('CSV:mydata')).toBe('csv:MYDATA');
   });
 
   it('returns null for empty input', () => {
     expect(resolveTypedSymbol('')).toBeNull();
     expect(resolveTypedSymbol('   ')).toBeNull();
-    expect(resolveTypedSymbol('binance:')).toBeNull();
+    expect(resolveTypedSymbol('zerodha:')).toBeNull();
   });
 });
 
 describe('resolveTypedSymbol with a default provider', () => {
   it('sends a bare ticker to the default provider, naming NSE for Zerodha', () => {
     expect(resolveTypedSymbol('reliance', 'zerodha')).toBe('zerodha:NSE:RELIANCE');
-    expect(resolveTypedSymbol('btc-usd', 'coinbase')).toBe('coinbase:BTC-USD');
-    expect(resolveTypedSymbol('btcusdt', 'binance')).toBe('binance:BTCUSDT');
+    expect(resolveTypedSymbol('mydata', 'csv')).toBe('csv:MYDATA');
   });
 
   it('keeps an exchange the user named, which is not a provider prefix', () => {
@@ -146,15 +140,14 @@ describe('resolveTypedSymbol with a default provider', () => {
   });
 
   it('still honours an explicit provider over the default', () => {
-    expect(resolveTypedSymbol('binance:btcusdt', 'zerodha')).toBe('binance:BTCUSDT');
-    expect(resolveTypedSymbol('zerodha:nse:infy', 'binance')).toBe('zerodha:NSE:INFY');
-    expect(resolveTypedSymbol('zerodha:infy', 'binance')).toBe('zerodha:NSE:INFY');
+    expect(resolveTypedSymbol('csv:mydata', 'zerodha')).toBe('csv:MYDATA');
+    expect(resolveTypedSymbol('zerodha:nse:infy', 'csv')).toBe('zerodha:NSE:INFY');
+    expect(resolveTypedSymbol('zerodha:infy', 'csv')).toBe('zerodha:NSE:INFY');
   });
 
-  it('no longer knows Dhan, whose saved symbols still read short in a watchlist', () => {
-    expect(providerLabel('dhan')).toBe('dhan');
-    expect(resolveTypedSymbol('dhan:infy', 'binance')).toBe('binance:DHAN:INFY');
-    expect(displayTicker('dhan:NSE:RELIANCE')).toBe('RELIANCE');
+  it('no longer knows the free crypto sources', () => {
+    expect(providerLabel('binance')).toBe('binance');
+    expect(resolveTypedSymbol('binance:btcusdt')).toBe('zerodha:BINANCE:BTCUSDT');
   });
 });
 
@@ -166,8 +159,8 @@ describe('Zerodha symbols', () => {
 
   it('honours an exchange, and an explicit prefix', () => {
     expect(resolveTypedSymbol('bse:sensex', 'zerodha')).toBe('zerodha:BSE:SENSEX');
-    expect(resolveTypedSymbol('zerodha:infy', 'binance')).toBe('zerodha:NSE:INFY');
-    expect(resolveTypedSymbol('zerodha:mcx:goldm26octfut', 'binance')).toBe('zerodha:MCX:GOLDM26OCTFUT');
+    expect(resolveTypedSymbol('zerodha:infy', 'csv')).toBe('zerodha:NSE:INFY');
+    expect(resolveTypedSymbol('zerodha:mcx:goldm26octfut', 'csv')).toBe('zerodha:MCX:GOLDM26OCTFUT');
   });
 
   it('keeps the punctuation in Kite symbols', () => {

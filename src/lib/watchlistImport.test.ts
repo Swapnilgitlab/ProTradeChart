@@ -2,16 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { mapSymbol, parseWatchlistFile } from './watchlistImport';
 
 describe('mapSymbol', () => {
-  it('routes crypto exchanges to their own providers', () => {
-    expect(mapSymbol('BINANCE:BTCUSDT')).toBe('binance:BTCUSDT');
-    expect(mapSymbol('COINBASE:BTCUSD')).toBe('coinbase:BTC-USD');
-    expect(mapSymbol('COINBASE:ETH-EUR')).toBe('coinbase:ETH-EUR');
-    expect(mapSymbol('HYPERLIQUID:btc')).toBe('hyperliquid:BTC');
-  });
-
   it('cannot chart an exchange none of the app\'s data sources covers', () => {
-    // US and world stocks, FX, indices and futures had no source once Yahoo Finance was removed.
-    for (const entry of ['NASDAQ:AAPL', 'NYSE:BRK.B', 'LSE:VOD', 'HKEX:700', 'FX_IDC:EURUSD', 'OANDA:GBPJPY', 'SP:SPX', 'TVC:DJI']) {
+    // The app's only live source is Zerodha (Indian markets); crypto, US and world stocks, FX and
+    // their indices and futures have none.
+    for (const entry of [
+      'NASDAQ:AAPL', 'NYSE:BRK.B', 'LSE:VOD', 'HKEX:700', 'FX_IDC:EURUSD', 'OANDA:GBPJPY', 'SP:SPX', 'TVC:DJI',
+      'BINANCE:BTCUSDT', 'COINBASE:BTCUSD', 'HYPERLIQUID:BTC',
+    ]) {
       expect(mapSymbol(entry), entry).toBeNull();
     }
   });
@@ -22,21 +19,19 @@ describe('mapSymbol', () => {
   });
 
   it('passes through already-qualified provider symbols', () => {
-    expect(mapSymbol('binance:ETHUSDT')).toBe('binance:ETHUSDT');
+    expect(mapSymbol('zerodha:NSE:INFY')).toBe('zerodha:NSE:INFY');
     expect(mapSymbol('csv:mydata')).toBe('csv:MYDATA');
   });
 
-  it('skips a symbol from a source that no longer exists, such as an old export\'s yahoo: or dhan: entries', () => {
-    expect(mapSymbol('yahoo:AAPL')).toBeNull();
-    expect(mapSymbol('yahoo:RELIANCE.NS')).toBeNull();
-    expect(mapSymbol('dhan:NSE:INFY')).toBeNull();
+  it('skips a symbol from a source that no longer exists, such as an old export\'s binance: entries', () => {
+    expect(mapSymbol('nosuch:NSE:INFY')).toBeNull();
+    expect(mapSymbol('binance:BTCUSDT')).toBeNull();
   });
 
   it('sends a bare ticker to the default provider, or the one given', () => {
-    expect(mapSymbol('btcusdt')).toBe('binance:BTCUSDT');
-    expect(mapSymbol('ETHUSDT')).toBe('binance:ETHUSDT');
-    expect(mapSymbol('BTC-USD', { defaultProvider: 'coinbase' })).toBe('coinbase:BTC-USD');
-    expect(mapSymbol('reliance', { defaultProvider: 'zerodha' })).toBe('zerodha:NSE:RELIANCE');
+    expect(mapSymbol('reliance')).toBe('zerodha:NSE:RELIANCE');
+    expect(mapSymbol('TCS')).toBe('zerodha:NSE:TCS');
+    expect(mapSymbol('mydata', { defaultProvider: 'csv' })).toBe('csv:MYDATA');
   });
 
   it('rejects empty and malformed entries', () => {
@@ -48,26 +43,26 @@ describe('mapSymbol', () => {
 
 describe('parseWatchlistFile', () => {
   it('reads a TradingView export, ignoring section headings and duplicates', () => {
-    const r = parseWatchlistFile('###MAJORS,BINANCE:BTCUSDT,BINANCE:ETHUSDT,###MORE,COINBASE:BTCUSD,BINANCE:BTCUSDT');
-    expect(r.items.map((i) => i.symbol)).toEqual(['binance:BTCUSDT', 'binance:ETHUSDT', 'coinbase:BTC-USD']);
+    const r = parseWatchlistFile('###MAJORS,NSE:RELIANCE,NSE:TCS,###MORE,NSE:INFY,NSE:RELIANCE', { indianProvider: 'zerodha' });
+    expect(r.items.map((i) => i.symbol)).toEqual(['zerodha:NSE:RELIANCE', 'zerodha:NSE:TCS', 'zerodha:NSE:INFY']);
     expect(r.skipped).toEqual([]);
   });
 
   it('reads one entry per line as well', () => {
-    const r = parseWatchlistFile('BINANCE:BTCUSDT\r\nBINANCE:ETHUSDT\r\n');
+    const r = parseWatchlistFile('RELIANCE\r\nTCS\r\n');
     expect(r.items).toHaveLength(2);
   });
 
   it('reads a CSV with a Symbol column and an optional Name', () => {
-    const r = parseWatchlistFile('Symbol,Name,Price\nBINANCE:BTCUSDT,Bitcoin,65000\nCOINBASE:ETHUSD,Ether,3200\n');
+    const r = parseWatchlistFile('Symbol,Name,Price\nRELIANCE,Reliance Industries,2900\nTCS,Tata Consultancy,4100\n');
     expect(r.items).toEqual([
-      { symbol: 'binance:BTCUSDT', name: 'Bitcoin' },
-      { symbol: 'coinbase:ETH-USD', name: 'Ether' },
+      { symbol: 'zerodha:NSE:RELIANCE', name: 'Reliance Industries' },
+      { symbol: 'zerodha:NSE:TCS', name: 'Tata Consultancy' },
     ]);
   });
 
   it('collects entries it cannot map instead of failing', () => {
-    const r = parseWatchlistFile('BINANCE:BTCUSDT,NASDAQ:AAPL,NSE:,two words');
+    const r = parseWatchlistFile('RELIANCE,NASDAQ:AAPL,NSE:,two words');
     expect(r.items).toHaveLength(1);
     expect(r.skipped).toEqual(['NASDAQ:AAPL', 'NSE:', 'two words']);
   });
@@ -99,8 +94,8 @@ describe('importing into Zerodha', () => {
     expect(mapSymbol('BSE:SENSEX', zerodha)).toBe('zerodha:BSE:SENSEX');
   });
 
-  it('leaves the crypto exchanges where they were, and still skips what has no source', () => {
-    expect(mapSymbol('BINANCE:BTCUSDT', zerodha)).toBe('binance:BTCUSDT');
+  it('still skips what has no source, crypto included', () => {
+    expect(mapSymbol('BINANCE:BTCUSDT', zerodha)).toBeNull();
     expect(mapSymbol('NASDAQ:AAPL', zerodha)).toBeNull();
   });
 

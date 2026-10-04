@@ -1,24 +1,21 @@
-import type { DataProvider, SymbolDescriptor } from '@luxalgo/vela';
+import type { SymbolDescriptor } from '@luxalgo/vela';
 import { listDatasets, zerodhaSearchInstruments } from '../lib/ipc';
 import { joinSymbol, type ProviderId } from '../lib/symbols';
-import { getProvider } from './providers';
 import { ensureProvidersLoaded, isProviderUsable } from './providerStatus';
 
 export interface SymbolResult {
-  /** Fully-qualified chart symbol, e.g. `binance:BTCUSDT`. */
+  /** Fully-qualified chart symbol, e.g. `zerodha:NSE:RELIANCE`. */
   symbol: string;
   ticker: string;
   provider: ProviderId;
   name?: string;
-  /** Venue or instrument class, shown as a small tag (e.g. `NASDAQ`, `Crypto`). */
+  /** Venue or instrument class, shown as a small tag (e.g. `NSE`, `Imported`). */
   tag?: string;
 }
 
 /** Search everything, or one provider only. */
 export type SearchScope = 'all' | ProviderId;
 
-const CRYPTO_PROVIDERS: ProviderId[] = ['binance', 'coinbase', 'hyperliquid'];
-const CRYPTO_RESULTS_PER_PROVIDER = 4;
 const ZERODHA_RESULTS = 8;
 const IMPORTED_RESULTS = 4;
 /** With a single source picked there's room to show more of it. */
@@ -62,19 +59,6 @@ async function zerodhaResults(query: string, limit: number): Promise<SymbolResul
   }));
 }
 
-async function enumerableResults(provider: ProviderId, query: string, limit: number): Promise<SymbolResult[]> {
-  const source: DataProvider | undefined = getProvider(provider);
-  if (!source?.listSymbols) return [];
-  const symbols = await source.listSymbols(); // cached inside each provider after the first call
-  return rankSymbols(query, symbols, limit).map((s) => ({
-    symbol: joinSymbol(provider, s.ticker),
-    ticker: s.ticker,
-    provider,
-    name: s.description,
-    tag: 'Crypto',
-  }));
-}
-
 async function importedResults(query: string, limit: number): Promise<SymbolResult[]> {
   const datasets = await listDatasets();
   const symbols: SymbolDescriptor[] = datasets.map((d) => ({ ticker: d.ticker, description: d.description ?? undefined }));
@@ -100,9 +84,7 @@ export async function searchSymbols(query: string, scope: SearchScope = 'all'): 
 
   const jobs: Promise<SymbolResult[]>[] = [];
   if (wants('csv')) jobs.push(importedResults(q, size(IMPORTED_RESULTS)));
-  // The broker first: someone who has set up their own account wants it ahead of the crypto lists.
   if (wants('zerodha')) jobs.push(zerodhaResults(q, size(ZERODHA_RESULTS)));
-  for (const p of CRYPTO_PROVIDERS) if (wants(p)) jobs.push(enumerableResults(p, q, size(CRYPTO_RESULTS_PER_PROVIDER)));
 
   const groups = await Promise.allSettled(jobs);
   return groups.flatMap((g) => (g.status === 'fulfilled' ? g.value : []));

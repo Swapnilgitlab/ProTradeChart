@@ -7,6 +7,10 @@ project uses [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- **Log in to Zerodha from the Home tab, and get asked when it has expired.** The Home tab opens with a **Zerodha** row
+  showing how long today's login has left, with a **Log in with Zerodha** button (or **Set up Zerodha** before the API key
+  is saved). When the app opens and the login you were using has expired overnight, a **Log in to Zerodha** window asks
+  once — **Not now** waits until the next launch. It doesn't appear if Zerodha is switched off or was never logged in.
 - **Screener results as charts.** **Charts**, beside **Table** above a screen's results, shows the matches as daily
   candlestick charts, 1 × 1 up to 2 × 2 at a time, in the table's order; the arrows page through them and a stock's name
   opens it in a chart tab. **1M**, **3M**, **6M**, **1Y**, **5Y** and **All** pick how much history each chart shows. The
@@ -294,10 +298,7 @@ project uses [Semantic Versioning](https://semver.org).
   `zerodha:NSE:HFCL`. An exchange is still shown when leaving it out would make two instruments look alike
   (`BSE:RELIANCE` beside `RELIANCE`), and the status line keeps the timeframe. Hovering the symbol in a chart's status line
   shows the full symbol, and nothing stored changes: watchlists, layouts and alerts keep their existing symbols.
-- **Crypto symbols show a two-letter badge instead of a coin logo.** The logos came from Ledger's icon server, a third
-  party you never chose to contact. The web view no longer loads images from the internet at all.
-- The README, About and third-party notices now spell out each data source's terms: the crypto exchanges' own terms, and
-  broker data being licensed to you alone.
+- The README, About and third-party notices now spell out broker data being licensed to you alone.
 - **About** now credits the developer, Swapnil Pawar, with links to their X and GitHub profiles, and lists Credits before Shortcuts.
 - **New logo and app icon.** A single candlestick in a green rounded tile, with the wordmark in Geist and "Trade" in
   green. The README carries the full logo, and the app icon (window, taskbar, installers), the favicon and the About
@@ -308,32 +309,24 @@ project uses [Semantic Versioning](https://semver.org).
   same licence with the source available.
 - The Content-Security-Policy now allows `'unsafe-eval'`, which PineTS needs to compile scripts. Scripts run in a Web
   Worker with no access to the page or the backend.
-- **Binance is the default data source.** New charts, symbols typed without a provider, and the starter watchlist (crypto
-  pairs from Binance, Coinbase and Hyperliquid) use sources that need no account. Importing a watchlist sends a bare
-  ticker to the default provider, NSE/BSE symbols to your Zerodha account when one is set up, and reports any
-  symbol no source can chart as skipped.
 
 ### Removed
 
-- **Yahoo Finance is no longer a data source.** The provider, its rate limiter, the opt-in terms dialog and the first-run
-  intro are gone, and the app makes no request to Yahoo. US and world stocks, FX, indices and futures are no longer available
-  (Indian markets remain available through Zerodha). Watchlists, layouts and alerts you saved with `yahoo:`
-  symbols are left as they are — a layout opened with such a tab swaps it for Bitcoin and says so — and the cached Yahoo
-  bars and settings are deleted once, on first launch.
-- **Dhan is no longer a data source.** Zerodha is now the only broker for Indian markets. Dhan's provider, live feed,
-  symbol search and settings panel are gone. `dhan:` symbols saved in watchlists, layouts and alerts stay but can't be
-  loaded (a layout swaps such a tab for Bitcoin and says so); Dhan's saved credentials, instrument list, cached bars and
-  market-data history are deleted once, on first launch. A screen or Study saved with Dhan as its broker opens with Zerodha.
+- **Binance, Coinbase and Hyperliquid are no longer data sources.** Zerodha is now the only live data source (besides
+  your own imported files); the free crypto providers, which needed no account, are gone. New charts, symbols typed
+  without a provider, and the starter watchlist now default to Zerodha (NSE) instead, which needs your own account
+  connected to actually load. `binance:`, `coinbase:` and `hyperliquid:` symbols saved in watchlists, layouts and
+  alerts stay but can't be loaded (a layout swaps such a tab for a starter NSE symbol and says so). The TradingView
+  watchlist importer no longer maps the crypto exchanges.
 
 ## [0.1.0] — initial release
 
 ### Added
 
 - Candlestick charting on [Vela](https://luxalgo.com/vela): chart styles, drawing tools, 70+ indicators, multiple panes.
-- Data from Yahoo Finance (stocks, ETFs, indices, FX, futures; 1-minute to monthly bars, 2h/3h/4h built from hourly),
-  and live-streaming crypto from Binance, Coinbase and Hyperliquid.
+- Live-streaming crypto from Binance, Coinbase and Hyperliquid.
 - Import your own OHLCV CSV and chart it offline; coarser timeframes are built automatically.
 - Browser-style chart tabs, extra windows, and named layouts (with a default layout that also seeds new tabs).
 - Watchlists with live prices and day change, sorting, and import from TradingView exports.
 - Six themes; the starting theme follows the OS.
-- Local-only SQLite storage, with an offline fallback cache for Yahoo bars.
+- Local-only SQLite storage, with an offline fallback cache for market data.

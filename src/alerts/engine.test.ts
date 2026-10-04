@@ -113,8 +113,8 @@ describe('AlertEngine', () => {
   });
 
   it('skips a symbol that cannot be priced without disturbing the others', async () => {
-    const t = setup([alert({ id: 'a', symbol: 'dhan:NSE:X' }), alert({ id: 'b' })]);
-    t.prices.set('binance:BTCUSDT', 105); // dhan:NSE:X has no price
+    const t = setup([alert({ id: 'a', symbol: 'nosuch:NSE:X' }), alert({ id: 'b' })]);
+    t.prices.set('binance:BTCUSDT', 105); // nosuch:NSE:X has no price
     await t.engine.poll();
     expect(t.fired.map(([a]) => a.id)).toEqual(['b']);
   });
