@@ -70,8 +70,15 @@ jobs:
 
       # The installers carry THIRD_PARTY_LICENSES.txt; rebuild it from the lockfiles being
       # built, so a release can't ship a list that has fallen behind its dependencies.
+      # Rust 1.99's `cargo metadata --filter-platform` panics on the macOS runners ("no entry
+      # found for key", cargo_metadata.rs); 1.98.1 reads the same lockfile fine. Only this step
+      # is pinned: the installers still build on stable. Drop the pin once a fixed cargo ships.
       - name: Third-party licences
-        run: node scripts/third-party-licenses.mjs
+        env:
+          RUSTUP_TOOLCHAIN: "1.98.1"
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal --no-self-update
+          node scripts/third-party-licenses.mjs
 
       - uses: tauri-apps/tauri-action@v0
         id: tauri
