@@ -70,15 +70,17 @@ jobs:
 
       # The installers carry THIRD_PARTY_LICENSES.txt; rebuild it from the lockfiles being
       # built, so a release can't ship a list that has fallen behind its dependencies.
-      # Rust 1.99's `cargo metadata --filter-platform` panics on the macOS runners ("no entry
-      # found for key", cargo_metadata.rs); 1.98.1 reads the same lockfile fine. Only this step
-      # is pinned: the installers still build on stable. Drop the pin once a fixed cargo ships.
+      # On a macOS runner `cargo metadata --filter-platform` panics ("no entry found for key", in
+      # cargo_output_metadata.rs, on Rust 1.98.1 and 1.99 alike) for the same lockfile Windows and
+      # Linux read fine. The list is the same on every runner (each filters to the same four
+      # desktop targets), so macOS bundles the committed file, and the Linux job fails the release
+      # if that file has fallen behind the lockfiles; nothing ships a stale list.
       - name: Third-party licences
-        env:
-          RUSTUP_TOOLCHAIN: "1.98.1"
-        run: |
-          rustup toolchain install 1.98.1 --profile minimal --no-self-update
-          node scripts/third-party-licenses.mjs
+        if: matrix.platform != 'macos-latest'
+        run: node scripts/third-party-licenses.mjs
+      - name: Third-party licences are current
+        if: matrix.platform == 'ubuntu-22.04'
+        run: git diff --ignore-cr-at-eol --exit-code -- THIRD_PARTY_LICENSES.txt || (echo "::error::THIRD_PARTY_LICENSES.txt is out of date; run npm run licenses and commit it" && exit 1)
 
       - uses: tauri-apps/tauri-action@v0
         id: tauri
