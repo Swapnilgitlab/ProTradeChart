@@ -44,7 +44,7 @@ describe('sha256File', () => {
 
 describe('isDownload', () => {
   it('keeps installers and updater bundles', () => {
-    for (const name of ['ProTradeChart_0.1.0_x64-setup.exe', 'ProTradeChart_0.1.0_x64.dmg', 'ProTradeChart_0.1.0_amd64.AppImage', 'ProTradeChart_x64.app.tar.gz']) {
+    for (const name of ['ProTradeChart_0.1.0_x64-setup.exe', 'ProTradeChart_0.1.0_x64.dmg', 'ProTradeChart_0.1.0_amd64.deb', 'ProTradeChart_x64.app.tar.gz']) {
       expect(isDownload(name)).toBe(true);
     }
   });

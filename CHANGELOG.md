@@ -317,6 +317,9 @@ project uses [Semantic Versioning](https://semver.org).
   connected to actually load. `binance:`, `coinbase:` and `hyperliquid:` symbols saved in watchlists, layouts and
   alerts stay but can't be loaded (a layout swaps such a tab for a starter NSE symbol and says so). The TradingView
   watchlist importer no longer maps the crypto exchanges.
+- **No Linux AppImage.** Linux installers are the `.deb` and `.rpm` packages, which use the system's own GTK and
+  WebKitGTK (and update themselves like the other installers). The AppImage carried its own copies of those libraries,
+  whose LGPL licences would have meant shipping their texts and source with every release.
 
 ## [0.1.0] — initial release
 

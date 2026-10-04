@@ -27,7 +27,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis", "msi", "app", "dmg", "deb", "rpm"],
     "createUpdaterArtifacts": true,
     "publisher": "ProTradeChart contributors",
     "copyright": "Copyright (C) 2026 Swapnil Pawar and the ProTradeChart contributors",
