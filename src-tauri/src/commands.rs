@@ -21,7 +21,7 @@ fn sql<T>(result: rusqlite::Result<T>) -> Result<T, String> {
 
 // ---- App -------------------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_app_info(app: AppHandle) -> Result<AppInfo, String> {
     let data_dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     Ok(AppInfo {
@@ -30,46 +30,46 @@ pub fn get_app_info(app: AppHandle) -> Result<AppInfo, String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_ui_preference(key: String, db: State<Database>) -> Result<Option<String>, String> {
     sql(preferences::get(&*lock(&db)?, &key))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_ui_preference(key: String, value: String, db: State<Database>) -> Result<(), String> {
     sql(preferences::set(&*lock(&db)?, &key, &value))
 }
 
 // ---- Layouts ---------------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_chart_layouts(db: State<Database>) -> Result<Vec<ChartLayout>, String> {
     sql(layouts::list(&*lock(&db)?))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_chart_layout(layout: ChartLayout, db: State<Database>) -> Result<(), String> {
     sql(layouts::save(&mut *lock(&db)?, &layout))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_chart_layout(id: String, db: State<Database>) -> Result<(), String> {
     sql(layouts::delete(&*lock(&db)?, &id))
 }
 
 // ---- Pine scripts ----------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_pine_scripts(db: State<Database>) -> Result<Vec<PineScript>, String> {
     sql(scripts::list(&*lock(&db)?))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_pine_script(script: PineScript, db: State<Database>) -> Result<(), String> {
     sql(scripts::save(&*lock(&db)?, &script))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_pine_script(id: String, db: State<Database>) -> Result<(), String> {
     sql(scripts::delete(&*lock(&db)?, &id))
 }
@@ -96,14 +96,14 @@ fn real_list(id: i64) -> Result<(), String> {
 }
 
 /// The six colour lists, with how many symbols each holds.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_flag_lists(db: State<Database>) -> Result<Vec<WatchlistSummary>, String> {
     sql(watchlists::flag_lists(&*lock(&db)?))
 }
 
 /// Flags a symbol with a colour (`red`, `orange`, `yellow`, `green`, `blue`, `purple`) — on every list it is
 /// on — or clears its flag with `None`. Tells every window, so lists and colour lists follow.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_symbol_flag(
     symbol: String,
     flag: Option<String>,
@@ -126,24 +126,30 @@ pub fn set_symbol_flag(
     Ok(())
 }
 
-#[tauri::command]
+/// The flags of those of `symbols` that have one (a symbol's flag is its own, on every list).
+#[tauri::command(async)]
+pub fn symbol_flags(symbols: Vec<String>, db: State<Database>) -> Result<HashMap<String, String>, String> {
+    sql(watchlists::flags_of(&*lock(&db)?, &symbols))
+}
+
+#[tauri::command(async)]
 pub fn list_watchlists(db: State<Database>) -> Result<Vec<WatchlistSummary>, String> {
     sql(watchlists::list(&*lock(&db)?))
 }
 
 /// Which symbols every list holds, as `[watchlist id, symbol]` pairs.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_watchlist_members(db: State<Database>) -> Result<Vec<(i64, String)>, String> {
     sql(watchlists::members(&*lock(&db)?))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_watchlist(id: i64, db: State<Database>) -> Result<WatchlistDetail, String> {
     watchlist_detail(&*lock(&db)?, id)
 }
 
 /// Makes the Indices watchlist (the broad market, sectors and themes) from a broker's instrument list.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_indices_watchlist(provider: String, db: State<Database>) -> Result<WatchlistDetail, String> {
     let source = crate::store::instrument_list::Source::parse(&provider)
         .ok_or("Indices come from Zerodha's instrument list.")?;
@@ -158,7 +164,7 @@ pub fn create_indices_watchlist(provider: String, db: State<Database>) -> Result
 /// what powers clicking a chart's symbol name or bare-typing to search — the app's own search
 /// box (`SymbolSearchBox`) already searches everything live and doesn't use this.
 const MAX_NSE_EQUITIES: usize = 5_000;
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_nse_equities(provider: String, db: State<Database>) -> Result<Vec<SymbolMatch>, String> {
     let source = crate::store::instrument_list::Source::parse(&provider)
         .ok_or("NSE equities come from Zerodha's instrument list.")?;
@@ -185,13 +191,13 @@ pub fn list_nse_equities(provider: String, db: State<Database>) -> Result<Vec<Sy
 }
 
 /// A symbol's drawings document, or `None` when the app has never stored one for it.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_symbol_drawings(symbol: String, db: State<Database>) -> Result<Option<String>, String> {
     crate::store::symbol_drawings::get(&*lock(&db)?, &symbol)
 }
 
 /// Stores a symbol's drawings, and tells every window, so its other charts of the symbol follow.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_symbol_drawings(
     symbol: String,
     doc_json: String,
@@ -208,7 +214,7 @@ pub fn save_symbol_drawings(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_watchlist(name: String, db: State<Database>) -> Result<WatchlistDetail, String> {
     let name = name.trim();
     if name.is_empty() {
@@ -219,7 +225,7 @@ pub fn create_watchlist(name: String, db: State<Database>) -> Result<WatchlistDe
     watchlist_detail(&conn, id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn rename_watchlist(id: i64, name: String, db: State<Database>) -> Result<(), String> {
     let name = name.trim();
     if name.is_empty() {
@@ -229,14 +235,14 @@ pub fn rename_watchlist(id: i64, name: String, db: State<Database>) -> Result<()
     sql(watchlists::rename(&*lock(&db)?, id, name))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_watchlist(id: i64, db: State<Database>) -> Result<(), String> {
     real_list(id)?;
     sql(watchlists::delete(&*lock(&db)?, id))
 }
 
 /// Adds symbols to a list. Adding to a colour's list flags them with that colour.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_watchlist_items(
     watchlist_id: i64,
     items: Vec<NewWatchlistItem>,
@@ -264,7 +270,7 @@ pub fn add_watchlist_items(
 }
 
 /// Removes symbols from a list. Removing from a colour's list clears their flag.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_watchlist_items(watchlist_id: i64, symbols: Vec<String>, db: State<Database>) -> Result<(), String> {
     let mut conn = lock(&db)?;
     if let Some(flag) = watchlists::flag_of_list(watchlist_id) {
@@ -279,7 +285,7 @@ pub fn remove_watchlist_items(watchlist_id: i64, symbols: Vec<String>, db: State
 
 /// Puts a list's rows (symbols and section headings) in the given order; see `watchlists::write_order`
 /// for what a partial or stale order does. Returns the list as it now stands.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_watchlist_order(
     watchlist_id: i64,
     order: Vec<RowRef>,
@@ -292,7 +298,7 @@ pub fn set_watchlist_order(
 }
 
 /// Adds a section heading before `before`, or at the end of the list when that is `None`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_watchlist_section(
     watchlist_id: i64,
     name: String,
@@ -309,7 +315,7 @@ pub fn add_watchlist_section(
     watchlist_detail(&conn, watchlist_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn rename_watchlist_section(id: i64, name: String, db: State<Database>) -> Result<(), String> {
     let name = name.trim();
     if name.is_empty() {
@@ -319,24 +325,24 @@ pub fn rename_watchlist_section(id: i64, name: String, db: State<Database>) -> R
 }
 
 /// Removes a section heading; its symbols stay on the list.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_watchlist_section(id: i64, db: State<Database>) -> Result<(), String> {
     sql(watchlists::delete_section(&*lock(&db)?, id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_watchlist_section_collapsed(id: i64, collapsed: bool, db: State<Database>) -> Result<(), String> {
     sql(watchlists::set_section_collapsed(&*lock(&db)?, id, collapsed))
 }
 
 // ---- Imported datasets -----------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_datasets(db: State<Database>) -> Result<Vec<DatasetInfo>, String> {
     sql(datasets::list(&*lock(&db)?))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_dataset(input: DatasetInput, db: State<Database>) -> Result<DatasetInfo, String> {
     if input.ticker.trim().is_empty() {
         return Err("a dataset needs a ticker".to_string());
@@ -347,12 +353,12 @@ pub fn save_dataset(input: DatasetInput, db: State<Database>) -> Result<DatasetI
     sql(datasets::save(&mut *lock(&db)?, &input))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_dataset(ticker: String, db: State<Database>) -> Result<(), String> {
     sql(datasets::delete(&*lock(&db)?, &ticker))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_dataset_bars(
     ticker: String,
     from_ms: Option<i64>,
@@ -367,7 +373,7 @@ pub fn get_dataset_bars(
 
 /// Company names already known for `symbols` (`provider:TICKER`): the brokers'
 /// instrument lists carry them. A symbol with no known name is simply absent.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn symbol_names(symbols: Vec<String>, db: State<Database>) -> Result<HashMap<String, String>, String> {
     sql(symbol_names::known(&*lock(&db)?, &symbols))
 }

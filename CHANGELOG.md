@@ -11,7 +11,7 @@ project uses [Semantic Versioning](https://semver.org).
   candlestick charts, 1 × 1 up to 2 × 2 at a time, in the table's order; the arrows page through them and a stock's name
   opens it in a chart tab. **1M**, **3M**, **6M**, **1Y**, **5Y** and **All** pick how much history each chart shows. The
   **Filters** and **Columns** sections fold to a one-line summary while the charts are shown (click a heading to open it
-  again).
+  again). A match can be flagged from the table or beside its chart, and the flag shows on every watchlist.
 - **The Script Editor has a tab of its own.** Like the Python tab: your scripts, the bundled ones and examples are listed on
   the left, the editor and its console beside them, so there's room to write. `Ctrl+E` or the rail's **</>** opens it, and a
   legend row's pencil opens that script there. **Add to chart** uses the chart you last looked at, named in the toolbar (click

@@ -162,6 +162,7 @@ pub fn run() {
             commands::add_watchlist_items,
             commands::remove_watchlist_items,
             commands::set_symbol_flag,
+            commands::symbol_flags,
             commands::list_flag_lists,
             commands::set_watchlist_order,
             commands::add_watchlist_section,

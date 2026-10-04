@@ -18,23 +18,23 @@ fn sql<T>(result: rusqlite::Result<T>) -> Result<T, String> {
     result.map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_screeners(db: State<Database>) -> Result<Vec<Screener>, String> {
     sql(screeners::list(&*db.conn.lock().map_err(|e| e.to_string())?))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_screener(id: String, name: String, spec_json: String, db: State<Database>) -> Result<(), String> {
     screeners::save(&*db.conn.lock().map_err(|e| e.to_string())?, &id, &name, &spec_json)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_screener(id: String, db: State<Database>) -> Result<(), String> {
     sql(screeners::delete(&*db.conn.lock().map_err(|e| e.to_string())?, &id))
 }
 
 /// Keeps a run as the screen's last one; `false` when the screen isn't saved (the run is only shown).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_screener_result(
     id: String,
     result_json: String,
@@ -44,7 +44,7 @@ pub fn save_screener_result(
     screeners::save_result(&*db.conn.lock().map_err(|e| e.to_string())?, &id, &result_json, &ran_at)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_screener_result(id: String, db: State<Database>) -> Result<Option<String>, String> {
     sql(screeners::get_result(&*db.conn.lock().map_err(|e| e.to_string())?, &id))
 }

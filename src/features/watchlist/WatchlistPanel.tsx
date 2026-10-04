@@ -85,6 +85,7 @@ import { useRowDrag } from './useRowDrag';
 import { MAX_QUICK_LISTS } from '../../lib/quickLists';
 import { loadQuickLists, toggleQuickListPin, useQuickLists } from './quickLists';
 import { WatchlistBrowserDialog } from './WatchlistBrowserDialog';
+import { FlagSwatches } from './FlagSwatches';
 import { subscribeWatchlistsChanged } from './watchlistBus';
 
 interface Props {
@@ -1248,29 +1249,6 @@ function SectionNameInput({ initial, onDone }: { initial: string; onDone: (typed
       }}
       onBlur={(e) => settle(e.currentTarget.value)}
     />
-  );
-}
-
-/** The flag colours as swatches; the one already set removes the flag. Shared by the row's flag
- *  button and its right-click menu. */
-function FlagSwatches({ current, onFlag }: { current: WatchlistFlag | null; onFlag: (flag: WatchlistFlag | null) => void }) {
-  return (
-    <div className="menu-flags" role="group" aria-label="Flag">
-      <span className="menu-flags-label">Flag</span>
-      {WATCHLIST_FLAGS.map((flag) => (
-        <button
-          key={flag}
-          type="button"
-          role="menuitemradio"
-          aria-checked={current === flag}
-          aria-label={flag}
-          title={current === flag ? `Remove the ${flag} flag` : `Flag ${flag}`}
-          className={`flag-swatch${current === flag ? ' on' : ''}`}
-          style={{ background: `var(--flag-${flag})` }}
-          onClick={() => onFlag(current === flag ? null : flag)}
-        />
-      ))}
-    </div>
   );
 }
 

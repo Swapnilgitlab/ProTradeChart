@@ -396,3 +396,21 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* A result's flag: the watchlist's own flag button, shown when set, on a row's hover, and always
+   beside a chart's name (where there is no row to hover). */
+.screener-flag-wrap {
+  display: inline-flex;
+}
+.screener-flag-cell {
+  width: 22px;
+}
+.screener-table-scroll tr:hover .screener-flag,
+.screener-charts-symbol .screener-flag {
+  visibility: visible;
+}
+.screener-charts-symbol {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}

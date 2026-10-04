@@ -26,7 +26,7 @@ fn sql<T>(result: rusqlite::Result<T>) -> Result<T, String> {
     result.map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_providers(db: State<Database>, secrets: State<Secrets>) -> Result<Vec<ProviderInfo>, String> {
     sql(providers::describe(&*lock(&db)?, &secrets))
 }
@@ -38,7 +38,7 @@ pub struct SaveResult {
     pub secret_storage: Option<String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_provider_config(
     provider: String,
     values: HashMap<String, String>,
@@ -59,7 +59,7 @@ pub fn save_provider_config(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clear_provider_config(
     provider: String,
     db: State<Database>,
@@ -79,7 +79,7 @@ pub fn clear_provider_config(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_provider_enabled(
     provider: String,
     enabled: bool,

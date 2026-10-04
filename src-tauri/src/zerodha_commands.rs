@@ -95,7 +95,7 @@ pub struct ZerodhaStatus {
     pub feed: StatusEvent,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn zerodha_status(
     db: State<Database>,
     secrets: State<Secrets>,
@@ -116,7 +116,7 @@ pub fn zerodha_status(
 }
 
 /// The address of Zerodha's login page for the saved API key.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn zerodha_login_url(db: State<Database>) -> Result<String, String> {
     let key = sql(settings::get(&*lock(&db)?, Table::Settings, ZERODHA, "apiKey"))?
         .filter(|k| !k.trim().is_empty())
@@ -385,7 +385,7 @@ pub async fn test(db: &Database, secrets: &Secrets, client: &ZerodhaClient) -> R
 
 // ---- Market data ------------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn zerodha_search_instruments(
     query: String,
     limit: Option<u32>,
@@ -532,7 +532,7 @@ pub struct ZerodhaSubscription {
     pub exchange: String,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn zerodha_subscribe(
     ticker: String,
     db: State<Database>,
@@ -546,7 +546,7 @@ pub fn zerodha_subscribe(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn zerodha_unsubscribe(ticker: String, db: State<Database>, feed: State<Feed>) -> Result<(), String> {
     if let Some(inst) = sql(instruments::resolve(&*lock(&db)?, &ticker))? {
         feed.unsubscribe(inst.token);

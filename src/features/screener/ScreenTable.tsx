@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
-import { CandlestickChart, Download, LineChart, ListPlus, Table2 } from 'lucide-react';
+import { CandlestickChart, Download, ListPlus, Table2 } from 'lucide-react';
 import { displayTicker } from '../../lib/symbols';
 import { sortScreenRows, type ScreenResult, type SortKey } from '../../screener/result';
 import { featureLabel, featureUnit, formatValue } from '../../studies/metrics';
 import { ScreenCharts } from './ScreenCharts';
+import { ScreenFlag } from './ScreenFlag';
+import { useSymbolFlags } from './useSymbolFlags';
 
 interface Props {
   result: ScreenResult;
@@ -31,6 +33,7 @@ export function ScreenTable({ result, onOpenSymbol, onAddToWatchlist, onExport, 
   const ordered = useMemo(() => rows.map((r) => r.symbol), [rows]);
   const names = useMemo(() => new Map(rows.map((r) => [r.symbol, r.name])), [rows]);
   const symbols = useMemo(() => result.rows.map((r) => r.symbol), [result]);
+  const { flags, setFlag } = useSymbolFlags(symbols);
   // A number column sorts high-to-low first (what a screen is usually after), text A-to-Z; the second
   // press reverses it and the third goes back to the screen's own order.
   const toggle = (key: SortKey) =>
@@ -81,7 +84,7 @@ export function ScreenTable({ result, onOpenSymbol, onAddToWatchlist, onExport, 
       {rows.length === 0 ? (
         <p className="muted small">Nothing in the universe matches every filter on its latest bar.</p>
       ) : view === 'charts' ? (
-        <ScreenCharts symbols={ordered} names={names} onOpenSymbol={onOpenSymbol} />
+        <ScreenCharts symbols={ordered} names={names} flags={flags} onFlag={setFlag} onOpenSymbol={onOpenSymbol} />
       ) : (
         <div className="python-table-scroll screener-table-scroll">
           <table className="python-table study-table">
@@ -112,8 +115,8 @@ export function ScreenTable({ result, onOpenSymbol, onAddToWatchlist, onExport, 
             <tbody>
               {rows.map((r) => (
                 <tr key={r.symbol} onClick={() => onOpenSymbol(r.symbol)} title={`Open ${displayTicker(r.symbol)} on the chart`}>
-                  <td>
-                    <LineChart size={13} className="muted" aria-hidden="true" />
+                  <td className="screener-flag-cell">
+                    <ScreenFlag symbol={r.symbol} flag={flags[r.symbol] ?? null} onFlag={(flag) => setFlag(r.symbol, flag)} />
                   </td>
                   <td className="screener-symbol">{displayTicker(r.symbol)}</td>
                   <td className="screener-name">{r.name ?? ''}</td>

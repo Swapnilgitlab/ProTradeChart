@@ -19,7 +19,7 @@ pub struct MarketDataStatus {
     pub holdings: Holdings,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn market_data_status(
     db: State<Database>,
     research: State<ResearchDb>,
@@ -49,12 +49,12 @@ pub fn market_data_status(
 }
 
 /// Starts (or resumes) the five-year download. Only ever called from its button.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn market_data_download(app: AppHandle) -> Result<(), String> {
     marketdata::start(&app, Trigger::Download)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn market_data_update_now(app: AppHandle) -> Result<(), String> {
     marketdata::start(&app, Trigger::Update)
 }
@@ -64,7 +64,7 @@ pub fn market_data_stop(jobs: State<MarketData>) {
     jobs.stop();
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn market_data_set_auto(on: bool, db: State<Database>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     marketdata::set_auto(&conn, on).map_err(|e| e.to_string())

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -85,6 +85,19 @@ pub fn set_symbol_flag(conn: &Connection, symbol: &str, flag: Option<&str>, now:
         )?,
     };
     Ok(())
+}
+
+/// The flags of those of `symbols` that have one, for a view of symbols that aren't a list (the
+/// Screener's results). A symbol with no flag is left out.
+pub fn flags_of(conn: &Connection, symbols: &[String]) -> rusqlite::Result<HashMap<String, String>> {
+    let mut stmt = conn.prepare_cached("SELECT flag FROM symbol_flags WHERE symbol = ?1")?;
+    let mut flags = HashMap::new();
+    for symbol in symbols {
+        if let Some(flag) = stmt.query_row(params![symbol], |r| r.get::<_, String>(0)).optional()? {
+            flags.insert(symbol.clone(), flag);
+        }
+    }
+    Ok(flags)
 }
 
 /// The six colour lists as a list selector shows them, with how many symbols each holds.
@@ -801,6 +814,19 @@ mod tests {
         // Deleting the heading keeps every symbol, in place.
         delete_section(&conn, s).unwrap();
         assert_eq!(rows(&conn, id), ["a", "b"]);
+    }
+
+    #[test]
+    fn the_flags_of_symbols_on_no_list_are_read_by_symbol() {
+        let db = Database::open_in_memory().unwrap();
+        let conn = db.conn.lock().unwrap();
+        set_symbol_flag(&conn, "zerodha:NSE:TCS", Some("green"), 1).unwrap();
+        set_symbol_flag(&conn, "zerodha:NSE:INFY", Some("red"), 1).unwrap();
+        set_symbol_flag(&conn, "zerodha:NSE:INFY", None, 2).unwrap();
+        let asked = ["zerodha:NSE:TCS", "zerodha:NSE:INFY", "zerodha:NSE:SBIN"].map(String::from);
+        let flags = flags_of(&conn, &asked).unwrap();
+        assert_eq!(flags.len(), 1, "a cleared or never-set flag is absent");
+        assert_eq!(flags["zerodha:NSE:TCS"], "green");
     }
 
     #[test]

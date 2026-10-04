@@ -15,13 +15,13 @@ fn sql<T>(result: rusqlite::Result<T>) -> Result<T, String> {
     result.map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_schedules(db: State<Database>) -> Result<Vec<Schedule>, String> {
     sql(schedules::list(&*db.conn.lock().map_err(|e| e.to_string())?))
 }
 
 /// Creates or changes a schedule. Its script must exist; a schedule switched on is planned from now.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_schedule(
     id: String,
     script: String,
@@ -51,7 +51,7 @@ pub fn save_schedule(
 }
 
 /// Deletes a schedule and its history, stopping a run of it that is still going.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_schedule(id: String, app: AppHandle, db: State<Database>) -> Result<(), String> {
     stop_schedule_run(id.clone(), app.clone(), db.clone())?;
     sql(schedules::delete(&*db.conn.lock().map_err(|e| e.to_string())?, &id))?;
@@ -59,7 +59,7 @@ pub fn delete_schedule(id: String, app: AppHandle, db: State<Database>) -> Resul
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_schedule_runs(schedule_id: String, db: State<Database>) -> Result<Vec<ScheduleRun>, String> {
     sql(schedules::runs(
         &*db.conn.lock().map_err(|e| e.to_string())?,
@@ -83,7 +83,7 @@ pub async fn run_schedule_now(id: String, app: AppHandle, db: State<'_, Database
 }
 
 /// Stops the running run of a schedule, if there is one.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn stop_schedule_run(id: String, app: AppHandle, db: State<Database>) -> Result<(), String> {
     let running = {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;

@@ -202,6 +202,9 @@ export const removeWatchlistItems = (watchlistId: number, symbols: string[]) =>
 /** Flags a symbol with a colour — the same on every list it is on — or clears its flag. */
 export const setSymbolFlag = (symbol: string, flag: WatchlistFlag | null) => invoke<void>('set_symbol_flag', { symbol, flag });
 
+/** The flags of those of `symbols` that have one; a symbol with none is absent. */
+export const getSymbolFlags = (symbols: string[]) => invoke<Record<string, WatchlistFlag>>('symbol_flags', { symbols });
+
 /** The six colour lists (every symbol flagged with that colour), with their counts. Their ids are negative. */
 export const listFlagLists = () => invoke<WatchlistSummary[]>('list_flag_lists');
 

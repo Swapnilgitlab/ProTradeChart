@@ -28,22 +28,22 @@ fn sql<T>(result: rusqlite::Result<T>) -> Result<T, String> {
     result.map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_studies(db: State<Database>) -> Result<Vec<Study>, String> {
     sql(studies::list(&*db.conn.lock().map_err(|e| e.to_string())?))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_study(study: Study, db: State<Database>) -> Result<(), String> {
     studies::save(&*db.conn.lock().map_err(|e| e.to_string())?, &study)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_study(id: String, db: State<Database>) -> Result<(), String> {
     sql(studies::delete(&mut *db.conn.lock().map_err(|e| e.to_string())?, &id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_study_results(study_id: Option<String>, db: State<Database>) -> Result<Vec<StudyResultInfo>, String> {
     sql(studies::list_results(
         &*db.conn.lock().map_err(|e| e.to_string())?,
@@ -51,17 +51,17 @@ pub fn list_study_results(study_id: Option<String>, db: State<Database>) -> Resu
     ))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_study_result(id: String, db: State<Database>) -> Result<Option<StudyResult>, String> {
     sql(studies::get_result(&*db.conn.lock().map_err(|e| e.to_string())?, &id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_study_result(result: StudyResult, db: State<Database>) -> Result<(), String> {
     studies::save_result(&mut *db.conn.lock().map_err(|e| e.to_string())?, &result)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_study_result(id: String, db: State<Database>) -> Result<(), String> {
     sql(studies::delete_result(
         &*db.conn.lock().map_err(|e| e.to_string())?,
@@ -71,27 +71,27 @@ pub fn delete_study_result(id: String, db: State<Database>) -> Result<(), String
 
 // ---- Research Notebooks ------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_notebooks(db: State<Database>) -> Result<Vec<NotebookSummary>, String> {
     sql(notebooks::list(&*db.conn.lock().map_err(|e| e.to_string())?))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_notebook(id: String, db: State<Database>) -> Result<Option<NotebookDetail>, String> {
     sql(notebooks::get(&*db.conn.lock().map_err(|e| e.to_string())?, &id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_notebook(id: String, name: String, notes: String, db: State<Database>) -> Result<(), String> {
     notebooks::save(&*db.conn.lock().map_err(|e| e.to_string())?, &id, &name, &notes)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_notebook(id: String, db: State<Database>) -> Result<(), String> {
     sql(notebooks::delete(&*db.conn.lock().map_err(|e| e.to_string())?, &id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_notebook_item(notebook_id: String, kind: String, ref_id: String, db: State<Database>) -> Result<(), String> {
     notebooks::add_item(
         &mut *db.conn.lock().map_err(|e| e.to_string())?,
@@ -101,7 +101,7 @@ pub fn add_notebook_item(notebook_id: String, kind: String, ref_id: String, db: 
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_notebook_item(item_id: i64, db: State<Database>) -> Result<(), String> {
     sql(notebooks::remove_item(
         &*db.conn.lock().map_err(|e| e.to_string())?,
@@ -109,12 +109,12 @@ pub fn remove_notebook_item(item_id: i64, db: State<Database>) -> Result<(), Str
     ))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_notebook_item_note(item_id: i64, note: String, db: State<Database>) -> Result<(), String> {
     notebooks::set_item_note(&*db.conn.lock().map_err(|e| e.to_string())?, item_id, &note)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_notebook_order(notebook_id: String, item_ids: Vec<i64>, db: State<Database>) -> Result<(), String> {
     sql(notebooks::set_order(
         &mut *db.conn.lock().map_err(|e| e.to_string())?,
@@ -155,7 +155,7 @@ pub struct StudyEstimate {
 
 /// How many symbols a Study would load, how many are already stored, and roughly how long the rest
 /// take at the broker's pace. Reads only the database; asks no broker.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn study_estimate(request: EstimateRequest, db: State<Database>) -> Result<StudyEstimate, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let (mut symbols, skipped) = match request.symbols {

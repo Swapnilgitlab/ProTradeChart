@@ -122,7 +122,7 @@ pub async fn python_set_interpreter(
 
 /// Makes the app's environment and installs the baseline packages, streaming what the tools
 /// print as `python-setup-output` and finishing with `python-setup-done`. Returns at once.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn python_setup_env(app: AppHandle, state: State<'_, PythonState>, db: State<'_, Database>) -> Result<(), String> {
     if state.setting_up.swap(true, Ordering::SeqCst) {
         return Err("Setup is already running.".into());
@@ -163,30 +163,30 @@ pub fn python_setup_env(app: AppHandle, state: State<'_, PythonState>, db: State
 
 // ---- Scripts -----------------------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn python_list_scripts(app: AppHandle) -> Result<Vec<ScriptInfo>, String> {
     let paths = paths(&app)?;
     scripts::seed_examples(&paths.scripts).map_err(|e| format!("Couldn't prepare the scripts folder: {e}"))?;
     scripts::list(&paths.scripts).map_err(|e| format!("Couldn't read the scripts folder: {e}"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn python_read_script(name: String, app: AppHandle) -> Result<String, String> {
     scripts::read(&paths(&app)?.scripts, &name)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn python_save_script(name: String, source: String, app: AppHandle) -> Result<(), String> {
     scripts::write(&paths(&app)?.scripts, &name, &source)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn python_delete_script(name: String, app: AppHandle) -> Result<(), String> {
     scripts::delete(&paths(&app)?.scripts, &name)
 }
 
 /// Opens the scripts folder in the system's file manager.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn python_reveal_folder(app: AppHandle) -> Result<(), String> {
     let paths = paths(&app)?;
     std::fs::create_dir_all(&paths.scripts).map_err(|e| e.to_string())?;
@@ -398,7 +398,7 @@ pub(crate) async fn start_python(
 }
 
 /// Stops a running script and everything it started. A run that has already ended is not an error.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn python_stop(run_id: String, state: State<'_, PythonState>) -> Result<(), String> {
     let stop = state.runs.lock().map_err(|e| e.to_string())?.remove(&run_id);
     if let Some(stop) = stop {
@@ -417,7 +417,7 @@ pub struct ResearchStats {
 }
 
 /// How much market data scripts have caused the app to keep.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn python_research_stats(db: State<'_, Database>) -> Result<ResearchStats, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let stats = research_bars::stats(&conn).map_err(|e| e.to_string())?;
@@ -428,7 +428,7 @@ pub fn python_research_stats(db: State<'_, Database>) -> Result<ResearchStats, S
 }
 
 /// Forgets it all; the next script that asks fetches from the broker again.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn python_clear_research_data(db: State<'_, Database>) -> Result<usize, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     research_bars::clear(&mut conn).map_err(|e| e.to_string())

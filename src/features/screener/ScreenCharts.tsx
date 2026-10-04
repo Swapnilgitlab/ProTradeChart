@@ -4,7 +4,7 @@ import { layoutForGrid, VelaWorkspace } from '@luxalgo/vela/workspace';
 import { applyGridOpacity, applyTheme, LOCAL_TIMEZONE, tintAttribution } from '../../chart/ChartView';
 import { installThinMovingAverages } from '../../chart/thinMovingAverages';
 import { providerFactories } from '../../data/providers';
-import { getPreference, setPreference } from '../../lib/ipc';
+import { getPreference, setPreference, type WatchlistFlag } from '../../lib/ipc';
 import { chartSymbol, displayTicker } from '../../lib/symbols';
 import {
   clampPage,
@@ -20,6 +20,7 @@ import {
   type RangeId,
 } from '../../screener/chartPages';
 import { useTheme } from '../../theme/ThemeProvider';
+import { ScreenFlag } from './ScreenFlag';
 
 const PREF_GRID = 'screener_chart_grid';
 const PREF_RANGE = 'screener_chart_range';
@@ -30,13 +31,16 @@ interface Props {
   /** The matches, in the table's current order. */
   symbols: string[];
   names: Map<string, string | null>;
+  /** The matches' flags (a symbol with none is absent), and how to set one. */
+  flags: Record<string, WatchlistFlag>;
+  onFlag: (symbol: string, flag: WatchlistFlag | null) => void;
   onOpenSymbol: (symbol: string) => void;
 }
 
 /** The matches as daily candlestick charts, a page of 1×1 to 2×2 at a time. One Vela workspace for the
  *  whole grid, built once and re-pointed as the page or grid changes; the bars come through the same
  *  providers as the chart tabs (from the market-data store where it holds them). */
-export function ScreenCharts({ symbols, names, onOpenSymbol }: Props) {
+export function ScreenCharts({ symbols, names, flags, onFlag, onOpenSymbol }: Props) {
   const [gridId, setGridId] = useState<GridId>('2x2');
   const [page, setPage] = useState(0);
   const [range, setRange] = useState<RangeId>('1Y');
@@ -182,16 +186,18 @@ export function ScreenCharts({ symbols, names, onOpenSymbol }: Props) {
         </span>
         <div className="screener-charts-open">
           {current.map((symbol) => (
-            <button
-              key={symbol}
-              type="button"
-              className="btn btn-tiny"
-              title={`Open ${names.get(symbol) ?? displayTicker(symbol)} in a chart tab`}
-              onClick={() => onOpenSymbol(symbol)}
-            >
-              {displayTicker(symbol)}
-              <ExternalLink size={11} />
-            </button>
+            <span key={symbol} className="screener-charts-symbol">
+              <ScreenFlag symbol={symbol} flag={flags[symbol] ?? null} onFlag={(flag) => onFlag(symbol, flag)} />
+              <button
+                type="button"
+                className="btn btn-tiny"
+                title={`Open ${names.get(symbol) ?? displayTicker(symbol)} in a chart tab`}
+                onClick={() => onOpenSymbol(symbol)}
+              >
+                {displayTicker(symbol)}
+                <ExternalLink size={11} />
+              </button>
+            </span>
           ))}
         </div>
         <div className="pine-toolbar-spacer" />

@@ -223,7 +223,7 @@ async fn ask_with_progress(
     ask(db, secrets, claude, openai, req, &mut report).await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_ai_providers(db: State<'_, Database>, secrets: State<'_, Secrets>) -> Result<AiProviders, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let providers = PROVIDERS
@@ -246,7 +246,7 @@ pub async fn ai_set_key(
     set_key(&db, &secrets, &claude, &openai, &provider, &key).await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ai_delete_key(provider: String, db: State<'_, Database>, secrets: State<'_, Secrets>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     secrets.delete(&conn, &provider, KEY).map_err(|e| e.to_string())?;

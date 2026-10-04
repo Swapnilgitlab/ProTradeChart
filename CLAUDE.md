@@ -49,6 +49,11 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
 
 ## Gotchas
 
+- A plain `#[tauri::command] pub fn` runs on the **window's main thread**: if it waits (the `Database` mutex held by an
+  instrument-list refresh, `ResearchDb`'s reader held by a whole-market panel read, a slow query), the window freezes until
+  it's done. So every command that touches the database or the disk is `#[tauri::command(async)]` (a worker thread; it must
+  return a `Result`); keep that for new commands, and only leave a command synchronous when it touches neither. Never hold
+  a lock across an `.await` either (`std` guards aren't `Send`, so spawning would refuse it anyway).
 - `installThinMovingAverages()` has to run after **every** `new VelaWorkspace(...)` (Vela re-registers its own on each
   construction).
 - Vela's price-scale autoscale hardcodes its top/bottom padding (`MARGIN_TOP`/`MARGIN_BOTTOM` in its compiled

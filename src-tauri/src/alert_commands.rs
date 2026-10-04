@@ -48,13 +48,13 @@ pub fn validate(a: &PriceAlert) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_price_alerts(db: State<Database>) -> Result<Vec<PriceAlert>, String> {
     alerts::list(&*lock(&db)?).map_err(|e| e.to_string())
 }
 
 /// Creates the alert, or updates the one with the same id.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_price_alert(alert: PriceAlert, db: State<Database>, app: AppHandle) -> Result<(), String> {
     validate(&alert)?;
     alerts::save(&*lock(&db)?, &alert).map_err(|e| e.to_string())?;
@@ -62,7 +62,7 @@ pub fn save_price_alert(alert: PriceAlert, db: State<Database>, app: AppHandle) 
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_price_alert(id: String, db: State<Database>, app: AppHandle) -> Result<(), String> {
     alerts::delete(&*lock(&db)?, &id).map_err(|e| e.to_string())?;
     let _ = app.emit(CHANGED_EVENT, ());
@@ -70,7 +70,7 @@ pub fn delete_price_alert(id: String, db: State<Database>, app: AppHandle) -> Re
 }
 
 /// Removes the alerts that have already fired. Returns how many went.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clear_triggered_price_alerts(db: State<Database>, app: AppHandle) -> Result<usize, String> {
     let removed = alerts::delete_triggered(&*lock(&db)?).map_err(|e| e.to_string())?;
     let _ = app.emit(CHANGED_EVENT, ());
