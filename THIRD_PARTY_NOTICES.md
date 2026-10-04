@@ -54,6 +54,13 @@ Vela is licensed under the Apache License, Version 2.0
 **This app keeps Vela's built-in attribution mark enabled** (the logomark in the
 bottom-left of each chart), and credits Vela in *About*.
 
+**This app ships a modified copy of Vela.** As section 4(b) of the Apache License asks, note that
+ProTradeChart changes Vela's distributed files before bundling them: it shrinks the fixed top and
+bottom padding of the price scale's autoscale, and extends its chart context menu and menu surface
+with submenus, labels that name the chart's symbol, and checkbox items. The changes are exactly the
+diff in `patches/@luxalgo+vela+<version>.patch` in this repository, applied by `patch-package` when
+dependencies are installed. Vela's attribution mark is not affected by them.
+
 **Additional term (AGPL-3.0, section 7(b)).** The attribution requirement above
 applies to the Vela material in this app and in any modified version of it: keep
 Vela's attribution mark, or the equivalent visible attribution Vela's notice
@@ -72,7 +79,8 @@ GNU Affero General Public License v3.0. They are the reason this app is AGPL-3.0
 source of PineTS, Vela PineTS and Vela at the exact versions it was built with
 (`pinets-<version>-source.tar.gz`, `vela-pinets-<version>-source.tar.gz`,
 `vela-<version>-source.tar.gz`), taken from the upstream `v<version>` tags. The versions
-are the ones pinned in `package-lock.json`; the app's own source is the release's tag.
+are the ones pinned in `package-lock.json`; the app's own source is the release's tag, which also
+holds the patch the app applies to Vela (above).
 
 PineTS is an independently developed open source runtime. LuxAlgo Global, LLC and the PineTS project are not affiliated
 with, sponsored by, endorsed by, or in any way officially associated with TradingView, Inc. "Pine Script®" and
