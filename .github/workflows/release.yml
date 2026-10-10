@@ -9,9 +9,15 @@ name: Release
 # The builds are not code-signed; see SECURITY.md.
 #
 # The app's auto-updater only accepts updates signed with the key whose public half is in
-# tauri.conf.json (plugins.updater.pubkey). The private half must be in two repository
-# secrets, or the build fails: TAURI_SIGNING_PRIVATE_KEY (the key file's contents) and
-# TAURI_SIGNING_PRIVATE_KEY_PASSWORD. See CONTRIBUTING.md, "Releasing".
+# tauri.conf.json (plugins.updater.pubkey). The private half must be in two secrets of the
+# `release` environment, or the build fails: TAURI_SIGNING_PRIVATE_KEY (the key file's
+# contents) and TAURI_SIGNING_PRIVATE_KEY_PASSWORD. See CONTRIBUTING.md, "Releasing".
+#
+# Whoever holds that key can push an update every installed copy will run, so the job that
+# signs is kept small: every action is pinned to a commit SHA (Dependabot bumps the pins),
+# the `release` environment hands the secrets only to release tags and `main`, and the Rust
+# build cache is not restored here — compiled artifacts in a cache aren't integrity-checked
+# the way npm's lockfile hashes are, so a poisoned cache could otherwise reach the signer.
 #
 # Once every platform has uploaded, the `checksums` job attaches the source of the AGPL
 # components the app is built from (PineTS, Vela PineTS and Vela, at the versions in
@@ -29,6 +35,7 @@ permissions:
 jobs:
   release:
     name: Build (${{ matrix.platform }} ${{ matrix.args }})
+    environment: release
     # Every leg uploads to the same release, so they all report the same id.
     outputs:
       release_id: ${{ steps.tauri.outputs.releaseId }}
@@ -46,7 +53,7 @@ jobs:
             args: ""
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Linux system libraries
         if: matrix.platform == 'ubuntu-22.04'
@@ -54,17 +61,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev libdbus-1-dev pkg-config
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
 
       - run: npm ci
 
@@ -82,7 +87,7 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: git diff --ignore-cr-at-eol --exit-code -- THIRD_PARTY_LICENSES.txt || (echo "::error::THIRD_PARTY_LICENSES.txt is out of date; run npm run licenses and commit it" && exit 1)
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -103,9 +108,9 @@ jobs:
     needs: release
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 

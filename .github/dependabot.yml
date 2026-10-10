@@ -1,7 +1,8 @@
 version: 2
 
-# Dependency updates arrive as pull requests against `develop`, like any other change: `main` only moves when the
-# owner says so. Dependabot reads this file from the default branch, so it takes effect once `main` has it.
+# Dependency updates arrive as pull requests against `main`, like any contributor's change, and merge only once the
+# owner approves them. Dependabot reads this file from the default branch. Security updates (Settings → Code security)
+# also target `main`, regardless of this file.
 #
 # Monthly and capped at two open PRs per ecosystem, so the branch list stays short. Minor and patch updates share one
 # PR; a major version of a build-toolchain package is not proposed at all (see `ignore`), because taking one means
@@ -9,7 +10,6 @@ version: 2
 updates:
   - package-ecosystem: npm
     directory: /
-    target-branch: develop
     schedule:
       interval: monthly
     open-pull-requests-limit: 2
@@ -29,7 +29,6 @@ updates:
         update-types: ["version-update:semver-major"]
   - package-ecosystem: cargo
     directory: /src-tauri
-    target-branch: develop
     schedule:
       interval: monthly
     open-pull-requests-limit: 2
@@ -38,7 +37,6 @@ updates:
         update-types: [minor, patch]
   - package-ecosystem: github-actions
     directory: /
-    target-branch: develop
     schedule:
       interval: monthly
     open-pull-requests-limit: 2
