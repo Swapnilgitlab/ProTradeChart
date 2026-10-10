@@ -11,8 +11,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use super::data::{
-    self, BarsData, BarsRequest, Fetched, Fetcher, PanelRequest, PanelSeries, SyncReport, SyncRequest, DEFAULT_LIMIT,
-    MAX_LIMIT,
+    self, BarsData, BarsRequest, Fetched, Fetcher, PanelRequest, PanelSeries, Snapshot, SyncReport, SyncRequest,
+    DEFAULT_LIMIT, MAX_LIMIT,
 };
 use super::routes::{Backend, InstrumentQuery, WatchlistSel};
 use super::wire::{
@@ -20,10 +20,11 @@ use super::wire::{
     WatchlistUpdate,
 };
 use super::{split_symbol, ApiError};
-use crate::db::{now_ms, Database, ResearchDb};
+use crate::db::{now_ms, Database};
 use crate::models::DaySnapshot;
 use crate::providers;
 use crate::secrets::Secrets;
+use crate::store::bar_memory::BarMemory;
 use crate::store::instrument_list::{self, Source};
 use crate::store::research_bars::canonical_interval;
 use crate::store::{datasets, watchlists};
@@ -268,8 +269,8 @@ impl Backend for AppBackend {
             match provider {
                 "csv" => self.with_conn(|conn| csv_bars(conn, ticker, &request)),
                 "zerodha" => {
-                    let research = self.app.state::<ResearchDb>();
-                    data::load_bars(&research.write, self, &request, now_ms()).await
+                    let memory = self.app.state::<BarMemory>();
+                    data::load_bars(&memory, self, &request, now_ms()).await
                 }
                 other => Err(unsupported_provider(other)),
             }
@@ -278,26 +279,28 @@ impl Backend for AppBackend {
 
     fn sync_bars<'a>(&'a self, request: SyncRequest) -> BoxFuture<'a, Result<SyncReport, ApiError>> {
         Box::pin(async move {
-            let research = self.app.state::<ResearchDb>();
-            Ok(data::sync_daily(&research.write, self, &request, now_ms()).await)
+            let memory = self.app.state::<BarMemory>();
+            Ok(data::sync_daily(&memory, self, &request, now_ms()).await)
         })
     }
 
     fn panel<'a>(&'a self, request: PanelRequest) -> BoxFuture<'a, Result<Vec<PanelSeries>, ApiError>> {
         let app = self.app.clone();
         Box::pin(async move {
-            // A whole market's history is a second or so of reading: off the async threads.
+            // Copying a whole market's history out of memory is a fraction of a second, but not
+            // one to spend on the async threads.
             tauri::async_runtime::spawn_blocking(move || {
-                let research = app.state::<ResearchDb>();
-                let conn = research
-                    .read
-                    .conn
-                    .lock()
-                    .map_err(|e| ApiError::internal(e.to_string()))?;
-                data::read_panel(&conn, &request, now_ms())
+                data::read_panel(&app.state::<BarMemory>(), &request, now_ms())
             })
             .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
+            .map_err(|e| ApiError::internal(e.to_string()))
+        })
+    }
+
+    fn snapshot<'a>(&'a self, symbols: Vec<String>) -> BoxFuture<'a, Result<Snapshot, ApiError>> {
+        Box::pin(async move {
+            let memory = self.app.state::<BarMemory>();
+            data::snapshot(&memory, self, &symbols, now_ms()).await
         })
     }
 }

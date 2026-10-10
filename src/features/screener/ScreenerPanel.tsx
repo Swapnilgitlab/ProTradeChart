@@ -584,7 +584,7 @@ export function ScreenerPanel({ visible, onOpenSymbol }: Props) {
                   </button>
                 )}
                 <p className="muted small">
-                  Bars are the broker’s daily bars. With Market data downloaded (Data providers), every NSE stock is read from this computer in one go; anything else is fetched at the broker’s pace and kept, so later runs are quick.
+                  Bars are the broker’s daily bars. Filters on today’s prices (the day’s change, gap, close or volume) are judged first on one quick quote of the whole universe, and history is read only for the stocks that pass. With Keep the market loaded on (Data providers → Market data), every NSE stock’s history is in memory and read in one go; anything else is fetched at the broker’s pace and held until the app closes, so later runs are quick.
                 </p>
               </section>
             </div>

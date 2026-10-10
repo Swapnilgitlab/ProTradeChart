@@ -157,6 +157,25 @@ mod live {
 
     #[tokio::test]
     #[ignore = "talks to the real Kite servers"]
+    async fn a_full_quote_batch_of_the_longest_symbols_is_a_url_kite_accepts() {
+        let mut nse: Vec<Instrument> = real_master()
+            .await
+            .into_iter()
+            .filter(|i| i.exchange == "NSE")
+            .collect();
+        nse.sort_by_key(|i| std::cmp::Reverse(i.quote_key().len()));
+        nse.truncate(super::client::QUOTE_BATCH);
+        let longest: usize = nse.iter().map(|i| i.quote_key().len() + 3).sum();
+        println!("{} instruments, about {longest} bytes of query", nse.len());
+        // Too long a URL would be refused before the token is even looked at (a 414 or a dropped
+        // connection); Kite's own token error means it read the whole request.
+        let err = client().day_snapshots(&fake(), &nse).await.unwrap_err();
+        println!("snapshots: {err}");
+        assert_eq!(err.kind, ZerodhaErrorKind::Token);
+    }
+
+    #[tokio::test]
+    #[ignore = "talks to the real Kite servers"]
     async fn a_made_up_login_is_refused_with_a_readable_reason() {
         let short = client()
             .exchange_token("fakekey", "fakesecret", "short")

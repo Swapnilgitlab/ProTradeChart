@@ -10,7 +10,8 @@
 //! - the `Authorization: Bearer` token must match. It is 256 random bits, made at launch
 //!   and handed only to the scripts the app starts, and it is compared in constant time.
 //!
-//! Everything answered is read-only market data. The one exception is a posted result: shown in the
+//! Everything answered is read-only market data (`/v1/snapshot` and `/v1/panel` are posted only
+//! because a market's symbol list doesn't fit in a URL). The one exception is a posted result: shown in the
 //! app's window, or — for kind `watchlist` — written to the watchlist the script named, after the
 //! same checks, through the same store code the watchlist panel uses.
 
@@ -20,12 +21,12 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use subtle::ConstantTimeEq;
 
-use super::data::{BarsData, BarsRequest, PanelRequest, PanelSeries, SyncReport, SyncRequest, MAX_LIMIT};
+use super::data::{BarsData, BarsRequest, PanelRequest, PanelSeries, Snapshot, SyncReport, SyncRequest, MAX_LIMIT};
 use super::valid_run_id;
 use super::wire::{
-    bars_body, error_json, panel_body, sync_report_body, InstrumentRow, PanelPost, ProviderStatus, ResultPost,
-    SyncPost, WatchlistContent, WatchlistInfo, WatchlistSync, WatchlistUpdate, MAX_TITLE_CHARS, PNG_BASE64_PREFIX,
-    RESULT_KINDS,
+    bars_body, error_json, panel_body, snapshot_body, sync_report_body, InstrumentRow, PanelPost, ProviderStatus,
+    ResultPost, SnapshotPost, SyncPost, WatchlistContent, WatchlistInfo, WatchlistSync, WatchlistUpdate,
+    MAX_TITLE_CHARS, PNG_BASE64_PREFIX, RESULT_KINDS,
 };
 use super::ApiError;
 use crate::store::instrument_list::Filter;
@@ -49,8 +50,10 @@ pub trait Backend: Send + Sync {
     /// safe (`store::day_topup`), ahead of the caller's own per-symbol `bars` reads. Never fails
     /// outright — a broker problem is reported per symbol in the result, not as an error here.
     fn sync_bars<'a>(&'a self, request: SyncRequest) -> BoxFuture<'a, Result<SyncReport, ApiError>>;
-    /// Many symbols' stored bars, from the research store alone: never a broker call.
+    /// Many symbols' held bars, from the session's memory alone: never a broker call.
     fn panel<'a>(&'a self, request: PanelRequest) -> BoxFuture<'a, Result<Vec<PanelSeries>, ApiError>>;
+    /// Many symbols' day from the broker's batched quote, in the order asked (`data::snapshot`).
+    fn snapshot<'a>(&'a self, symbols: Vec<String>) -> BoxFuture<'a, Result<Snapshot, ApiError>>;
     /// Shows a result a script posted, in the app. The one thing here that isn't a read, and it
     /// only ever reaches the app's own window.
     fn publish(&self, post: ResultPost) -> Result<(), ApiError>;
@@ -279,6 +282,16 @@ async fn route(ctx: &Ctx, req: &Req) -> Result<Body, ApiError> {
         }
         return post_panel(ctx, req).await;
     }
+    if path == "/v1/snapshot" {
+        if !req.method.eq_ignore_ascii_case("POST") {
+            return Err(ApiError::new(
+                405,
+                "method_not_allowed",
+                "A snapshot is posted (its symbol list is too long for a URL); this route only answers POST.",
+            ));
+        }
+        return post_snapshot(ctx, req).await;
+    }
     if !req.method.eq_ignore_ascii_case("GET") {
         return Err(ApiError::new(
             405,
@@ -407,6 +420,41 @@ async fn post_panel(ctx: &Ctx, req: &Req) -> Result<Body, ApiError> {
     let request = panel_request(post)?;
     let series = ctx.backend.panel(request.clone()).await?;
     Ok(Body::Binary(panel_body(&request.interval, &series)))
+}
+
+/// The most symbols one snapshot covers: every NSE stock and index, with room to spare.
+const MAX_SNAPSHOT_SYMBOLS: usize = 5_000;
+
+/// Many symbols' day from the broker's batched quote — a whole exchange in a few calls. A read,
+/// posted only because a market's symbol list doesn't fit in a URL.
+async fn post_snapshot(ctx: &Ctx, req: &Req) -> Result<Body, ApiError> {
+    let is_json = req
+        .content_type
+        .as_deref()
+        .is_some_and(|t| t.trim().to_ascii_lowercase().starts_with("application/json"));
+    if !is_json {
+        return Err(ApiError::new(
+            415,
+            "unsupported_media_type",
+            "Post a snapshot request as application/json.",
+        ));
+    }
+    if req.body.len() > MAX_BODY_BYTES {
+        return Err(too_large());
+    }
+    let post: SnapshotPost = serde_json::from_slice(&req.body)
+        .map_err(|e| ApiError::bad_request(format!("That isn't a snapshot request: {e}")))?;
+    if post.symbols.is_empty() {
+        return Err(ApiError::bad_request("symbols must name at least one symbol."));
+    }
+    if post.symbols.len() > MAX_SNAPSHOT_SYMBOLS {
+        return Err(ApiError::bad_request(format!(
+            "A snapshot can cover at most {MAX_SNAPSHOT_SYMBOLS} symbols at once."
+        )));
+    }
+    let symbols = checked_symbols(&post.symbols)?;
+    let snapshot = ctx.backend.snapshot(symbols).await?;
+    json(&snapshot_body(&snapshot))
 }
 
 fn panel_request(post: PanelPost) -> Result<PanelRequest, ApiError> {
@@ -666,7 +714,8 @@ pub mod testing {
 
     use super::*;
     use crate::models::Bar;
-    use crate::pyapi::data::{SyncResult, SyncStatus};
+    use crate::models::DaySnapshot;
+    use crate::pyapi::data::{SnapshotRow, SyncResult, SyncStatus};
 
     #[derive(Default)]
     pub struct FakeBackend {
@@ -689,6 +738,8 @@ pub mod testing {
         pub last_panel: Mutex<Option<PanelRequest>>,
         /// Symbols the panel reports as not held, so the caller reads them through `bars`.
         pub panel_missing: Mutex<Vec<String>>,
+        pub last_snapshot: Mutex<Option<Vec<String>>>,
+        pub fail_snapshot_with: Mutex<Option<ApiError>>,
     }
 
     /// `n` consecutive daily bars from 2022-01-03 (IST midnight) for `symbol`.
@@ -867,6 +918,40 @@ pub mod testing {
             })
         }
 
+        /// Each symbol's day as the last bar of the history `bars` serves, quoted on that bar's
+        /// own session (none when there is no history), so a pre-filter judges what a full read would.
+        fn snapshot<'a>(&'a self, symbols: Vec<String>) -> BoxFuture<'a, Result<Snapshot, ApiError>> {
+            Box::pin(async move {
+                *self.last_snapshot.lock().unwrap() = Some(symbols.clone());
+                if let Some(e) = self.fail_snapshot_with.lock().unwrap().clone() {
+                    return Err(e);
+                }
+                let n = *self.bar_count.lock().unwrap();
+                // The session of the history's last bar (they all end on the same day).
+                let session_day = (n >= 2).then(|| history(n, "")[n - 1].time);
+                let rows = symbols
+                    .into_iter()
+                    .map(|symbol| {
+                        let snapshot = (n >= 2).then(|| {
+                            let all = history(n, &symbol);
+                            let (prev, last) = (&all[n - 2], &all[n - 1]);
+                            DaySnapshot {
+                                open: last.open,
+                                high: last.high,
+                                low: last.low,
+                                last: last.close,
+                                previous_close: Some(prev.close),
+                                volume: last.volume,
+                                traded_at_ms: Some(last.time + 6 * 3_600_000),
+                            }
+                        });
+                        SnapshotRow { symbol, snapshot }
+                    })
+                    .collect();
+                Ok(Snapshot { session_day, rows })
+            })
+        }
+
         fn publish(&self, post: ResultPost) -> Result<(), ApiError> {
             self.results.lock().unwrap().push(post);
             Ok(())
@@ -888,7 +973,7 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use super::testing::FakeBackend;
+    use super::testing::{history, FakeBackend};
     use super::*;
     use serde_json::Value;
 
@@ -1471,5 +1556,77 @@ mod tests {
             assert_eq!((status, code(&body)), (400, "bad_request"), "{bad}");
         }
         assert!(backend.last_panel.lock().unwrap().is_none());
+    }
+
+    // ---- The snapshot -----------------------------------------------------------
+
+    fn snapshot(body: &Value) -> Req {
+        Req {
+            target: "/v1/snapshot".into(),
+            ..post(body)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_is_posted_and_answered_per_symbol_in_order() {
+        let (ctx, backend) = ctx();
+        *backend.bar_count.lock().unwrap() = 10;
+        let (status, body) = ask(
+            &ctx,
+            &snapshot(&serde_json::json!({ "symbols": ["zerodha:NSE:B", " zerodha:NSE:A "] })),
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert_eq!(
+            backend.last_snapshot.lock().unwrap().clone().unwrap(),
+            ["zerodha:NSE:B", "zerodha:NSE:A"]
+        );
+        let rows = body["snapshots"].as_array().unwrap();
+        assert_eq!(rows[0]["symbol"], "zerodha:NSE:B");
+        assert_eq!(rows[1]["symbol"], "zerodha:NSE:A");
+        let last = history(10, "zerodha:NSE:A");
+        // serde_json's parser may be an ulp off the exact float, so compare closely, not exactly.
+        assert!((rows[1]["last"].as_f64().unwrap() - last[9].close).abs() < 1e-9);
+        assert!((rows[1]["previousClose"].as_f64().unwrap() - last[8].close).abs() < 1e-9);
+        assert!(rows[1]["tradedAt"].is_i64());
+        assert_eq!(body["sessionDay"], last[9].time);
+
+        *backend.bar_count.lock().unwrap() = 0;
+        let (_, body) = ask(&ctx, &snapshot(&serde_json::json!({ "symbols": ["zerodha:NSE:A"] }))).await;
+        assert!(body["snapshots"][0]["last"].is_null(), "no quote is null, not an error");
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_is_not_read_by_get_its_request_is_checked_and_it_needs_the_token() {
+        let (ctx, backend) = ctx();
+        let (status, body) = ask(&ctx, &get("/v1/snapshot")).await;
+        assert_eq!((status, code(&body)), (405, "method_not_allowed"));
+        for bad in [
+            serde_json::json!({ "symbols": [] }),
+            serde_json::json!({ "symbols": ["RELIANCE"] }),
+            serde_json::json!({ "symbols": vec!["zerodha:NSE:A"; MAX_SNAPSHOT_SYMBOLS + 1] }),
+            serde_json::json!({ "tickers": ["zerodha:NSE:A"] }),
+        ] {
+            let (status, body) = ask(&ctx, &snapshot(&bad)).await;
+            assert_eq!((status, code(&body)), (400, "bad_request"), "{bad}");
+        }
+        let mut no_token = snapshot(&serde_json::json!({ "symbols": ["zerodha:NSE:A"] }));
+        no_token.authorization = None;
+        assert_eq!(ask(&ctx, &no_token).await.0, 401);
+        let mut browser = snapshot(&serde_json::json!({ "symbols": ["zerodha:NSE:A"] }));
+        browser.origin = Some("https://evil.example".into());
+        assert_eq!(ask(&ctx, &browser).await.0, 403);
+        assert!(
+            backend.last_snapshot.lock().unwrap().is_none(),
+            "none of them reached the broker"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_quote_is_the_snapshots_error() {
+        let (ctx, backend) = ctx();
+        *backend.fail_snapshot_with.lock().unwrap() = Some(ApiError::new(401, "auth", "token expired"));
+        let (status, body) = ask(&ctx, &snapshot(&serde_json::json!({ "symbols": ["zerodha:NSE:A"] }))).await;
+        assert_eq!((status, code(&body)), (401, "auth"));
     }
 }

@@ -2,7 +2,8 @@
 //! Tauri types so they can be unit-tested against an in-memory database.
 
 pub mod alerts;
-pub mod bars_cache;
+pub mod bar_memory;
+pub mod bar_tables;
 pub mod datasets;
 pub mod day_topup;
 pub mod index_catalog;

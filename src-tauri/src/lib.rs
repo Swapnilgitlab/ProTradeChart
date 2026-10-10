@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use tauri::{Emitter, Manager};
 
-use crate::db::{Database, ResearchDb};
+use crate::db::Database;
 use crate::secrets::Secrets;
 use crate::zerodha::client::ZerodhaClient;
 use crate::zerodha::feed::{Feed as ZerodhaFeed, FeedConfig as ZerodhaFeedConfig};
@@ -77,7 +77,7 @@ pub fn run() {
             log::info!("database ready at {}", data_dir.display());
 
             app.manage(db);
-            app.manage(ResearchDb::open(&data_dir)?);
+            app.manage(store::bar_memory::BarMemory::default());
             app.manage(marketdata::MarketData::default());
             app.manage(secrets);
             // The Python runs and the local data API they use, which starts with the first script.
@@ -229,10 +229,9 @@ pub fn run() {
             screener_commands::get_screener_result,
             screener_commands::screen_run,
             marketdata_commands::market_data_status,
-            marketdata_commands::market_data_download,
-            marketdata_commands::market_data_update_now,
+            marketdata_commands::market_data_load_now,
             marketdata_commands::market_data_stop,
-            marketdata_commands::market_data_set_auto,
+            marketdata_commands::market_data_set_keep_loaded,
             schedule_commands::list_schedules,
             schedule_commands::save_schedule,
             schedule_commands::delete_schedule,

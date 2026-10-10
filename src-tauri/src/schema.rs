@@ -63,46 +63,11 @@ CREATE TABLE IF NOT EXISTS watchlist_sections (
 );
 CREATE INDEX IF NOT EXISTS idx_watchlist_sections_list ON watchlist_sections(watchlist_id);
 
--- Read-through cache of the brokers' bars (keys start `zerodha:`), used only as an
--- offline fallback.
-CREATE TABLE IF NOT EXISTS bars_cache (
-  symbol    TEXT NOT NULL,
-  interval  TEXT NOT NULL,
-  ts        INTEGER NOT NULL,
-  open      REAL NOT NULL,
-  high      REAL NOT NULL,
-  low       REAL NOT NULL,
-  close     REAL NOT NULL,
-  volume    REAL,
-  PRIMARY KEY (symbol, interval, ts)
-) WITHOUT ROWID;
+-- No table holds broker price history: it lives in memory for the session (`store/bar_memory.rs`)
+-- and is never written to disk. Databases from before that change had three (`bars_cache`,
+-- `research_bars`, `research_coverage`); `bar_tables::drop_disk_bars` removes them once.
 
--- Bars kept for the Python research API (`store/research_bars.rs`). Unlike `bars_cache`
--- this is a store, not a fallback: it is never pruned, and `research_coverage` records
--- which span of each series is complete (an empty holiday and an unfetched day look
--- the same in the bars table).
-CREATE TABLE IF NOT EXISTS research_bars (
-  symbol    TEXT NOT NULL,
-  interval  TEXT NOT NULL,
-  ts        INTEGER NOT NULL,
-  open      REAL NOT NULL,
-  high      REAL NOT NULL,
-  low       REAL NOT NULL,
-  close     REAL NOT NULL,
-  volume    REAL,
-  PRIMARY KEY (symbol, interval, ts)
-) WITHOUT ROWID;
-
-CREATE TABLE IF NOT EXISTS research_coverage (
-  symbol     TEXT NOT NULL,
-  interval   TEXT NOT NULL,
-  from_ts    INTEGER NOT NULL,
-  to_ts      INTEGER NOT NULL,
-  synced_at  INTEGER NOT NULL,
-  PRIMARY KEY (symbol, interval)
-) WITHOUT ROWID;
-
--- The symbols the market-data store keeps daily history for (`store/market_symbols.rs`).
+-- The symbols "Keep the market loaded" covers (`store/market_symbols.rs`): names, never prices.
 -- Unlike the brokers' instrument tables, which each refresh replaces, a row here outlives
 -- its listing: a new one is a new listing (an IPO) and a stale `last_seen` a delisting.
 CREATE TABLE IF NOT EXISTS market_symbols (

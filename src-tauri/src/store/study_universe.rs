@@ -1,5 +1,5 @@
 //! What a Study's universe will cost before it runs: which listings count as stocks, and how many of
-//! them the research store already holds back far enough.
+//! them memory already holds back far enough (this session's loads; nothing is kept on disk).
 //!
 //! `listing_series` and `pick_listings` are the engine's own rules (`python/protrade/study.py`,
 //! same names): the estimate must count the symbols the run will fetch. Keep the two in step — the
@@ -7,9 +7,7 @@
 
 use std::collections::HashSet;
 
-use rusqlite::Connection;
-
-use super::research_bars;
+use super::bar_memory::BarMemory;
 
 const DAY_MS: i64 = 86_400_000;
 /// Words that mark a fund rather than a company, in a ticker or a name.
@@ -105,7 +103,7 @@ pub struct Estimate {
 /// weekend, a holiday, or (for the quote path) a rejected snapshot can need fewer than this.
 #[allow(clippy::too_many_arguments)]
 pub fn estimate(
-    conn: &Connection,
+    memory: &BarMemory,
     symbols: &[String],
     from_ms: i64,
     now_ms: i64,
@@ -113,11 +111,11 @@ pub fn estimate(
     gap_ms: u64,
     quote_batch: usize,
     quote_gap_ms: u64,
-) -> rusqlite::Result<Estimate> {
+) -> Estimate {
     let per_symbol = ((now_ms - from_ms).max(DAY_MS) + window_days * DAY_MS - 1) / (window_days * DAY_MS);
     let (mut stored, mut requests, mut topups) = (0usize, 0usize, 0usize);
     for symbol in symbols {
-        match research_bars::coverage(conn, symbol, "D")? {
+        match memory.coverage(symbol, "D") {
             Some(c) if c.from_ms <= from_ms => {
                 stored += 1;
                 if c.to_ms < now_ms - DAY_MS {
@@ -128,19 +126,18 @@ pub fn estimate(
         }
     }
     let quote_requests = topups.div_ceil(quote_batch.max(1));
-    Ok(Estimate {
+    Estimate {
         symbols: symbols.len(),
         stored,
         requests,
         quote_requests,
         seconds: requests as f64 * gap_ms as f64 / 1000.0 + quote_requests as f64 * quote_gap_ms as f64 / 1000.0,
-    })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::Database;
     use crate::store::research_bars::Range;
 
     #[test]
@@ -194,12 +191,11 @@ mod tests {
 
     #[test]
     fn stored_series_cost_at_most_a_top_up_and_new_ones_a_request_per_window() {
-        let db = Database::open_in_memory().unwrap();
-        let conn = db.conn.lock().unwrap();
+        let memory = BarMemory::default();
         let now = 3_000 * DAY_MS;
         let from = now - 1_500 * DAY_MS;
         let cover = |symbol: &str, from_ms: i64, to_ms: i64| {
-            research_bars::extend_coverage(&conn, symbol, "D", Range { from_ms, to_ms }, now).unwrap();
+            memory.extend_coverage(symbol, "D", Range { from_ms, to_ms }, now);
         };
         cover("zerodha:NSE:FRESH", from - DAY_MS, now);
         cover("zerodha:NSE:OLD", from, now - 5 * DAY_MS);
@@ -212,7 +208,7 @@ mod tests {
         ]
         .map(String::from)
         .to_vec();
-        let e = estimate(&conn, &symbols, from, now, 2000, 350, 200, 1100).unwrap();
+        let e = estimate(&memory, &symbols, from, now, 2000, 350, 200, 1100);
         assert_eq!(
             (e.symbols, e.stored, e.requests, e.quote_requests),
             (4, 2, 2, 1),
@@ -220,20 +216,18 @@ mod tests {
         );
         assert!((e.seconds - (2.0 * 0.35 + 1.0 * 1.1)).abs() < 1e-9);
         // A span longer than one request's window costs a request per window.
-        let long = estimate(&conn, &symbols[3..], now - 4_500 * DAY_MS, now, 2000, 350, 200, 1100).unwrap();
+        let long = estimate(&memory, &symbols[3..], now - 4_500 * DAY_MS, now, 2000, 350, 200, 1100);
         assert_eq!(long.requests, 3);
     }
 
     #[test]
     fn many_stale_but_stored_symbols_batch_into_quote_requests_not_one_each() {
-        let db = Database::open_in_memory().unwrap();
-        let conn = db.conn.lock().unwrap();
+        let memory = BarMemory::default();
         let now = 3_000 * DAY_MS;
         let from = now - 1_500 * DAY_MS;
         let symbols: Vec<String> = (0..450).map(|i| format!("zerodha:NSE:S{i}")).collect();
         for symbol in &symbols {
-            research_bars::extend_coverage(
-                &conn,
+            memory.extend_coverage(
                 symbol,
                 "D",
                 Range {
@@ -241,10 +235,9 @@ mod tests {
                     to_ms: now - 5 * DAY_MS,
                 },
                 now,
-            )
-            .unwrap();
+            );
         }
-        let e = estimate(&conn, &symbols, from, now, 2000, 350, 200, 1100).unwrap();
+        let e = estimate(&memory, &symbols, from, now, 2000, 350, 200, 1100);
         assert_eq!(
             (e.stored, e.requests, e.quote_requests),
             (450, 0, 3),

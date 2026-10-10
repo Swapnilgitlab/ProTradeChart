@@ -38,6 +38,8 @@ export interface ScreenResult {
     stale: number;
     /** Matches before the cap; `rows` may hold fewer. */
     matched: number;
+    /** Ruled out on today's quote alone, without reading their history (counted in `loaded`). */
+    prefiltered: number;
   };
   warnings: { code: string; message: string }[];
 }
@@ -90,6 +92,9 @@ export function parseScreenResult(data: unknown): ScreenResult | null {
   if (!asOf || !DATE.test(asOf) || !executedAt || numbers.some((n) => n === null)) return null;
   const [requested, loaded, failed, stale, matched] = numbers as number[];
   if (matched < rows.length) return null;
+  // Results saved before the quote pre-filter existed have no count: none were ruled out that way.
+  const prefiltered = m.prefiltered === undefined ? 0 : count(m.prefiltered);
+  if (prefiltered === null) return null;
   const warnings = (Array.isArray(data.warnings) ? data.warnings : [])
     .filter(isRecord)
     .map((w) => ({ code: text(w.code, 40) ?? '', message: text(w.message, 500) ?? '' }))
@@ -109,6 +114,7 @@ export function parseScreenResult(data: unknown): ScreenResult | null {
       failed,
       stale,
       matched,
+      prefiltered,
     },
     warnings,
   };

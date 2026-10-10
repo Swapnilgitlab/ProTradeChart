@@ -133,7 +133,7 @@ The app starts each script with three environment variables: `PROTRADE_API` (`ht
 (a one-off token) and `PROTRADE_RUN_ID` (which run to show results in). Every request carries
 `Authorization: Bearer <token>`, and the app answers only to its own `Host` and refuses any request that has an `Origin`
 header (a browser's). Everything is read-only market data apart from posting a result, and there is no route that places an
-order or returns a credential. The token is new on every launch of the app, so it is not something to keep.
+order or returns a credential. The app holds the bars it fetches in memory while it is open and never writes them to disk. The token is new on every launch of the app, so it is not something to keep.
 
 | Route | |
 | --- | --- |
@@ -141,6 +141,8 @@ order or returns a credential. The token is new on every launch of the app, so i
 | `GET /v1/instruments?provider=&exchange=&kind=&q=&limit=` | Rows of `symbol`, `name`, `exchange`, `kind`, `expiry`. |
 | `GET /v1/watchlists`, `GET /v1/watchlist?name=` or `?id=` | The lists, and the symbols on one. |
 | `GET /v1/providers`, `GET /v1/ping` | Sources and their state; the app's version. |
+| `POST /v1/panel` | `{symbols, from, to, bars}`: many symbols' daily bars from what the app holds in memory, in binary columns (`pt.panel`). A read, posted because the symbol list doesn't fit a URL. |
+| `POST /v1/snapshot` | `{symbols}`: each symbol's day from one batched broker quote (`open`, `high`, `low`, `last`, `previousClose`, `volume`, `tradedAt`), and `sessionDay`, the session they speak for (`null` before 9:15 IST). A read (`pt.snapshot`). |
 | `POST /v1/results` | `{runId, kind, title, data}`, where `kind` is `table`, `report` or `figure`. The only route that isn't a read: it shows something in the panel of the run that posted it. At most 16 MB. |
 
 Errors are `{"error": {"code": "...", "message": "..."}}` with an HTTP status.

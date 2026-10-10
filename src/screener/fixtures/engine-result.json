@@ -68,6 +68,7 @@
     "as_of": "2025-06-30",
     "symbols_requested": 5,
     "symbols_loaded": 4,
+    "prefiltered": 0,
     "symbols_failed": 1,
     "symbols_stale": 1,
     "matched": 2

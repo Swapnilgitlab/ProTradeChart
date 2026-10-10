@@ -19,6 +19,12 @@ const LICENSE_FILES = {
     title: 'Third-party licences',
     load: () => import('../../../THIRD_PARTY_LICENSES.txt?raw').then((m) => m.default),
   },
+  // Vela's NOTICE (Apache-2.0 section 4(d)), the statement that the app ships a modified Vela
+  // (section 4(b)) and the AGPL section 7(b) attribution term all live in this file.
+  notices: {
+    title: 'Third-party notices',
+    load: () => import('../../../THIRD_PARTY_NOTICES.md?raw').then((m) => m.default),
+  },
 } as const;
 
 interface Props {
@@ -76,17 +82,22 @@ export function AboutDialog({ onClose }: Props) {
         <dd>{info?.dataDir ?? '…'}</dd>
       </dl>
 
-      <UpdatesSection />
+      <UpdatesSection version={info?.version ?? null} />
 
       <div className="section-title">Credits</div>
       <p className="secondary about-links" style={{ marginTop: 0 }}>
         Charts are rendered by <a href="https://luxalgo.com/vela">Vela™</a>, an open-source charting library by LuxAlgo
-        (Apache-2.0). The desktop shell is built with <a href="https://tauri.app">Tauri</a>.
+        (Apache-2.0). ProTradeChart ships Vela with small changes of its own, to the price scale&rsquo;s padding and the chart
+        menus, described in the third-party notices. The desktop shell is built with <a href="https://tauri.app">Tauri</a>.
       </p>
       <p className="secondary about-links">
         Pine Script support is powered by <a href="https://github.com/LuxAlgo/PineTS">PineTS</a> and Vela PineTS, built by
         LuxAlgo (AGPL-3.0). The script editor is <a href="https://codemirror.net">CodeMirror</a>. Pine Script® and TradingView®
         are registered trademarks of TradingView, Inc.; this app is not affiliated with, or endorsed by, TradingView.
+      </p>
+      <p className="secondary">
+        It is also built on React, SQLite, Lucide icons and some 550 other open-source packages and crates. Each one&rsquo;s
+        copyright notice and licence is under Third-party licences, below.
       </p>
       <div className="section-title">Shortcuts</div>
       <dl className="about-list">
@@ -119,11 +130,47 @@ export function AboutDialog({ onClose }: Props) {
         <button type="button" className="link-button" onClick={() => setReading('thirdParty')}>
           Third-party licences
         </button>
+        {' · '}
+        <button type="button" className="link-button" onClick={() => setReading('notices')}>
+          Third-party notices
+        </button>
       </p>
-      <p className="notice">
-        Market data comes from Zerodha, with your own account, and your own imported files. Prices can be delayed or
-        wrong. Everything here is for information only and is not financial advice.
+      <p className="secondary">
+        Zerodha, Kite and Kite Connect, NSE, BSE, MCX, Claude, Anthropic, GPT, OpenAI and Python are trademarks of their
+        respective owners. They are named only to say which services the app connects to; ProTradeChart is not affiliated
+        with, sponsored by or endorsed by any of them.
       </p>
+
+      <div className="section-title">Market data: use and storage</div>
+      <div className="notice">
+        <ul>
+          <li>
+            <strong>Whose data it is.</strong> Prices come from the exchanges (NSE, BSE, MCX and others) through your own
+            Zerodha Kite Connect account and API key, or from files you import. Broker data is licensed to you, for your
+            own use, under Zerodha&rsquo;s Kite Connect terms and the exchanges&rsquo; rules. ProTradeChart supplies no
+            data and holds no data licence.
+          </li>
+          <li>
+            <strong>Keep it to yourself.</strong> Don&rsquo;t publish, share, sell or show it to the public (on a stream or
+            a website, or by passing on this app&rsquo;s data folder or prices exported from it), and don&rsquo;t use it
+            for mock trading or games, which Kite&rsquo;s terms forbid.
+          </li>
+          <li>
+            <strong>Never saved on this computer.</strong> Kite Connect&rsquo;s terms restrict permanent copies of its
+            data, so broker prices are held only in memory while the app is open (the charts&rsquo; recent bars, what
+            scripts, the Screener and Studies read, and the whole market if you keep it loaded) and are gone when it
+            closes. What the data folder above keeps is your own: layouts, watchlists, alerts, scripts, imported files,
+            and the results of the screens and Studies you ran. None of it is sent to this project or anyone else. AI
+            features send your question, symbols, watchlist names and a Study&rsquo;s summary statistics, never price
+            history.
+          </li>
+          <li>
+            <strong>No advice.</strong> Prices can be delayed, incomplete or wrong. ProTradeChart is not a broker or a
+            SEBI-registered investment adviser and places no orders; nothing in it is financial advice. Following your
+            broker&rsquo;s terms and the rules that apply to you is your responsibility.
+          </li>
+        </ul>
+      </div>
     </Dialog>
   );
 }

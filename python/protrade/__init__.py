@@ -10,9 +10,10 @@ Scripts run from the app's Python tab reach market data through it::
     closes = pt.panel(universe, bars=260).wide("close")
 
 The app fetches from the broker (it holds the credentials, and this package never sees
-them), keeps what it fetched, and answers over a local, token-protected connection. Once the
-app's market data has been downloaded, daily bars for every NSE stock come from that store in
-one read (``pt.panel``) instead of one request per symbol.
+them), keeps what it fetched in memory while it is open (never on disk), and answers over a
+local, token-protected connection. With "Keep the market loaded" on, daily bars for every NSE
+stock come from memory in one read (``pt.panel``) instead of one request per symbol, and
+``pt.snapshot`` gives today's quote for a whole market in a few seconds.
 
 A script can also keep one of the app's watchlists up to date (``pt.set_watchlist``), which is
 how a scheduled script refreshes a list every evening.
@@ -31,6 +32,7 @@ from .api import (
     panel,
     providers,
     resample,
+    snapshot,
     status,
     universe,
     watchlist,
@@ -76,6 +78,7 @@ __all__ = [
     "resample",
     "set_watchlist",
     "show",
+    "snapshot",
     "status",
     "universe",
     "watchlist",

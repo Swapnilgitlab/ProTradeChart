@@ -5,8 +5,8 @@ import { useUpdateState } from '../../updates/useUpdateState';
 import { AUTO_UPDATE_PREFERENCE, autoCheckEnabled, progressPercent } from '../../updates/updater';
 
 /** The About dialog's "Updates" block: check now, install what's found, and the switch for
- *  the daily background check. */
-export function UpdatesSection() {
+ *  the daily background check. `version` is the installed one, once About has read it. */
+export function UpdatesSection({ version }: { version: string | null }) {
   const state = useUpdateState();
   const [auto, setAuto] = useState(true);
 
@@ -28,7 +28,7 @@ export function UpdatesSection() {
       status = 'Checking for updates…';
       break;
     case 'current':
-      status = "You're up to date.";
+      status = version ? `You're up to date: ${version} is the latest version.` : "You're up to date.";
       action = <CheckButton label="Check again" />;
       break;
     case 'available':

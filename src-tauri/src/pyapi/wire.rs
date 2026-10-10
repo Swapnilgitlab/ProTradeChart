@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::data::{BarsData, SyncReport, SyncStatus};
+use super::data::{BarsData, Snapshot, SyncReport, SyncStatus};
 use super::ApiError;
 
 /// What a script posts to show in the app: a table, a backtest report or a figure. Rust checks
@@ -45,6 +45,59 @@ pub struct WatchlistSync {
     pub added: usize,
     pub removed: usize,
     pub total: usize,
+}
+
+/// A `POST /v1/snapshot` request: the symbols whose day to quote.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct SnapshotPost {
+    pub symbols: Vec<String>,
+}
+
+/// One symbol's day in a snapshot answer. Every price is `null` when the broker had no quote for it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotRowBody {
+    pub symbol: String,
+    pub open: Option<f64>,
+    pub high: Option<f64>,
+    pub low: Option<f64>,
+    pub last: Option<f64>,
+    pub previous_close: Option<f64>,
+    pub volume: Option<f64>,
+    /// When it last traded (epoch milliseconds): the quote's session.
+    pub traded_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotBody {
+    /// The session these quotes speak for (epoch milliseconds of its IST midnight); `null` in the
+    /// pre-open window, when no quote is a day's bar.
+    pub session_day: Option<i64>,
+    pub snapshots: Vec<SnapshotRowBody>,
+}
+
+pub fn snapshot_body(snapshot: &Snapshot) -> SnapshotBody {
+    SnapshotBody {
+        session_day: snapshot.session_day,
+        snapshots: snapshot
+            .rows
+            .iter()
+            .map(|r| {
+                let s = r.snapshot;
+                SnapshotRowBody {
+                    symbol: r.symbol.clone(),
+                    open: s.map(|s| s.open),
+                    high: s.map(|s| s.high),
+                    low: s.map(|s| s.low),
+                    last: s.map(|s| s.last),
+                    previous_close: s.and_then(|s| s.previous_close),
+                    volume: s.and_then(|s| s.volume),
+                    traded_at: s.and_then(|s| s.traded_at_ms),
+                }
+            })
+            .collect(),
+    }
 }
 
 /// A `POST /v1/bars/sync` request, before [`super::routes::sync_request`] checks it.

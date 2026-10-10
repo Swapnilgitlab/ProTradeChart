@@ -1,24 +1,26 @@
-//! One run of the market-data update: record the listing, download any history the store lacks
-//! (the first run's five years, a new listing's), then bring every series up to the latest settled
-//! session, fetching a series again in full when the broker's history no longer agrees with it.
+//! One run of "Keep the market loaded": record the listing, read into memory the history it
+//! doesn't hold yet (everything, the first time after launch; a new listing's, later), then bring
+//! every series up to the latest settled session from the batched quote. A series the quote can't
+//! update is read again whole, which costs Kite the same single request as its missing tail and
+//! can never mix prices from before and after a split.
 //!
 //! The broker sits behind the Python API's own [`Fetcher`] and [`Snapshots`], so a run reuses
-//! `load_bars` (coverage-aware downloads) and `sync_daily` (the batched quote top-up), and is
-//! tested here with a fake broker. The research lock is never held across an await.
+//! `load_bars` (coverage-aware reads) and `sync_daily` (the quote top-up), and is tested here with
+//! a fake broker. Bars go to memory only; the database lock is never held across an await.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
 
-use super::plan::{disagrees, history_from, needs_history, settled_session, was_holiday, TAIL_OVERLAP_MS};
+use super::plan::{history_from, needs_history, settled_session, was_holiday};
 use crate::db::Database;
 use crate::market::last_settled_ms;
 use crate::pyapi::data::{
     load_bars, normalise_daily, sync_daily, BarsRequest, Fetcher, Snapshots, SyncRequest, SyncStatus,
 };
 use crate::pyapi::ApiError;
+use crate::store::bar_memory::BarMemory;
 use crate::store::market_symbols::{self, Listed};
-use crate::store::research_bars::{self, Range};
 
 const D: &str = "D";
 const DAY_MS: i64 = 86_400_000;
@@ -29,12 +31,11 @@ impl<T: Fetcher + Snapshots> Broker for T {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Phase {
-    /// Downloading history the store lacks.
+    /// Reading history memory doesn't hold.
     History,
     /// The batched quote top-up of every series' latest bar.
     Prices,
-    /// Series the quote couldn't update, read from the historical endpoint (and refetched in
-    /// full after a corporate action).
+    /// Series the quote couldn't update, read again whole.
     Corrections,
 }
 
@@ -51,9 +52,12 @@ pub struct Progress {
 pub struct Summary {
     pub listed: usize,
     pub new_listings: usize,
-    pub downloaded: usize,
+    /// Series whose history was read into memory.
+    pub loaded: usize,
+    /// Series brought up to date from the quote.
     pub updated: usize,
-    pub refetched: usize,
+    /// Series the quote couldn't update, read again whole (a split or bonus among them).
+    pub reloaded: usize,
     pub failed: usize,
     pub holiday: bool,
 }
@@ -67,17 +71,16 @@ pub fn cancelled() -> ApiError {
     ApiError::new(499, "cancelled", "Stopped.")
 }
 
-fn locked<T>(db: &Database, f: impl FnOnce(&mut rusqlite::Connection) -> rusqlite::Result<T>) -> Result<T, ApiError> {
-    let mut conn = db.conn.lock().map_err(|e| ApiError::internal(e.to_string()))?;
-    Ok(f(&mut conn)?)
-}
-
-/// Runs one update over `listed` (the exchange's current listing, from `plan::universe`).
-/// Returns early with the error when a failure is fatal, or with [`cancelled`] once `cancel` is set.
+/// Runs one pass over `listed` (the exchange's current listing, from `plan::universe`). Symbols in
+/// `first` (the user's watchlists, the last screens' matches) are read before the rest. Returns
+/// early with the error when a failure is fatal, or with [`cancelled`] once `cancel` is set.
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
-    research: &Database,
+    db: &Database,
+    memory: &BarMemory,
     broker: &dyn Broker,
     listed: &[Listed],
+    first: &[String],
     now: i64,
     cancel: &AtomicBool,
     progress: &(dyn Fn(Progress) + Sync),
@@ -87,15 +90,20 @@ pub async fn run(
         listed: listed.len(),
         ..Summary::default()
     };
-    summary.new_listings = locked(research, |c| market_symbols::record_listing(c, listed, now))?.len();
+    summary.new_listings = {
+        let mut conn = db.conn.lock().map_err(|e| ApiError::internal(e.to_string()))?;
+        market_symbols::record_listing(&mut conn, listed, now)?.len()
+    };
 
-    // History the store lacks: everything on the first run, a new listing on a later one.
-    let mut missing = Vec::new();
-    for l in listed {
-        if needs_history(locked(research, |c| research_bars::coverage(c, &l.symbol, D))?, from) {
-            missing.push(l.symbol.as_str());
-        }
-    }
+    // History memory lacks: everything after launch, a new listing later. The user's own symbols first.
+    let mut missing: Vec<&str> = listed
+        .iter()
+        .map(|l| l.symbol.as_str())
+        .filter(|s| needs_history(memory.coverage(s, D), from))
+        .collect();
+    missing.sort_by_key(|s| !first.iter().any(|f| f == s));
+    // A symbol the broker just refused isn't asked again in the same run, nor counted twice.
+    let mut refused = std::collections::HashSet::new();
     for (i, symbol) in missing.iter().enumerate() {
         if cancel.load(Ordering::SeqCst) {
             return Err(cancelled());
@@ -105,19 +113,13 @@ pub async fn run(
             done: i,
             total: missing.len(),
         });
-        let request = BarsRequest {
-            symbol: symbol.to_string(),
-            interval: D.to_string(),
-            from_ms: Some(from),
-            to_ms: None,
-            limit: Some(1),
-        };
-        match load_bars(research, broker, &request, now).await {
-            Ok(_) => summary.downloaded += 1,
+        match load(memory, broker, symbol, from, now).await {
+            Ok(()) => summary.loaded += 1,
             Err(e) if fatal(&e) => return Err(e),
             Err(e) => {
-                log::warn!("market data: couldn't download {symbol}: {}", e.message);
+                log::warn!("market data: couldn't load {symbol}: {}", e.message);
                 summary.failed += 1;
+                refused.insert(symbol.to_string());
             }
         }
     }
@@ -131,7 +133,7 @@ pub async fn run(
         total: listed.len(),
     });
     let report = sync_daily(
-        research,
+        memory,
         broker,
         &SyncRequest {
             symbols: listed.iter().map(|l| l.symbol.clone()).collect(),
@@ -143,49 +145,43 @@ pub async fn run(
         now,
     )
     .await;
-    let mut corrections = Vec::new();
+    let mut stale = Vec::new();
     let mut no_trade_today = false;
     for r in report.results {
         match r.status {
             SyncStatus::Updated => summary.updated += 1,
+            SyncStatus::Fetch if refused.contains(&r.symbol) => {}
             SyncStatus::Fetch => {
-                let reason = r.reason.as_deref();
-                no_trade_today |= reason == Some("NotThisSession");
-                corrections.push((r.symbol, reason == Some("PreviousCloseMismatch")));
+                no_trade_today |= r.reason.as_deref() == Some("NotThisSession");
+                stale.push(r.symbol);
             }
             SyncStatus::Current | SyncStatus::Skipped => {}
         }
     }
 
     // Quotes that last traded before the session may mean a weekday holiday, which has no bar to
-    // fetch: check once, from one liquid symbol, rather than asking the broker for every symbol's
-    // missing day.
+    // fetch: check once, from one liquid symbol, rather than reading every symbol again.
     if no_trade_today {
         if let Some(probe) = probe_symbol(listed) {
-            if holiday(research, broker, probe, now).await? {
+            if holiday(memory, broker, probe, now).await? {
                 summary.holiday = true;
                 return Ok(summary);
             }
         }
     }
 
-    for (i, (symbol, split)) in corrections.iter().enumerate() {
+    for (i, symbol) in stale.iter().enumerate() {
         if cancel.load(Ordering::SeqCst) {
             return Err(cancelled());
         }
         progress(Progress {
             phase: Phase::Corrections,
             done: i,
-            total: corrections.len(),
+            total: stale.len(),
         });
-        let outcome = if *split {
-            refetch(research, broker, symbol, now).await.map(|_| true)
-        } else {
-            refresh_tail(research, broker, symbol, now).await
-        };
-        match outcome {
-            Ok(true) => summary.refetched += 1,
-            Ok(false) => summary.updated += 1,
+        memory.forget(symbol, D);
+        match load(memory, broker, symbol, from, now).await {
+            Ok(()) => summary.reloaded += 1,
             Err(e) if fatal(&e) => return Err(e),
             Err(e) => {
                 log::warn!("market data: couldn't update {symbol}: {}", e.message);
@@ -196,7 +192,19 @@ pub async fn run(
     Ok(summary)
 }
 
-/// NIFTY 50 if it's listed (it trades every session), else the first symbol.
+/// Reads a symbol's daily history from `from` into memory.
+async fn load(memory: &BarMemory, broker: &dyn Broker, symbol: &str, from: i64, now: i64) -> Result<(), ApiError> {
+    let request = BarsRequest {
+        symbol: symbol.to_string(),
+        interval: D.to_string(),
+        from_ms: Some(from),
+        to_ms: None,
+        limit: Some(1),
+    };
+    load_bars(memory, broker, &request, now).await.map(|_| ())
+}
+
+/// NIFTY 50 if it's listed (it trades every session), else the first stock.
 fn probe_symbol(listed: &[Listed]) -> Option<&str> {
     listed
         .iter()
@@ -205,13 +213,14 @@ fn probe_symbol(listed: &[Listed]) -> Option<&str> {
         .map(|l| l.symbol.as_str())
 }
 
-/// Whether the latest settled session was a holiday. If it was, every series that was current
-/// up to the session before is marked current through it, so the next session's quote top-up
-/// sees no gap.
-async fn holiday(research: &Database, broker: &dyn Broker, probe: &str, now: i64) -> Result<bool, ApiError> {
+/// Whether the latest settled session was a holiday. If it was, every series that was current up
+/// to the session before is marked current through it, so the next session's quote top-up sees no gap.
+async fn holiday(memory: &BarMemory, broker: &dyn Broker, probe: &str, now: i64) -> Result<bool, ApiError> {
     let session = settled_session(now);
-    let coverage = locked(research, |c| research_bars::coverage(c, probe, D))?;
-    if coverage.is_some_and(|c| c.to_ms >= last_settled_ms(now)) {
+    if memory
+        .coverage(probe, D)
+        .is_some_and(|c| c.to_ms >= last_settled_ms(now))
+    {
         return Ok(false);
     }
     let fetched = match broker.fetch(probe, D, session - 10 * DAY_MS, now).await {
@@ -225,96 +234,13 @@ async fn holiday(research: &Database, broker: &dyn Broker, probe: &str, now: i64
     if !was_holiday(&bars, session) {
         return Ok(false);
     }
-    let before = last_settled_ms(session - 1);
-    locked(research, |c| {
-        let tx = c.transaction()?;
-        let current: Vec<(String, i64)> = {
-            let mut stmt =
-                tx.prepare("SELECT symbol, to_ts FROM research_coverage WHERE interval = 'D' AND to_ts >= ?1")?;
-            let rows = stmt.query_map([before], |r| Ok((r.get(0)?, r.get(1)?)))?;
-            rows.collect::<rusqlite::Result<_>>()?
-        };
-        for (symbol, to) in current {
-            research_bars::extend_coverage(
-                &tx,
-                &symbol,
-                D,
-                Range {
-                    from_ms: to,
-                    to_ms: now,
-                },
-                now,
-            )?;
-        }
-        tx.commit()
-    })?;
+    memory.carry_daily_through(last_settled_ms(session - 1), now);
     Ok(true)
-}
-
-/// Reads a series' missing tail, starting far enough back to overlap settled days. Returns `true`
-/// when those days disagreed with the store and the series was fetched again in full instead.
-async fn refresh_tail(research: &Database, broker: &dyn Broker, symbol: &str, now: i64) -> Result<bool, ApiError> {
-    let from = history_from(now);
-    let Some(coverage) = locked(research, |c| research_bars::coverage(c, symbol, D))? else {
-        refetch(research, broker, symbol, now).await?;
-        return Ok(false);
-    };
-    for range in research_bars::plan(Some(coverage), D, from, now, now) {
-        let start = (range.from_ms - TAIL_OVERLAP_MS).max(coverage.from_ms);
-        let fetched = broker.fetch(symbol, D, start, range.to_ms).await?;
-        let mut bars = fetched.bars;
-        normalise_daily(&mut bars);
-        let stored = locked(research, |c| research_bars::get(c, symbol, D, start, range.to_ms, None))?;
-        if disagrees(&stored, &bars) {
-            refetch(research, broker, symbol, now).await?;
-            return Ok(true);
-        }
-        locked(research, |c| {
-            research_bars::put(c, symbol, D, &bars)?;
-            research_bars::extend_coverage(
-                c,
-                symbol,
-                D,
-                Range {
-                    from_ms: fetched.from_ms.max(start),
-                    to_ms: range.to_ms,
-                },
-                now,
-            )?;
-            Ok(())
-        })?;
-    }
-    Ok(false)
-}
-
-/// Fetches a series' whole stored span again and swaps it in. An empty answer is refused rather
-/// than allowed to wipe the history it would replace.
-async fn refetch(research: &Database, broker: &dyn Broker, symbol: &str, now: i64) -> Result<(), ApiError> {
-    let from = history_from(now);
-    let fetched = broker.fetch(symbol, D, from, now).await?;
-    let mut bars = fetched.bars;
-    normalise_daily(&mut bars);
-    if bars.is_empty() {
-        return Err(ApiError::new(
-            502,
-            "upstream",
-            format!("the broker returned no history for {symbol}"),
-        ));
-    }
-    let covered = Range {
-        from_ms: fetched.from_ms.max(from),
-        to_ms: now,
-    };
-    locked(research, |c| {
-        research_bars::replace(c, symbol, D, &bars, covered, now)?;
-        market_symbols::mark_refetched(c, symbol, now)
-    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::ResearchDb;
     use crate::market::ist_day_start;
     use crate::models::{Bar, DaySnapshot};
     use crate::pyapi::data::Fetched;
@@ -344,6 +270,8 @@ mod tests {
         holidays: HashSet<i64>,
         fetches: Mutex<Vec<String>>,
         fail_auth: AtomicBool,
+        /// Symbols the broker refuses outright, with no quote either.
+        refuse: HashSet<String>,
     }
 
     impl Fake {
@@ -355,6 +283,7 @@ mod tests {
                 holidays: HashSet::new(),
                 fetches: Mutex::new(Vec::new()),
                 fail_auth: AtomicBool::new(false),
+                refuse: HashSet::new(),
             }
         }
 
@@ -393,6 +322,9 @@ mod tests {
                     return Err(ApiError::new(401, "auth", "token expired"));
                 }
                 self.fetches.lock().unwrap().push(symbol.to_string());
+                if self.refuse.contains(symbol) {
+                    return Err(ApiError::new(400, "bad_request", "invalid token"));
+                }
                 let bars = self
                     .sessions(from, to)
                     .into_iter()
@@ -427,6 +359,9 @@ mod tests {
                     .iter()
                     .map(|t| {
                         let symbol = format!("{provider}:{t}");
+                        if self.refuse.contains(&symbol) {
+                            return None;
+                        }
                         let [.., prev, session] = traded.as_slice() else {
                             return None;
                         };
@@ -461,16 +396,34 @@ mod tests {
         }
     }
 
-    async fn update(research: &ResearchDb, fake: &Fake, listed: &[Listed], now: i64) -> Result<Summary, ApiError> {
-        run(&research.write, fake, listed, now, &AtomicBool::new(false), &|_| {}).await
+    struct World {
+        db: Database,
+        memory: BarMemory,
     }
 
-    fn close_on(research: &ResearchDb, symbol: &str, day: i64) -> Option<f64> {
-        let conn = research.read.conn.lock().unwrap();
-        research_bars::get(&conn, symbol, D, day, day, None)
-            .unwrap()
-            .first()
-            .map(|b| b.close)
+    fn world() -> World {
+        World {
+            db: Database::open_in_memory().unwrap(),
+            memory: BarMemory::default(),
+        }
+    }
+
+    async fn update(w: &World, fake: &Fake, listed: &[Listed], now: i64) -> Result<Summary, ApiError> {
+        run(
+            &w.db,
+            &w.memory,
+            fake,
+            listed,
+            &[],
+            now,
+            &AtomicBool::new(false),
+            &|_| {},
+        )
+        .await
+    }
+
+    fn close_on(w: &World, symbol: &str, day: i64) -> Option<f64> {
+        w.memory.get(symbol, D, day, day, None).first().map(|b| b.close)
     }
 
     const A: &str = "zerodha:NSE:AAA";
@@ -478,119 +431,156 @@ mod tests {
     const NIFTY: &str = "zerodha:NSE:NIFTY_50";
 
     #[tokio::test]
-    async fn the_first_run_downloads_five_years_and_the_next_session_is_one_quote() {
-        let research = ResearchDb::open_in_memory().unwrap();
+    async fn the_first_run_loads_five_years_into_memory_and_the_next_session_is_one_quote() {
+        let w = world();
         let fake = Fake::new(&[(A, 100.0), (B, 50.0), (NIFTY, 20000.0)], at(0, 0));
         let listed = [eq(A), eq(B), index(NIFTY)];
 
-        let first = update(&research, &fake, &listed, at(0, 17)).await.unwrap();
-        assert_eq!((first.new_listings, first.downloaded, first.failed), (3, 3, 0));
-        let c = research_bars::coverage(&research.read.conn.lock().unwrap(), A, D)
-            .unwrap()
-            .unwrap();
-        assert!(c.from_ms <= history_from(at(0, 17)));
-        assert_eq!(close_on(&research, A, at(0, 0)), Some(fake.price(A, at(0, 0))));
+        let first = update(&w, &fake, &listed, at(0, 17)).await.unwrap();
+        assert_eq!((first.new_listings, first.loaded, first.failed), (3, 3, 0));
+        assert!(w.memory.coverage(A, D).unwrap().from_ms <= history_from(at(0, 17)));
+        assert_eq!(close_on(&w, A, at(0, 0)), Some(fake.price(A, at(0, 0))));
         fake.fetched();
 
         // Tuesday evening: no history call at all, every series topped up from the quote.
         *fake.last_day.lock().unwrap() = at(1, 0);
-        let next = update(&research, &fake, &listed, at(1, 17)).await.unwrap();
-        assert_eq!((next.downloaded, next.updated, next.refetched), (0, 3, 0));
+        let next = update(&w, &fake, &listed, at(1, 17)).await.unwrap();
+        assert_eq!((next.loaded, next.updated, next.reloaded), (0, 3, 0));
         assert!(fake.fetched().is_empty(), "no probe and no per-symbol history read");
-        assert_eq!(close_on(&research, B, at(1, 0)), Some(fake.price(B, at(1, 0))));
+        assert_eq!(close_on(&w, B, at(1, 0)), Some(fake.price(B, at(1, 0))));
     }
 
     #[tokio::test]
-    async fn a_new_listing_is_downloaded_on_the_day_it_appears() {
-        let research = ResearchDb::open_in_memory().unwrap();
+    async fn the_users_own_symbols_are_read_first() {
+        let w = world();
+        let fake = Fake::new(&[(A, 100.0), (B, 50.0), (NIFTY, 20000.0)], at(0, 0));
+        let listed = [eq(A), eq(B), index(NIFTY)];
+        run(
+            &w.db,
+            &w.memory,
+            &fake,
+            &listed,
+            &[NIFTY.to_string()],
+            at(0, 17),
+            &AtomicBool::new(false),
+            &|_| {},
+        )
+        .await
+        .unwrap();
+        assert_eq!(fake.fetched(), [NIFTY, A, B]);
+    }
+
+    #[tokio::test]
+    async fn after_a_relaunch_memory_is_empty_and_everything_is_read_again() {
+        let w = world();
+        let fake = Fake::new(&[(A, 100.0)], at(0, 0));
+        update(&w, &fake, &[eq(A)], at(0, 17)).await.unwrap();
+
+        // The app closed: memory goes, the symbol list (not prices) stays.
+        let relaunched = World {
+            db: w.db,
+            memory: BarMemory::default(),
+        };
+        let again = update(&relaunched, &fake, &[eq(A)], at(0, 18)).await.unwrap();
+        assert_eq!((again.new_listings, again.loaded), (0, 1));
+    }
+
+    #[tokio::test]
+    async fn a_new_listing_is_loaded_on_the_day_it_appears() {
+        let w = world();
         let fake = Fake::new(&[(A, 100.0), (B, 50.0)], at(0, 0));
-        update(&research, &fake, &[eq(A)], at(0, 17)).await.unwrap();
+        update(&w, &fake, &[eq(A)], at(0, 17)).await.unwrap();
         fake.fetched();
 
         *fake.last_day.lock().unwrap() = at(1, 0);
-        let next = update(&research, &fake, &[eq(A), eq(B)], at(1, 17)).await.unwrap();
-        assert_eq!((next.new_listings, next.downloaded), (1, 1));
+        let next = update(&w, &fake, &[eq(A), eq(B)], at(1, 17)).await.unwrap();
+        assert_eq!((next.new_listings, next.loaded), (1, 1));
         assert!(
-            close_on(&research, B, at(-28, 0)).is_some(),
+            close_on(&w, B, at(-28, 0)).is_some(),
             "with its history, not just today"
         );
     }
 
     #[tokio::test]
-    async fn a_split_refetches_the_whole_series_instead_of_mixing_prices() {
-        let research = ResearchDb::open_in_memory().unwrap();
+    async fn a_split_reads_the_whole_series_again_instead_of_mixing_prices() {
+        let w = world();
         let fake = Fake::new(&[(A, 100.0)], at(0, 0));
-        update(&research, &fake, &[eq(A)], at(0, 17)).await.unwrap();
+        update(&w, &fake, &[eq(A)], at(0, 17)).await.unwrap();
 
         // A 1:2 split: the broker's whole history is halved from Tuesday on.
         *fake.factor.lock().unwrap() = 0.5;
         *fake.last_day.lock().unwrap() = at(1, 0);
-        let next = update(&research, &fake, &[eq(A)], at(1, 17)).await.unwrap();
-        assert_eq!(next.refetched, 1);
+        let next = update(&w, &fake, &[eq(A)], at(1, 17)).await.unwrap();
+        assert_eq!(next.reloaded, 1);
         assert_eq!(
-            close_on(&research, A, at(-28, 0)),
+            close_on(&w, A, at(-28, 0)),
             Some(fake.price(A, at(-28, 0))),
             "old prices adjusted too"
         );
-        let conn = research.read.conn.lock().unwrap();
-        assert!(market_symbols::list(&conn).unwrap()[0].refetched_at.is_some());
     }
 
     #[tokio::test]
-    async fn a_missed_week_is_read_from_history_and_checked_against_what_is_stored() {
-        let research = ResearchDb::open_in_memory().unwrap();
+    async fn a_missed_week_is_read_again_whole() {
+        let w = world();
         let fake = Fake::new(&[(A, 100.0)], at(0, 0));
-        update(&research, &fake, &[eq(A)], at(0, 17)).await.unwrap();
+        update(&w, &fake, &[eq(A)], at(0, 17)).await.unwrap();
 
-        // A week away: the quote can't fill five sessions, so the tail is read.
+        // A week left open without an update: the quote can't fill five sessions.
         *fake.last_day.lock().unwrap() = at(7, 0);
-        let next = update(&research, &fake, &[eq(A)], at(7, 17)).await.unwrap();
-        assert_eq!((next.updated, next.refetched), (1, 0));
-        assert_eq!(close_on(&research, A, at(3, 0)), Some(fake.price(A, at(3, 0))));
-
-        // The same, after a split during the week: the overlap disagrees, so it's refetched.
-        *fake.factor.lock().unwrap() = 0.5;
-        *fake.last_day.lock().unwrap() = at(14, 0);
-        let later = update(&research, &fake, &[eq(A)], at(14, 17)).await.unwrap();
-        assert_eq!(later.refetched, 1);
-        assert_eq!(close_on(&research, A, at(3, 0)), Some(fake.price(A, at(3, 0))));
+        let next = update(&w, &fake, &[eq(A)], at(7, 17)).await.unwrap();
+        assert_eq!(next.reloaded, 1);
+        assert_eq!(close_on(&w, A, at(3, 0)), Some(fake.price(A, at(3, 0))));
     }
 
     #[tokio::test]
     async fn a_holiday_is_checked_once_and_every_series_is_marked_current_through_it() {
-        let research = ResearchDb::open_in_memory().unwrap();
+        let w = world();
         let mut fake = Fake::new(&[(A, 100.0), (B, 50.0), (NIFTY, 20000.0)], at(0, 0));
         let listed = [eq(A), eq(B), index(NIFTY)];
-        update(&research, &fake, &listed, at(0, 17)).await.unwrap();
+        update(&w, &fake, &listed, at(0, 17)).await.unwrap();
 
         fake.holidays.insert(at(1, 0));
         *fake.last_day.lock().unwrap() = at(1, 0);
         fake.fetched();
-        let tuesday = update(&research, &fake, &listed, at(1, 17)).await.unwrap();
+        let tuesday = update(&w, &fake, &listed, at(1, 17)).await.unwrap();
         assert!(tuesday.holiday);
         assert_eq!(fake.fetched(), [NIFTY], "one probe, no per-symbol reads");
 
         // Wednesday's quote top-up sees no gap over the holiday.
         *fake.last_day.lock().unwrap() = at(2, 0);
-        let wednesday = update(&research, &fake, &listed, at(2, 17)).await.unwrap();
+        let wednesday = update(&w, &fake, &listed, at(2, 17)).await.unwrap();
         assert_eq!(
-            (wednesday.updated, wednesday.refetched, wednesday.holiday),
+            (wednesday.updated, wednesday.reloaded, wednesday.holiday),
             (3, 0, false)
         );
         assert!(fake.fetched().is_empty());
     }
 
     #[tokio::test]
+    async fn a_symbol_the_broker_refuses_is_counted_once_and_not_asked_again() {
+        let w = world();
+        // Listed, but the broker refuses it (as Kite does an instrument it no longer serves).
+        let mut fake = Fake::new(&[(A, 100.0)], at(0, 0));
+        fake.refuse.insert("zerodha:NSE:GONE".to_string());
+        let s = update(&w, &fake, &[eq(A), eq("zerodha:NSE:GONE")], at(0, 17))
+            .await
+            .unwrap();
+        assert_eq!((s.loaded, s.failed, s.reloaded), (1, 1, 0));
+        let asked = fake.fetched();
+        assert_eq!(asked.iter().filter(|f| *f == "zerodha:NSE:GONE").count(), 1);
+    }
+
+    #[tokio::test]
     async fn a_lapsed_login_stops_the_run_and_a_stop_is_honoured() {
-        let research = ResearchDb::open_in_memory().unwrap();
+        let w = world();
         let fake = Fake::new(&[(A, 100.0), (B, 50.0)], at(0, 0));
         fake.fail_auth.store(true, Ordering::SeqCst);
-        let err = update(&research, &fake, &[eq(A), eq(B)], at(0, 17)).await.unwrap_err();
+        let err = update(&w, &fake, &[eq(A), eq(B)], at(0, 17)).await.unwrap_err();
         assert_eq!(err.code, "auth");
 
         fake.fail_auth.store(false, Ordering::SeqCst);
         let stop = AtomicBool::new(true);
-        let err = run(&research.write, &fake, &[eq(A)], at(0, 17), &stop, &|_| {})
+        let err = run(&w.db, &w.memory, &fake, &[eq(A)], &[], at(0, 17), &stop, &|_| {})
             .await
             .unwrap_err();
         assert_eq!(err.code, "cancelled");

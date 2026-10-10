@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   errorMessage,
-  marketDataDownload,
-  marketDataSetAuto,
+  marketDataLoadNow,
+  marketDataSetKeepLoaded,
   marketDataStatus,
   marketDataStop,
-  marketDataUpdateNow,
   type MarketDataFinished,
   type MarketDataProgress,
   type MarketDataStatus,
 } from '../../lib/ipc';
+import { describeSummary } from '../../lib/marketData';
 import { subscribe } from '../../python/events';
 
-/** The market-data store's status, kept live from its progress and finished events. `notice` is
- *  what the last run (or a refused start) had to say. */
+/** "Keep the market loaded": its status, kept live from its progress and finished events. `notice`
+ *  is what the last load (or a refused start) had to say. */
 export function useMarketData() {
   const [status, setStatus] = useState<MarketDataStatus | null>(null);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
@@ -26,7 +26,7 @@ export function useMarketData() {
       setStatus((s) => (s?.running ? { ...s, running: { ...s.running, progress } } : s)),
     );
     const offFinished = subscribe<MarketDataFinished>('market-data-finished', (f) => {
-      setNotice(f.error ? { text: f.error, error: true } : null);
+      setNotice(f.error ? { text: f.error, error: true } : f.summary ? { text: describeSummary(f.summary), error: false } : null);
       void reload();
     });
     return () => {
@@ -51,9 +51,8 @@ export function useMarketData() {
   return {
     status,
     notice,
-    download: () => act(marketDataDownload),
-    updateNow: () => act(marketDataUpdateNow),
+    loadNow: () => act(marketDataLoadNow),
     stop: () => act(marketDataStop),
-    setAuto: (on: boolean) => act(() => marketDataSetAuto(on)),
+    setKeepLoaded: (on: boolean) => act(() => marketDataSetKeepLoaded(on)),
   };
 }

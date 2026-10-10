@@ -298,5 +298,222 @@ class RunTests(Case):
         self.assertNotIn("Traceback", err.getvalue())
 
 
+# ---- The quote pre-filter ---------------------------------------------------------------------
+
+
+def quotes_of(series, session="2025-06-30"):
+    """What `/v1/snapshot` answers for `series` ({symbol: frame}): each symbol's last bar as today's
+    quote, traded on that bar's own day, with the bar before as its previous close."""
+
+    def answer(payload):
+        rows = []
+        for symbol in payload["symbols"]:
+            frame = series.get(symbol)
+            if frame is None or len(frame) < 2:
+                rows.append({"symbol": symbol, "open": None, "high": None, "low": None, "last": None,
+                             "previousClose": None, "volume": None, "tradedAt": None})
+                continue
+            last, prev = frame.iloc[-1], frame.iloc[-2]
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "open": float(last["open"]),
+                    "high": float(last["high"]),
+                    "low": float(last["low"]),
+                    "last": float(last["close"]),
+                    "previousClose": float(prev["close"]),
+                    "volume": float(last["volume"]),
+                    "tradedAt": ms(f"{frame.index[-1]:%Y-%m-%d} 15:29"),
+                }
+            )
+        return 200, {"sessionDay": ms(session) if session else None, "snapshots": rows}
+
+    return answer
+
+
+class SnapshotRuleTests(unittest.TestCase):
+    def test_only_filters_a_quote_decides_exactly_qualify(self):
+        decidable = [
+            {"left": "close", "op": ">", "right": 100},
+            {"left": "return_1d", "op": ">", "right": 0.03},
+            {"left": "gap", "op": "between", "right": [0.01, 0.05]},
+            {"left": "volume", "op": ">", "right": "open"},
+            {"left": "close", "op": "crosses_above", "right": 150},
+        ]
+        not_decidable = [
+            {"left": "close", "op": ">", "right": "ema_50"},
+            {"left": "return_5", "op": ">", "right": 0.1},
+            {"left": "close@W", "op": ">", "right": 100},
+            # Yesterday's volume isn't in a quote, so it can't say whether volume *crossed*.
+            {"left": "volume", "op": "crosses_above", "right": 1e6},
+            {"left": "return_1", "op": "crosses_above", "right": 0},
+        ]
+        for c in decidable:
+            self.assertTrue(screen.snapshot_decidable(feat.parse_condition(c)), c)
+        for c in not_decidable:
+            self.assertFalse(screen.snapshot_decidable(feat.parse_condition(c)), c)
+
+    def test_a_quote_from_another_session_or_without_a_previous_close_is_left_to_history(self):
+        session = pd.Timestamp("2025-06-30", tz="Asia/Kolkata")
+        quotes = pd.DataFrame(
+            {
+                "open": [10.0, 20.0, 30.0],
+                "high": [11.0, 21.0, 31.0],
+                "low": [9.0, 19.0, 29.0],
+                "close": [10.5, 20.5, 30.5],
+                "previous_close": [10.0, float("nan"), 30.0],
+                "volume": [1.0, 2.0, 3.0],
+                "traded": pd.to_datetime(["2025-06-30 15:29", "2025-06-30 15:29", "2025-06-20 15:29"]).tz_localize("Asia/Kolkata"),
+            },
+            index=["zerodha:NSE:A", "zerodha:NSE:NOPREV", "zerodha:NSE:SUSPENDED"],
+        )
+        quotes.attrs["session"] = session
+        frames = screen.snapshot_frames(quotes)
+        self.assertEqual(list(frames), ["zerodha:NSE:A"])
+        self.assertEqual(list(frames["zerodha:NSE:A"]["close"]), [10.0, 10.5])
+        self.assertEqual(frames["zerodha:NSE:A"].index[-1], pd.Timestamp("2025-06-30"))
+        quotes.attrs["session"] = None
+        self.assertEqual(screen.snapshot_frames(quotes), {}, "pre-open: no quote is a day's bar")
+
+
+def random_series(seed: int, n_symbols: int = 14) -> dict:
+    """Random daily bars for a universe, ending together on DAYS[-1]: random walks with gaps and
+    volumes that vary, so quote filters split the universe a different way each time."""
+    rng = np.random.default_rng(seed)
+    out = {}
+    for i in range(n_symbols):
+        n = len(DAYS) if i % 7 else len(DAYS) - 30  # one in seven stopped trading a while ago
+        close = 100 * np.exp(np.cumsum(rng.normal(0, 0.02, n)))
+        opened = np.concatenate([[close[0]], close[:-1]]) * np.exp(rng.normal(0, 0.01, n))
+        out[f"zerodha:NSE:S{i:02d}"] = pd.DataFrame(
+            {
+                "open": opened,
+                "high": np.maximum(opened, close) * 1.01,
+                "low": np.minimum(opened, close) * 0.99,
+                "close": close,
+                "volume": rng.integers(1_000, 100_000, n).astype(float),
+            },
+            index=DAYS[:n],
+        )
+    return out
+
+
+def frame_body(symbol, frame):
+    return {
+        "symbol": symbol,
+        "interval": "D",
+        "timezone": "Asia/Kolkata",
+        "count": len(frame),
+        "t": [ms(f"{d:%Y-%m-%d}") for d in frame.index],
+        "o": list(frame["open"]),
+        "h": list(frame["high"]),
+        "l": list(frame["low"]),
+        "c": list(frame["close"]),
+        "v": list(frame["volume"]),
+        "coveredFrom": ms(f"{frame.index[0]:%Y-%m-%d}"),
+        "coveredTo": ms(f"{frame.index[-1]:%Y-%m-%d}"),
+        "limitedFrom": None,
+    }
+
+
+QUICK = [
+    lambda r: {"left": "close", "op": ">", "right": float(r.uniform(60, 160))},
+    lambda r: {"left": "return_1", "op": ">", "right": float(r.uniform(-0.02, 0.02))},
+    lambda r: {"left": "change_1", "op": "<", "right": float(r.uniform(-1, 1))},
+    lambda r: {"left": "gap", "op": "between", "right": [float(r.uniform(-0.02, 0)), float(r.uniform(0, 0.02))]},
+    lambda r: {"left": "gap_up", "op": ">", "right": 0},
+    lambda r: {"left": "volume", "op": ">", "right": float(r.uniform(10_000, 90_000))},
+    lambda r: {"left": "close", "op": ">", "right": "open"},
+    lambda r: {"left": "high", "op": "<", "right": float(r.uniform(80, 200))},
+    lambda r: {"left": "close", "op": "crosses_above", "right": float(r.uniform(80, 140))},
+]
+SLOW = [
+    lambda r: {"left": "close", "op": ">", "right": "sma_20"},
+    lambda r: {"left": "rsi_14", "op": "<", "right": float(r.uniform(40, 80))},
+    lambda r: {"left": "return_5", "op": ">", "right": float(r.uniform(-0.05, 0.05))},
+    lambda r: {"left": "volume", "op": "crosses_above", "right": float(r.uniform(20_000, 80_000))},
+]
+
+
+class PrefilterTests(Case):
+    """The pre-filter only saves work: a run with it and one without give exactly the same screen."""
+
+    run_id = None
+
+    def setUp(self):
+        super().setUp()
+        self.series = {}
+        self.stub.routes.update(
+            {
+                "/v1/ping": lambda q: (200, {"ok": True, "api": 1, "app": "9.9.9"}),
+                "/v1/bars": lambda q: (200, frame_body(q["symbol"], self.series[q["symbol"]]))
+                if q["symbol"] in self.series
+                else (404, {"error": {"code": "not_found", "message": "unknown symbol"}}),
+            }
+        )
+        self.stub.posts.update(
+            {
+                "/v1/snapshot": lambda p: quotes_of(self.series)(p),
+                "/v1/bars/sync": sync_route,
+            }
+        )
+
+    def run_both(self, spec_):
+        spec_ = {**spec_, "universe": {"source": "symbols", "symbols": list(self.series)}}
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            fast = screen.Screen(spec_).run(today=TODAY)
+            os.environ["PROTRADE_NO_SNAPSHOT"] = "1"
+            try:
+                full = screen.Screen(spec_).run(today=TODAY)
+            finally:
+                os.environ.pop("PROTRADE_NO_SNAPSHOT")
+        return fast, full
+
+    def test_random_screens_match_exactly_with_and_without_the_prefilter(self):
+        rng = np.random.default_rng(7)
+        used = 0
+        for trial in range(40):
+            self.series = random_series(1000 + trial)
+            filters = [QUICK[i](rng) for i in rng.choice(len(QUICK), size=rng.integers(1, 3), replace=False)]
+            filters += [SLOW[i](rng) for i in rng.choice(len(SLOW), size=rng.integers(0, 3), replace=False)]
+            columns = ["close", "return_1"] if trial % 2 else ["close", "rsi_14"]
+            fast, full = self.run_both(spec(filters=filters, columns=columns, sort=None))
+            self.assertEqual(fast["rows"], full["rows"], f"trial {trial}: {filters}")
+            for key in ("matched", "symbols_requested", "symbols_loaded", "symbols_failed", "symbols_stale", "as_of"):
+                self.assertEqual(fast["meta"][key], full["meta"][key], f"trial {trial} {key}: {filters}")
+            self.assertEqual(full["meta"]["prefiltered"], 0)
+            used += fast["meta"]["prefiltered"] > 0
+        self.assertGreater(used, 20, "most trials ruled stocks out on the quote")
+
+    def test_a_screen_the_quote_decides_reads_no_history_for_the_stocks_it_judged(self):
+        self.series = random_series(3)
+        self.stub.requests.clear()
+        fast, full = self.run_both(spec(filters=[{"left": "return_1", "op": ">", "right": 0}], columns=["close"], sort=None))
+        self.assertEqual(fast["rows"], full["rows"])
+        fetched = {r["query"]["symbol"] for r in self.stub.requests if r["path"] == "/v1/bars"}
+        # Only the symbol whose last quote isn't this session's was read in full in the fast run, and
+        # every symbol in the full one.
+        stopped = {s for s, f in self.series.items() if f.index[-1] != DAYS[-1]}
+        self.assertEqual(len(self.stub.posted("/v1/snapshot")), 1)
+        self.assertTrue(stopped <= fetched)
+        self.assertIn("prefiltered", {w["code"] for w in fast["warnings"]})
+
+    def test_before_the_open_or_without_the_route_nothing_is_ruled_out(self):
+        self.series = random_series(5)
+        filters = [{"left": "return_1", "op": ">", "right": 0}]
+        for answer in (quotes_of(self.series, session=None), lambda p: (404, {"error": {"code": "not_found", "message": "no"}})):
+            self.stub.posts["/v1/snapshot"] = answer
+            fast, full = self.run_both(spec(filters=filters, columns=["close"], sort=None))
+            self.assertEqual(fast["meta"]["prefiltered"], 0)
+            self.assertEqual(fast["rows"], full["rows"])
+
+    def test_when_the_quote_rules_everything_out_the_screen_is_empty_not_an_error(self):
+        self.series = random_series(9)
+        fast, _ = self.run_both(spec(filters=[{"left": "close", "op": ">", "right": 1e9}], columns=["close"], sort=None))
+        self.assertEqual(fast["rows"], [])
+        self.assertEqual(fast["meta"]["matched"], 0)
+        self.assertEqual(fast["meta"]["as_of"], f"{DAYS[-1]:%Y-%m-%d}")
+
+
 if __name__ == "__main__":
     unittest.main()

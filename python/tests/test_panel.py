@@ -90,5 +90,34 @@ class PanelTests(Case):
             pt.panel([A], bars=0)
 
 
+
+class SnapshotTests(Case):
+    def test_a_snapshot_is_one_row_per_symbol_with_its_session(self):
+        self.stub.posts["/v1/snapshot"] = lambda p: (
+            200,
+            {
+                "sessionDay": ms("2026-10-09"),
+                "snapshots": [
+                    {"symbol": A, "open": 10.0, "high": 12.0, "low": 9.5, "last": 11.0, "previousClose": 10.2,
+                     "volume": 500.0, "tradedAt": ms("2026-10-09 15:29")},
+                    {"symbol": B, "open": None, "high": None, "low": None, "last": None, "previousClose": None,
+                     "volume": None, "tradedAt": None},
+                ],
+            },
+        )
+        got = pt.snapshot([A, B, A])
+        self.assertEqual(self.stub.posted("/v1/snapshot"), [{"symbols": [A, B]}], "each symbol once")
+        self.assertEqual(list(got.index), [A, B])
+        self.assertEqual(list(got.columns), ["open", "high", "low", "close", "previous_close", "volume", "traded"])
+        self.assertEqual((got.loc[A, "close"], got.loc[A, "previous_close"]), (11.0, 10.2))
+        self.assertEqual(got.loc[A, "traded"], pd.Timestamp("2026-10-09 15:29", tz="Asia/Kolkata"))
+        self.assertTrue(math.isnan(got.loc[B, "close"]) and pd.isna(got.loc[B, "traded"]))
+        self.assertEqual(got.attrs["session"], pd.Timestamp("2026-10-09", tz="Asia/Kolkata"))
+
+    def test_before_the_open_there_is_no_session(self):
+        self.stub.posts["/v1/snapshot"] = lambda p: (200, {"sessionDay": None, "snapshots": []})
+        self.assertIsNone(pt.snapshot([A]).attrs["session"])
+
+
 if __name__ == "__main__":
     unittest.main()

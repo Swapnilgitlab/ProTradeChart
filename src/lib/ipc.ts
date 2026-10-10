@@ -497,7 +497,7 @@ export const runPythonScript = (name: string, runId: string) => invoke<void>('py
 
 export const stopPythonRun = (runId: string) => invoke<void>('python_stop', { runId });
 
-/** How much market data scripts have caused the app to keep. */
+/** How much market data the app holds in memory this session, for scripts, the Screener and Studies. */
 export const pythonResearchStats = () => invoke<ResearchStats>('python_research_stats');
 
 /** Forgets it all; resolves with how many bars went. */
@@ -663,9 +663,9 @@ export const getScreenerResult = (id: string) => invoke<string | null>('get_scre
 /** Starts the Python engine on a screen. Its progress, result and exit arrive as `python-*` events for `runId`. */
 export const runScreen = (specJson: string, runId: string) => invoke<void>('screen_run', { specJson, runId });
 
-// ---- Market data (the local store of every NSE stock's daily history) ---------------
+// ---- Market data ("Keep the market loaded": every NSE stock's daily history, in memory) ------
 
-export type MarketDataTrigger = 'download' | 'update' | 'automatic';
+export type MarketDataTrigger = 'load' | 'automatic';
 export type MarketDataPhase = 'history' | 'prices' | 'corrections';
 
 export interface MarketDataProgress {
@@ -677,21 +677,23 @@ export interface MarketDataProgress {
 export interface MarketDataSummary {
   listed: number;
   newListings: number;
-  downloaded: number;
+  /** Series whose history was read into memory. */
+  loaded: number;
   updated: number;
-  refetched: number;
+  /** Series the quote couldn't update, read again whole (after a split or bonus, say). */
+  reloaded: number;
   failed: number;
   holiday: boolean;
 }
 
 export interface MarketDataStatus {
-  /** The broker the history comes from; null until the download has been started. */
-  provider: 'zerodha' | null;
-  autoUpdate: boolean;
+  keepLoaded: boolean;
   running: { trigger: MarketDataTrigger; startedAt: number; progress: MarketDataProgress | null } | null;
+  /** This session's last finished load; null after a launch until one finishes. */
   lastUpdate: number | null;
   lastFailure: number | null;
   lastError: string | null;
+  /** `symbols` the market lists, `series` of them loaded, and the span they reach. */
   holdings: { symbols: number; series: number; fromMs: number | null; toMs: number | null };
 }
 
@@ -703,14 +705,13 @@ export interface MarketDataFinished {
 
 export const marketDataStatus = () => invoke<MarketDataStatus>('market_data_status');
 
-/** Starts (or resumes) the five-year download. Only its button calls this. */
-export const marketDataDownload = () => invoke<void>('market_data_download');
-
-export const marketDataUpdateNow = () => invoke<void>('market_data_update_now');
+/** Loads the market into memory now, or brings it up to date. Only its button calls this. */
+export const marketDataLoadNow = () => invoke<void>('market_data_load_now');
 
 export const marketDataStop = () => invoke<void>('market_data_stop');
 
-export const marketDataSetAuto = (on: boolean) => invoke<void>('market_data_set_auto', { on });
+/** Switches "Keep the market loaded" on (and starts loading) or off (and stops a load). */
+export const marketDataSetKeepLoaded = (on: boolean) => invoke<void>('market_data_set_keep_loaded', { on });
 
 // ---- Research Notebooks -------------------------------------------------------
 

@@ -45,6 +45,15 @@ export function progressPercent(received: number, total: number | null): number 
   return Math.min(100, Math.round((received / total) * 100));
 }
 
+/** Whether a failed check means the server answered but had no release to give: a 404, which is
+ *  what GitHub says while no release is published (the newest is still a draft, or the repository
+ *  is private). Nothing newer can be installed then, so a check that ends this way finds the app
+ *  up to date. A failed download is never this: there, a 404 is a real failure. */
+export function isNoRelease(error: unknown): boolean {
+  const raw = error instanceof Error ? error.message : String(error);
+  return /release json|404|not found/i.test(raw);
+}
+
 /** What to tell the user about a failure. The plugin's own messages are terse and
  *  technical, so the common causes get plain wording and the rest keep the detail. */
 export function describeUpdateError(error: unknown, during: 'check' | 'install'): string {
@@ -103,7 +112,10 @@ export class Updater {
         this.set({ kind: 'current' });
       }
     } catch (error) {
-      if (quiet) this.set(before);
+      if (isNoRelease(error)) {
+        this.offer = null;
+        this.set({ kind: 'current' });
+      } else if (quiet) this.set(before);
       else this.set({ kind: 'error', during: 'check', message: describeUpdateError(error, 'check') });
     }
   }

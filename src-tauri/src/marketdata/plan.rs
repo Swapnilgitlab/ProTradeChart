@@ -1,6 +1,6 @@
-//! The market-data store's rules, with no I/O and no clock: what the store holds, when the
-//! daily update is due, and how a corporate action or a holiday is recognised. Times are IST
-//! through `market.rs`; there is no holiday list.
+//! The rules of "Keep the market loaded", with no I/O and no clock: what it reads into memory,
+//! when the daily update is due, and how a holiday is recognised. Times are IST through
+//! `market.rs`; there is no holiday list.
 
 use crate::market::{ist_day_start, last_settled_ms};
 use crate::models::Bar;
@@ -12,7 +12,7 @@ use crate::store::study_universe::pick_listings;
 const DAY_MS: i64 = 86_400_000;
 const HOUR_MS: i64 = 3_600_000;
 
-/// How far back the store keeps daily history.
+/// How far back daily history is read: more than the deepest screen asks for.
 pub const HISTORY_DAYS: i64 = 5 * 365 + 2;
 /// A coverage that starts this close after [`history_from`] is complete: the target moves forward
 /// a day at a time, and a broker's window can start a little late.
@@ -20,15 +20,11 @@ const HISTORY_SLACK_MS: i64 = 7 * DAY_MS;
 /// After a failed update (a lapsed login, the broker down), the automatic one waits this long
 /// before trying again. "Update now" doesn't wait.
 pub const RETRY_AFTER_FAILURE_MS: i64 = HOUR_MS;
-/// A tail refresh reads this far back, so it overlaps days that have certainly settled: a
-/// stored close that disagrees with the broker's there is a corporate action, not a bar that
-/// was still forming when it was stored.
-pub const TAIL_OVERLAP_MS: i64 = 7 * DAY_MS;
 /// The daily update refreshes the instrument list when it is older than this, so a new listing
 /// is found the day after it appears (startup alone refreshes it weekly).
 pub const INSTRUMENTS_MAX_AGE_MS: i64 = 20 * HOUR_MS;
 
-/// The start of the stored history, as of `now`.
+/// The start of the history read into memory, as of `now`.
 pub fn history_from(now: i64) -> i64 {
     ist_day_start(now - HISTORY_DAYS * DAY_MS)
 }
@@ -38,7 +34,7 @@ pub fn needs_history(coverage: Option<Coverage>, from: i64) -> bool {
     coverage.is_none_or(|c| c.from_ms > from + HISTORY_SLACK_MS)
 }
 
-/// What the store keeps for `provider`: one listing per company among its NSE EQ-series stocks
+/// What is kept loaded for `provider`: one listing per company among its NSE EQ-series stocks
 /// (the Studies' rule, `study_universe::pick_listings`), then every NSE index.
 pub fn universe(
     provider: &str,
@@ -74,27 +70,6 @@ pub fn due(now: i64, last_update: Option<i64>, last_failure: Option<i64>) -> boo
         }
     }
     last_ok < last_settled_ms(now)
-}
-
-/// The tolerance a stored close may differ from the broker's by and still be the same price:
-/// a tick, or a basis point of the price, whichever is larger (as `day_topup` judges it).
-fn same_price(a: f64, b: f64) -> bool {
-    (a - b).abs() <= (a.abs() * 1e-4).max(0.011)
-}
-
-/// Whether the broker's bars disagree with the stored ones on a day both have, other than the
-/// newest stored day (which may have been stored while it was still forming). A disagreement
-/// means the broker has adjusted its history (a split, a bonus) and the stored series must be
-/// fetched again in full: mixing the two would put an artificial jump in it.
-pub fn disagrees(stored: &[Bar], fetched: &[Bar]) -> bool {
-    let Some(newest) = stored.last().map(|b| b.time) else {
-        return false;
-    };
-    stored.iter().filter(|s| s.time < newest).any(|s| {
-        fetched
-            .iter()
-            .any(|f| f.time == s.time && !same_price(f.close, s.close))
-    })
 }
 
 /// The session the last settlement before `now` belongs to (midnight IST of that day).
@@ -218,37 +193,6 @@ mod tests {
         assert!(due(at(0, 17, 6), Some(friday), Some(failed)));
         // An old failure, followed by a success, doesn't hold anything back.
         assert!(due(at(0, 16, 1), Some(friday), Some(at(-4, 17, 0))));
-    }
-
-    #[test]
-    fn a_split_shows_as_a_disagreement_on_an_older_day() {
-        let stored = [
-            bar(at(-3, 0, 0), 200.0),
-            bar(at(-2, 0, 0), 202.0),
-            bar(at(-1, 0, 0), 204.0),
-        ];
-        let same = [
-            bar(at(-3, 0, 0), 200.0),
-            bar(at(-2, 0, 0), 202.005),
-            bar(at(-1, 0, 0), 204.0),
-        ];
-        assert!(!disagrees(&stored, &same), "within a tick");
-        let halved = [
-            bar(at(-3, 0, 0), 100.0),
-            bar(at(-2, 0, 0), 101.0),
-            bar(at(-1, 0, 0), 102.0),
-            bar(at(0, 0, 0), 103.0),
-        ];
-        assert!(disagrees(&stored, &halved));
-    }
-
-    #[test]
-    fn the_newest_stored_day_may_change_without_being_a_corporate_action() {
-        // Stored at noon while forming; the settled close is different.
-        let stored = [bar(at(-1, 0, 0), 100.0), bar(at(0, 0, 0), 101.0)];
-        let fetched = [bar(at(-1, 0, 0), 100.0), bar(at(0, 0, 0), 105.0)];
-        assert!(!disagrees(&stored, &fetched));
-        assert!(!disagrees(&[], &fetched));
     }
 
     #[test]

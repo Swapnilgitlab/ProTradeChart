@@ -1,4 +1,4 @@
-//! The market-data store's own list of symbols (`market_symbols`). The brokers' instrument
+//! The list of symbols "Keep the market loaded" covers (`market_symbols`): names, never prices. The brokers' instrument
 //! tables are replaced on every refresh, so they can't say what is *new*; this list keeps every
 //! symbol it has seen, which is how a new listing (an IPO) is found, and when it was last listed.
 
@@ -63,15 +63,6 @@ pub fn list(conn: &Connection) -> rusqlite::Result<Vec<MarketSymbol>> {
     rows.collect()
 }
 
-/// Notes that a symbol's whole history was fetched again (after a corporate action).
-pub fn mark_refetched(conn: &Connection, symbol: &str, now: i64) -> rusqlite::Result<()> {
-    conn.execute(
-        "UPDATE market_symbols SET refetched_at = ?2 WHERE symbol = ?1",
-        params![symbol, now],
-    )?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,14 +92,5 @@ mod tests {
         let b = all.iter().find(|s| s.symbol == "zerodha:NSE:B").unwrap();
         assert_eq!((a.first_seen, a.last_seen), (100, 100));
         assert_eq!((b.first_seen, b.last_seen), (100, 200));
-    }
-
-    #[test]
-    fn a_refetch_is_noted() {
-        let db = Database::open_in_memory().unwrap();
-        let mut conn = db.conn.lock().unwrap();
-        record_listing(&mut conn, &[eq("zerodha:NSE:A")], 100).unwrap();
-        mark_refetched(&conn, "zerodha:NSE:A", 150).unwrap();
-        assert_eq!(list(&conn).unwrap()[0].refetched_at, Some(150));
     }
 }

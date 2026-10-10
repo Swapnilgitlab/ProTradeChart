@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import cases from './fixtures/screen-cases.json';
 import { fromPreset, PRESETS } from './presets';
-import { historyBars, loadFrom, normalizeScreen, outputColumns, screenProblem } from './spec';
+import { historyBars, loadFrom, normalizeScreen, outputColumns, quoteUse, screenProblem, snapshotDecidable } from './spec';
+import type { Condition } from '../studies/spec';
 
 /** The placeholders screen-cases.json uses for lists too long to write out (test_screen.py expands them the same way). */
 function expand(value: unknown): unknown {
@@ -54,5 +55,36 @@ describe('a screen', () => {
 
   it('an unknown preset falls back to a blank screen', () => {
     expect(fromPreset('nope').filters).toEqual([]);
+  });
+});
+
+describe('snapshotDecidable', () => {
+  // The same cases as SnapshotRuleTests in python/tests/test_screen.py.
+  it('qualifies only filters today’s quote decides exactly', () => {
+    const yes: Condition[] = [
+      { left: 'close', op: '>', right: 100 },
+      { left: 'return_1d', op: '>', right: 0.03 },
+      { left: 'gap', op: 'between', right: [0.01, 0.05] },
+      { left: 'volume', op: '>', right: 'open' },
+      { left: 'close', op: 'crosses_above', right: 150 },
+    ];
+    const no: Condition[] = [
+      { left: 'close', op: '>', right: 'ema_50' },
+      { left: 'return_5', op: '>', right: 0.1 },
+      { left: 'close@W', op: '>', right: 100 },
+      { left: 'volume', op: 'crosses_above', right: 1e6 },
+      { left: 'return_1', op: 'crosses_above', right: 0 },
+    ];
+    for (const c of yes) expect(snapshotDecidable(c), JSON.stringify(c)).toBe(true);
+    for (const c of no) expect(snapshotDecidable(c), JSON.stringify(c)).toBe(false);
+  });
+
+  it('says how much of a screen the quote decides', () => {
+    const quick: Condition = { left: 'return_1', op: '>', right: 0.03 };
+    const slow: Condition = { left: 'close', op: '>', right: 'sma_200' };
+    expect(quoteUse({ filters: [quick], columns: ['close', 'gap'] })).toBe('all');
+    expect(quoteUse({ filters: [quick], columns: ['rsi_14'] })).toBe('some');
+    expect(quoteUse({ filters: [quick, slow], columns: [] })).toBe('some');
+    expect(quoteUse({ filters: [slow], columns: ['close'] })).toBe('none');
   });
 });

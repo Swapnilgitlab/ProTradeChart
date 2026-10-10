@@ -153,10 +153,14 @@ pub struct StudyEstimate {
     pub listings_skipped: usize,
 }
 
-/// How many symbols a Study would load, how many are already stored, and roughly how long the rest
-/// take at the broker's pace. Reads only the database; asks no broker.
+/// How many symbols a Study would load, how many are already in memory, and roughly how long the rest
+/// take at the broker's pace. Reads only the instrument list and memory; asks no broker.
 #[tauri::command(async)]
-pub fn study_estimate(request: EstimateRequest, db: State<Database>) -> Result<StudyEstimate, String> {
+pub fn study_estimate(
+    request: EstimateRequest,
+    db: State<Database>,
+    memory: State<crate::store::bar_memory::BarMemory>,
+) -> Result<StudyEstimate, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let (mut symbols, skipped) = match request.symbols {
         Some(list) => {
@@ -195,7 +199,7 @@ pub fn study_estimate(request: EstimateRequest, db: State<Database>) -> Result<S
         crate::zerodha::client::Pacing::default().quote_gap,
     );
     let e = study_universe::estimate(
-        &conn,
+        &memory,
         &symbols,
         request.from_ms,
         crate::db::now_ms(),
@@ -203,8 +207,7 @@ pub fn study_estimate(request: EstimateRequest, db: State<Database>) -> Result<S
         gap.as_millis() as u64,
         quote_batch,
         quote_gap.as_millis() as u64,
-    )
-    .map_err(|e| e.to_string())?;
+    );
     Ok(StudyEstimate {
         symbols: e.symbols,
         stored: e.stored,

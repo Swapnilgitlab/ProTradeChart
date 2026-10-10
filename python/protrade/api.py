@@ -142,13 +142,14 @@ def bars(symbol: str, interval: str = "D", start=None, end=None, limit: int | No
 
 
 def panel(symbols, start=None, end=None, bars: int | None = None) -> _panel.Panel:
-    """Daily bars for many symbols at once, from the app's market-data store.
+    """Daily bars for many symbols at once, from what the app holds in memory.
 
-    The store holds five years of every NSE stock and index once its market data has been
-    downloaded (Data providers → Market data), so this answers a whole market in about a second
-    and never waits on the broker. ``start``/``end`` limit the dates; ``bars`` keeps the newest
-    that many per symbol. A symbol the store doesn't hold up to the latest session is listed in
-    ``result.missing`` (read those with :func:`bars`); :func:`bars_many` does that for you.
+    With "Keep the market loaded" on (Data providers → Market data), the app holds five years of
+    every NSE stock and index while it is open, so this answers a whole market in about a second
+    and never waits on the broker. Nothing is kept on disk: after the app restarts, the market is
+    read again. ``start``/``end`` limit the dates; ``bars`` keeps the newest that many per symbol.
+    A symbol the app doesn't hold up to the latest session is listed in ``result.missing`` (read
+    those with :func:`bars`); :func:`bars_many` does that for you.
 
     ``result.frame(symbol)`` is one symbol's DataFrame, as :func:`bars` gives it;
     ``result.wide("close")`` is a dates × symbols table.
@@ -170,8 +171,8 @@ _PANEL_BATCH = 5_000
 
 
 def _from_panel(symbols, start, end, limit, tz=None, naive=False) -> tuple[dict, list]:
-    """The daily frames the store already holds, and the symbols it doesn't. An app without the
-    store (or a store that can't be read) answers nothing, and every symbol is fetched as before."""
+    """The daily frames the app already holds, and the symbols it doesn't. An app that can't answer
+    a panel answers nothing, and every symbol is fetched as before."""
     if not symbols:
         return {}, []
     try:
@@ -182,6 +183,48 @@ def _from_panel(symbols, start, end, limit, tz=None, naive=False) -> tuple[dict,
         return {}, list(symbols)
     held = stored.held
     return {s: stored.frame(s, tz=tz, naive=naive) for s in held}, stored.missing
+
+
+def snapshot(symbols) -> pd.DataFrame:
+    """Today's quote for many symbols at once: one row per symbol (indexed by symbol, in the order
+    given) with ``open high low close previous_close volume`` and when it last ``traded``.
+
+    It comes from the broker's batched quote, all of NSE in a few seconds where history costs a
+    request per symbol, so it is the quick way to find the stocks worth reading :func:`bars` for.
+    ``close`` is the last traded price (the day's close once the session has settled). A symbol
+    the broker had no quote for has NaN prices.
+
+    ``result.attrs["session"]`` is the trading day the quotes speak for (a Timestamp at IST
+    midnight), or ``None`` in the pre-open window (09:00 to 09:15 IST), when a quote is an
+    indicative price rather than the day's bar. A row whose ``traded`` falls on another day is an
+    earlier session's quote (a suspended stock), not today's.
+    """
+    symbols = list(dict.fromkeys(symbols))
+    rows, session = [], None
+    for i in range(0, len(symbols), _SNAPSHOT_BATCH):
+        answer = client.post("/v1/snapshot", {"symbols": symbols[i : i + _SNAPSHOT_BATCH]})
+        session = answer.get("sessionDay")
+        rows.extend(answer.get("snapshots", []))
+    nan = float("nan")
+    frame = pd.DataFrame(
+        {
+            "open": [nan if r.get("open") is None else r["open"] for r in rows],
+            "high": [nan if r.get("high") is None else r["high"] for r in rows],
+            "low": [nan if r.get("low") is None else r["low"] for r in rows],
+            "close": [nan if r.get("last") is None else r["last"] for r in rows],
+            "previous_close": [nan if r.get("previousClose") is None else r["previousClose"] for r in rows],
+            "volume": [nan if r.get("volume") is None else r["volume"] for r in rows],
+        },
+        index=pd.Index([r["symbol"] for r in rows], name="symbol"),
+    )
+    traded = pd.to_datetime(pd.Series([r.get("tradedAt") for r in rows], dtype="float64"), unit="ms", utc=True)
+    frame["traded"] = traded.dt.tz_convert(frames.MARKET_TZ).array
+    frame.attrs["session"] = frames.from_millis(session) if session is not None else None
+    return frame
+
+
+# Keep at or below the app's own cap (`MAX_SNAPSHOT_SYMBOLS`, src-tauri/src/pyapi/routes.rs).
+_SNAPSHOT_BATCH = 5_000
 
 
 class BarsMap(dict):
@@ -218,10 +261,10 @@ def bars_many(symbols, interval: str = "D", start=None, end=None, limit: int | N
               tz: str | None = None, naive: bool = False) -> BarsMap:
     """:func:`bars` for many symbols, in parallel, in the order given.
 
-    Daily bars come from the app's market-data store in one read (see :func:`panel`) for every
-    symbol it holds; only the rest are fetched one by one. The app paces the broker itself, so
-    extra ``workers`` only overlap waiting; a first run over a few hundred symbols the store
-    doesn't hold takes minutes at the brokers' rate limits, later runs fetch only what is new.
+    Daily bars come from the app's memory in one read (see :func:`panel`) for every symbol it
+    holds; only the rest are fetched one by one. The app paces the broker itself, so extra
+    ``workers`` only overlap waiting; a first run over a few hundred symbols the app doesn't hold
+    takes minutes at the brokers' rate limits, later runs (while it stays open) fetch only what is new.
     ``errors="raise"`` stops at the first failure; ``"skip"`` leaves a failed symbol out of the
     result and records it in ``result.errors`` (a problem that would hit every symbol, like an
     expired token, still stops the run). The progress line shows the rate and the time left,

@@ -21,6 +21,9 @@ RUN_ENV = "PROTRADE_RUN_ID"
 # Set to disable the daily quote top-up (``api._top_up``) outright: a kill switch, and a way to
 # diff a screen's results with and without it.
 NO_TOPUP_ENV = "PROTRADE_NO_TOPUP"
+# Set to stop the Screener judging filters on today's quote before it reads history
+# (``screen.Screen.run``): a kill switch, and a way to diff a screen's results with and without it.
+NO_SNAPSHOT_ENV = "PROTRADE_NO_SNAPSHOT"
 # A request can queue behind the app's broker pacing (Kite allows three history calls a
 # second), so a long first sync of many symbols is normal, not a hang.
 DEFAULT_TIMEOUT = 900.0

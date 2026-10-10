@@ -1,17 +1,17 @@
-//! "Bars for this symbol and range", answered from the research store and topped up
-//! from the broker only where the store is missing or out of date.
+//! "Bars for this symbol and range", answered from the session's bar memory and topped up
+//! from the broker only where it is missing or out of date. Nothing here touches the disk.
 //!
 //! No HTTP and no Tauri here: the broker sits behind [`Fetcher`], so the whole policy is
-//! tested with a fake one. The database lock is only ever held between awaits.
+//! tested with a fake one. The memory's lock is never held across an await.
 
 use std::collections::HashMap;
 
 use futures::future::BoxFuture;
 
 use super::{split_symbol, ApiError};
-use crate::db::Database;
-use crate::market::{ist_day_start, SESSION_MINUTES};
+use crate::market::{ist_day_start, quote_session_day, SESSION_MINUTES};
 use crate::models::{Bar, DaySnapshot};
+use crate::store::bar_memory::BarMemory;
 use crate::store::day_topup::{candidate, snapshot_bar, Candidate};
 use crate::store::research_bars::{self as store, interval_ms, Range};
 
@@ -111,11 +111,6 @@ pub fn lookback_ms(interval: &str, limit: usize) -> i64 {
     }
 }
 
-fn locked<T>(db: &Database, f: impl FnOnce(&mut rusqlite::Connection) -> rusqlite::Result<T>) -> Result<T, ApiError> {
-    let mut conn = db.conn.lock().map_err(|e| ApiError::internal(e.to_string()))?;
-    Ok(f(&mut conn)?)
-}
-
 /// The `[from, to]` a request resolves to: `to` is `now` (or the requested end, clamped to it;
 /// daily rounds up to the end of its calendar day), `from` is the requested start or a lookback
 /// long enough for `limit` bars (daily rounds down to midnight). Shared by [`load_bars`] and
@@ -134,10 +129,10 @@ pub fn span(interval: &str, from_ms: Option<i64>, to_ms: Option<i64>, limit: Opt
     (from, to)
 }
 
-/// Bars for a request. Reads the store, asks `fetcher` for the ranges the store lacks,
-/// records what it got, and answers from the store.
+/// Bars for a request. Reads the memory, asks `fetcher` for the ranges it lacks, records
+/// what it got, and answers from the memory.
 pub async fn load_bars(
-    db: &Database,
+    mem: &BarMemory,
     fetcher: &dyn Fetcher,
     req: &BarsRequest,
     now_ms: i64,
@@ -145,7 +140,7 @@ pub async fn load_bars(
     let daily = req.interval == "D";
     let (from, to) = span(&req.interval, req.from_ms, req.to_ms, req.limit, now_ms);
 
-    let coverage = locked(db, |c| store::coverage(c, &req.symbol, &req.interval))?;
+    let coverage = mem.coverage(&req.symbol, &req.interval);
     for range in store::plan(coverage, &req.interval, from, to, now_ms) {
         let fetched = fetcher
             .fetch(&req.symbol, &req.interval, range.from_ms, range.to_ms)
@@ -158,14 +153,10 @@ pub async fn load_bars(
             from_ms: fetched.from_ms.max(range.from_ms),
             to_ms: range.to_ms,
         };
-        locked(db, |c| {
-            store::put(c, &req.symbol, &req.interval, &bars)?;
-            store::extend_coverage(c, &req.symbol, &req.interval, done, now_ms)?;
-            Ok(())
-        })?;
+        mem.put_covered(&req.symbol, &req.interval, &bars, done, now_ms);
     }
 
-    let coverage = locked(db, |c| store::coverage(c, &req.symbol, &req.interval))?;
+    let coverage = mem.coverage(&req.symbol, &req.interval);
     // Never answer with bars from outside the span known to be complete.
     let (start, end) = match coverage {
         Some(c) => (from.max(c.from_ms), to.min(c.to_ms)),
@@ -180,9 +171,7 @@ pub async fn load_bars(
     let bars = if start > end {
         Vec::new()
     } else {
-        locked(db, |c| {
-            store::get(c, &req.symbol, &req.interval, start, end, Some(newest))
-        })?
+        mem.get(&req.symbol, &req.interval, start, end, Some(newest))
     };
 
     Ok(BarsData {
@@ -211,29 +200,28 @@ pub struct PanelSeries {
     pub symbol: String,
     pub bars: Vec<Bar>,
     pub coverage: Option<store::Coverage>,
-    /// The store already holds everything this request covers, up to the latest settled session:
+    /// Memory already holds everything this request covers, up to the latest settled session:
     /// a `/v1/bars` read of the same span would fetch nothing from the broker.
     pub current: bool,
 }
 
-/// Each symbol's stored bars for the request, from the store alone — the broker is never asked.
+/// Each symbol's held bars for the request, from memory alone — the broker is never asked.
 /// A series that isn't `current` is the caller's to read through `/v1/bars`, which tops it up.
-pub fn read_panel(conn: &rusqlite::Connection, req: &PanelRequest, now_ms: i64) -> Result<Vec<PanelSeries>, ApiError> {
+pub fn read_panel(mem: &BarMemory, req: &PanelRequest, now_ms: i64) -> Vec<PanelSeries> {
     let (from, to) = span(&req.interval, req.from_ms, req.to_ms, req.limit, now_ms);
     let newest = req.limit.unwrap_or(MAX_LIMIT).min(MAX_LIMIT);
     let mut out = Vec::with_capacity(req.symbols.len());
     for symbol in &req.symbols {
-        let coverage = store::coverage(conn, symbol, &req.interval)?;
+        let coverage = mem.coverage(symbol, &req.interval);
         let current = coverage.is_some() && store::plan(coverage, &req.interval, from, to, now_ms).is_empty();
         let bars = match coverage {
-            Some(c) if from.max(c.from_ms) <= to.min(c.to_ms) => store::get(
-                conn,
+            Some(c) if from.max(c.from_ms) <= to.min(c.to_ms) => mem.get(
                 symbol,
                 &req.interval,
                 from.max(c.from_ms),
                 to.min(c.to_ms),
                 Some(newest),
-            )?,
+            ),
             _ => Vec::new(),
         };
         out.push(PanelSeries {
@@ -243,7 +231,7 @@ pub fn read_panel(conn: &rusqlite::Connection, req: &PanelRequest, now_ms: i64) 
             current,
         });
     }
-    Ok(out)
+    out
 }
 
 // ---- The daily quote top-up (the Screener's speed fix) --------------------------------------
@@ -294,7 +282,7 @@ const TOPUP_PROVIDERS: [&str; 1] = ["zerodha"];
 /// `Fetch` or `Skipped` and left for the caller's unchanged per-symbol `load_bars` loop — this
 /// never replaces that path, only short-circuits it where it is safe to. A provider's quote call
 /// failing marks only that provider's symbols `Fetch`; the other provider is unaffected.
-pub async fn sync_daily(db: &Database, snaps: &dyn Snapshots, req: &SyncRequest, now_ms: i64) -> SyncReport {
+pub async fn sync_daily(mem: &BarMemory, snaps: &dyn Snapshots, req: &SyncRequest, now_ms: i64) -> SyncReport {
     let (from, to) = span(&req.interval, req.from_ms, req.to_ms, req.limit, now_ms);
 
     let mut results = Vec::with_capacity(req.symbols.len());
@@ -313,17 +301,7 @@ pub async fn sync_daily(db: &Database, snaps: &dyn Snapshots, req: &SyncRequest,
             });
             continue;
         };
-        let coverage = match locked(db, |c| store::coverage(c, symbol, &req.interval)) {
-            Ok(c) => c,
-            Err(e) => {
-                results.push(SyncResult {
-                    symbol: symbol.clone(),
-                    status: SyncStatus::Fetch,
-                    reason: Some(e.message),
-                });
-                continue;
-            }
-        };
+        let coverage = mem.coverage(symbol, &req.interval);
         match candidate(coverage, &req.interval, from, to, now_ms) {
             Some(cand) => by_provider
                 .entry(provider)
@@ -349,7 +327,7 @@ pub async fn sync_daily(db: &Database, snaps: &dyn Snapshots, req: &SyncRequest,
         match snaps.snapshots(provider, &tickers).await {
             Ok(snapshots) => {
                 for ((symbol, _ticker, cand), snapshot) in group.into_iter().zip(snapshots) {
-                    results.push(apply_snapshot(db, &symbol, &req.interval, &cand, snapshot, now_ms));
+                    results.push(apply_snapshot(mem, &symbol, &req.interval, &cand, snapshot, now_ms));
                 }
             }
             Err(e) => {
@@ -367,10 +345,10 @@ pub async fn sync_daily(db: &Database, snaps: &dyn Snapshots, req: &SyncRequest,
 }
 
 /// Checks and, if it passes, stores one symbol's snapshot as `candidate`'s day's bar. Any failure
-/// — no snapshot, a rejected one, or a store error — reports `Fetch`: the store is left exactly
-/// as it was unless the bar is actually written.
+/// — no snapshot or a rejected one — reports `Fetch`: memory is left exactly as it was unless the
+/// bar is actually written.
 fn apply_snapshot(
-    db: &Database,
+    mem: &BarMemory,
     symbol: &str,
     interval: &str,
     candidate: &Candidate,
@@ -385,38 +363,96 @@ fn apply_snapshot(
     let Some(snapshot) = snapshot else {
         return fetch("no quote for it".to_string());
     };
-    let prior = match locked(db, |c| {
-        store::get(c, symbol, interval, i64::MIN, candidate.session_day - 1, Some(1))
-    }) {
-        Ok(bars) => bars.into_iter().next(),
-        Err(e) => return fetch(e.message),
-    };
+    let prior = mem
+        .get(symbol, interval, i64::MIN, candidate.session_day - 1, Some(1))
+        .into_iter()
+        .next();
     let bar = match snapshot_bar(candidate, &snapshot, prior.as_ref()) {
         Ok(bar) => bar,
         Err(reject) => return fetch(format!("{reject:?}")),
     };
-    let written = locked(db, |c| {
-        store::put(c, symbol, interval, std::slice::from_ref(&bar))?;
-        store::extend_coverage(
-            c,
-            symbol,
-            interval,
-            Range {
-                from_ms: candidate.session_day,
-                to_ms: now_ms,
-            },
-            now_ms,
-        )?;
-        Ok(())
-    });
-    match written {
-        Ok(()) => SyncResult {
-            symbol: symbol.to_string(),
-            status: SyncStatus::Updated,
-            reason: None,
+    mem.put_covered(
+        symbol,
+        interval,
+        std::slice::from_ref(&bar),
+        Range {
+            from_ms: candidate.session_day,
+            to_ms: now_ms,
         },
-        Err(e) => fetch(e.message),
+        now_ms,
+    );
+    SyncResult {
+        symbol: symbol.to_string(),
+        status: SyncStatus::Updated,
+        reason: None,
     }
+}
+
+// ---- Today's quote for many symbols (the Screener's pre-filter) ------------------------------
+
+/// One symbol's day as the broker's quote has it, or `None` when it had nothing for the symbol
+/// (or its provider has no quote).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SnapshotRow {
+    pub symbol: String,
+    pub snapshot: Option<DaySnapshot>,
+}
+
+/// A snapshot answer: the session a quote taken now speaks for (midnight IST of its day), and each
+/// symbol's quote. `session_day` is `None` in Kite's pre-open window, when a quote is an indicative
+/// price rather than the day's bar and must not be judged as one; a quote that last traded on
+/// another day (a suspended stock) isn't this session's either.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Snapshot {
+    pub session_day: Option<i64>,
+    pub rows: Vec<SnapshotRow>,
+}
+
+/// Every symbol's day from one batched quote per provider, in the order asked — a whole exchange
+/// in a few calls, where history costs a call per symbol. A quote that is exactly the bar a held
+/// daily series is missing (the checks `sync_daily` applies) also tops that series up, so a
+/// history read after it asks the broker for nothing. A provider's failed quote call fails the
+/// whole request: the caller falls back to reading history, as if there were no snapshot.
+pub async fn snapshot(
+    mem: &BarMemory,
+    snaps: &dyn Snapshots,
+    symbols: &[String],
+    now_ms: i64,
+) -> Result<Snapshot, ApiError> {
+    let mut rows: Vec<SnapshotRow> = symbols
+        .iter()
+        .map(|s| SnapshotRow {
+            symbol: s.clone(),
+            snapshot: None,
+        })
+        .collect();
+    let mut by_provider: HashMap<&'static str, Vec<(usize, String)>> = HashMap::new();
+    for (i, symbol) in symbols.iter().enumerate() {
+        let resolved =
+            split_symbol(symbol).and_then(|(p, t)| TOPUP_PROVIDERS.iter().find(|&&tp| tp == p).map(|&tp| (tp, t)));
+        if let Some((provider, ticker)) = resolved {
+            by_provider.entry(provider).or_default().push((i, ticker.to_string()));
+        }
+    }
+    for (provider, group) in by_provider {
+        let tickers: Vec<String> = group.iter().map(|(_, t)| t.clone()).collect();
+        let snapshots = snaps.snapshots(provider, &tickers).await?;
+        for ((i, _), snap) in group.into_iter().zip(snapshots) {
+            rows[i].snapshot = snap;
+        }
+    }
+    for row in &rows {
+        let (Some(snap), Some(c)) = (row.snapshot, mem.coverage(&row.symbol, "D")) else {
+            continue;
+        };
+        if let Some(cand) = candidate(Some(c), "D", c.from_ms, now_ms, now_ms) {
+            apply_snapshot(mem, &row.symbol, "D", &cand, Some(snap), now_ms);
+        }
+    }
+    Ok(Snapshot {
+        session_day: quote_session_day(now_ms),
+        rows,
+    })
 }
 
 #[cfg(test)]
@@ -501,8 +537,8 @@ mod tests {
         }
     }
 
-    async fn load(db: &Database, f: &Fake, req: &BarsRequest, now: i64) -> Result<BarsData, ApiError> {
-        load_bars(db, f, req, now).await
+    async fn load(mem: &BarMemory, f: &Fake, req: &BarsRequest, now: i64) -> Result<BarsData, ApiError> {
+        load_bars(mem, f, req, now).await
     }
 
     #[test]
@@ -560,7 +596,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_first_request_fetches_stores_and_answers() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let f = fake();
         let out = load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
 
@@ -577,7 +613,7 @@ mod tests {
 
     #[tokio::test]
     async fn asking_again_within_the_ttl_does_not_touch_the_broker() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let f = fake();
         let first = load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
         let again = load(&db, &f, &request(Some(30), None), NOW + 60_000).await.unwrap();
@@ -588,7 +624,7 @@ mod tests {
 
     #[tokio::test]
     async fn after_the_ttl_only_the_recent_tail_is_fetched_again() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let f = fake();
         load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
         let later = NOW + 10 * MINUTE_MS;
@@ -605,7 +641,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_evening_after_a_session_costs_one_refresh_and_then_the_broker_is_left_alone() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let f = fake();
         // Read mid-session on a Friday, so today's bar was still forming.
         load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
@@ -625,7 +661,7 @@ mod tests {
     async fn a_screen_asking_for_a_slightly_deeper_history_reuses_what_the_first_fetched() {
         // The measured case: 250 bars (a 200-day average), then 257 (a 52-week high). Each
         // symbol used to need a second broker request for the few days between them.
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let f = fake();
         load(&db, &f, &request(None, Some(250)), NOW).await.unwrap();
         load(&db, &f, &request(None, Some(257)), NOW + 1_000).await.unwrap();
@@ -634,7 +670,7 @@ mod tests {
 
     #[tokio::test]
     async fn older_history_is_fetched_only_for_the_part_not_held() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let f = fake();
         load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
         let out = load(&db, &f, &request(Some(60), None), NOW + 1_000).await.unwrap();
@@ -651,7 +687,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_limit_keeps_the_newest_bars() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let f = fake();
         let out = load(&db, &f, &request(None, Some(10)), NOW).await.unwrap();
         assert_eq!(out.bars.len(), 10);
@@ -660,7 +696,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_broker_that_will_not_go_back_far_enough_is_reported_and_not_pretended_about() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let mut f = fake();
         f.earliest = Some(ist_day_start(NOW) - 20 * DAY_MS);
         let out = load(&db, &f, &request(Some(60), None), NOW).await.unwrap();
@@ -672,24 +708,19 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_fetch_is_reported_and_leaves_the_store_as_it_was() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let f = fake();
         f.fail.store(true, Ordering::SeqCst);
         let err = load(&db, &f, &request(Some(30), None), NOW).await.unwrap_err();
         assert_eq!((err.status, err.code), (401, "auth"));
 
-        let conn = db.conn.lock().unwrap();
-        assert_eq!(
-            store::coverage(&conn, SYM, "D").unwrap(),
-            None,
-            "nothing was claimed as covered"
-        );
-        assert_eq!(store::stats(&conn).unwrap().bars, 0);
+        assert_eq!(db.coverage(SYM, "D"), None, "nothing was claimed as covered");
+        assert_eq!(db.stats().bars, 0);
     }
 
     #[tokio::test]
     async fn a_symbol_the_broker_has_nothing_for_is_an_empty_answer_not_an_error() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let mut f = fake();
         f.bars.clear();
         let out = load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
@@ -701,7 +732,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_daily_range_is_by_calendar_date_so_the_boundary_bar_is_included() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let f = fake();
         // `from` a few hours into a date and `to` a few hours into a later one: both dates count.
         let from = ist_day_start(NOW) - 10 * DAY_MS + 9 * 3_600_000;
@@ -801,7 +832,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_candidate_symbol_is_topped_up_from_a_quote_and_needs_no_further_historical_fetch() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let f = fake();
         load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
         assert_eq!(f.calls().len(), 1);
@@ -826,7 +857,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_already_current_symbol_needs_no_quote_at_all() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let f = fake();
         load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
 
@@ -839,7 +870,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_never_fetched_symbol_is_left_for_the_historical_endpoint() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let snaps = FakeSnapshots::default();
         let report = sync_daily(&db, &snaps, &sync_request(vec![SYM.to_string()]), NOW).await;
         assert_eq!(report.results[0].status, SyncStatus::Fetch);
@@ -851,7 +882,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_symbol_with_no_quote_top_up_is_skipped_not_fetched() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let snaps = FakeSnapshots::default();
         let req = sync_request(vec!["binance:BTCUSDT".to_string()]);
         let report = sync_daily(&db, &snaps, &req, NOW).await;
@@ -861,7 +892,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_quote_for_a_candidate_falls_back_to_fetch() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let f = fake();
         load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
 
@@ -873,7 +904,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_rejected_snapshot_falls_back_to_fetch_with_the_reason() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let f = fake();
         load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
 
@@ -897,14 +928,13 @@ mod tests {
         );
 
         // Rejected, not written: the stored bar is unchanged.
-        let conn = db.conn.lock().unwrap();
-        let stored = store::get(&conn, SYM, "D", ist_day_start(NOW), ist_day_start(NOW) + DAY_MS, None).unwrap();
+        let stored = db.get(SYM, "D", ist_day_start(NOW), ist_day_start(NOW) + DAY_MS, None);
         assert!(stored.is_empty());
     }
 
     #[tokio::test]
     async fn a_quote_failure_marks_its_symbols_fetch_and_other_sources_are_skipped() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let f = fake();
         load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
 
@@ -926,7 +956,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_panel_reads_the_store_alone_and_says_which_series_are_current() {
-        let db = Database::open_in_memory().unwrap();
+        let db = BarMemory::default();
         let f = fake();
         // A short request's span is rounded up to 90 days, so hold more than that.
         load(&db, &f, &request(Some(100), None), NOW).await.unwrap();
@@ -939,8 +969,7 @@ mod tests {
             to_ms: None,
             limit: Some(5),
         };
-        let conn = db.conn.lock().unwrap();
-        let series = read_panel(&conn, &req, NOW).unwrap();
+        let series = read_panel(&db, &req, NOW);
         assert_eq!(f.calls().len(), calls, "no broker call");
 
         assert!(series[0].current);
@@ -956,8 +985,58 @@ mod tests {
             limit: Some(400),
             ..req.clone()
         };
-        assert!(!read_panel(&conn, &deeper, NOW).unwrap()[0].current);
+        assert!(!read_panel(&db, &deeper, NOW)[0].current);
         // Nor is it after a session has settled that the store hasn't read.
-        assert!(!read_panel(&conn, &req, NOW + 3 * DAY_MS).unwrap()[0].current);
+        assert!(!read_panel(&db, &req, NOW + 3 * DAY_MS)[0].current);
+    }
+
+    // ---- snapshot (the Screener's pre-filter) ----------------------------------------------
+
+    #[tokio::test]
+    async fn a_snapshot_answers_every_symbol_in_order_from_one_batched_call() {
+        let db = BarMemory::default();
+        let snaps = FakeSnapshots::default();
+        snaps.set("zerodha", "NSE:RELIANCE", good_quote(evening() - 1_000));
+        let symbols = vec![
+            "zerodha:NSE:UNQUOTED".to_string(),
+            SYM.to_string(),
+            "csv:MY_DATA".to_string(),
+        ];
+        let answer = snapshot(&db, &snaps, &symbols, evening()).await.unwrap();
+        assert_eq!(answer.session_day, Some(ist_day_start(NOW)), "Friday's settled session");
+        let rows = answer.rows;
+        assert_eq!(rows.iter().map(|r| r.symbol.as_str()).collect::<Vec<_>>(), symbols);
+        assert_eq!(rows[0].snapshot, None);
+        assert_eq!(rows[1].snapshot.unwrap().last, 203.0);
+        assert_eq!(rows[2].snapshot, None, "a provider with no quote is just blank");
+        assert_eq!(snaps.calls().len(), 1, "one call for the broker's symbols");
+        assert_eq!(db.stats().bars, 0, "nothing held, so nothing to top up");
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_tops_up_a_held_series_missing_only_its_latest_bar() {
+        let db = BarMemory::default();
+        let f = fake();
+        load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
+        let snaps = FakeSnapshots::default();
+        snaps.set("zerodha", "NSE:RELIANCE", good_quote(evening() - 1_000));
+
+        snapshot(&db, &snaps, &[SYM.to_string()], evening()).await.unwrap();
+        let out = load(&db, &f, &request(Some(30), None), evening()).await.unwrap();
+        assert_eq!(
+            f.calls().len(),
+            1,
+            "the history read after it asked the broker for nothing"
+        );
+        assert_eq!(out.bars.last().unwrap().close, 203.0);
+    }
+
+    #[tokio::test]
+    async fn a_failed_quote_call_fails_the_snapshot() {
+        let db = BarMemory::default();
+        let snaps = FakeSnapshots::default();
+        snaps.fail_provider("zerodha", ApiError::new(401, "auth", "token expired"));
+        let err = snapshot(&db, &snaps, &[SYM.to_string()], NOW).await.unwrap_err();
+        assert_eq!(err.code, "auth");
     }
 }

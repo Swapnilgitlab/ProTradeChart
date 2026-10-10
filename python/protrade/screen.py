@@ -7,7 +7,12 @@ in ``src/screener/fixtures/screen-cases.json``). It is written in the Studies' f
 
 Where a Study looks for every day in history its conditions held, a screen judges them on each
 symbol's *latest* bar only: ``crosses_above`` means "crossed on the latest bar". Bars come through
-the app's local API and its research store, so a second screen the same day fetches nothing.
+the app's local API, which holds them in memory while it is open, so a second screen the same day
+fetches nothing.
+
+Filters that today's quote alone decides (:func:`snapshot_decidable`: the day's prices, its gap
+and its change from the previous close) are judged first, on one batched quote for the whole
+universe, and history is read only for the stocks that pass them.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import math
+import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -38,13 +44,18 @@ MAX_NAME = 120
 MAX_ROWS = 5_000
 # At least this many bars are loaded, so smoothed features (EMA, RSI, ADX) have settled.
 MIN_HISTORY_BARS = 260
-# At most this many: what the market-data store holds (five years) with room to spare, so a weekly
-# or monthly column on a long window reads the store rather than going back to the broker. Such a
+# At most this many: what "Keep the market loaded" holds (five years) with room to spare, so a weekly
+# or monthly column on a long window reads memory rather than going back to the broker. Such a
 # column settles a little less than twice its warm-up, which only touches its first values.
 MAX_HISTORY_BARS = 1_200
 # A symbol whose latest bar is this many days older than the universe's is left out: it hasn't traded
 # (suspended, delisted), and judging it on an old bar would present stale news as today's.
 STALE_DAYS = 7
+# Features today's quote alone decides: the day's own bar and the previous close, nothing older.
+SNAPSHOT_FEATURES = frozenset(
+    {"open", "high", "low", "close", "volume", "gap", "gap_up", "gap_down", "return_1", "change_1"}
+)
+CROSSING = ("crosses_above", "crosses_below")
 
 
 class ScreenError(ValueError):
@@ -217,6 +228,45 @@ def _number(value) -> float | None:
     return round(number, 6) if math.isfinite(number) else None
 
 
+def snapshot_decidable(condition: dict) -> bool:
+    """Whether a filter can be judged on today's quote alone, with exactly the answer the full
+    history would give: every feature it reads is a :data:`SNAPSHOT_FEATURES` one on the daily
+    interval. A crossing also needs the day before's value of both sides, which a quote carries only
+    for the close, so one qualifies only when it compares the close."""
+    names = [feat.canonical(n) for n in feat.condition_features(condition)]
+    if not all(feat.interval(n) == "D" and n in SNAPSHOT_FEATURES for n in names):
+        return False
+    return condition["op"] not in CROSSING or all(n == "close" for n in names)
+
+
+def snapshot_frames(quotes: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """Each symbol quoted on the session ``quotes`` speak for, as two daily bars: the previous close,
+    then the day's quote. That is all a :data:`SNAPSHOT_FEATURES` feature reads, so it is the number
+    the full history gives on its latest bar. A symbol with no quote, no previous close, or a quote
+    from another day (a suspended stock) is left out, to be judged on its history."""
+    session = quotes.attrs.get("session")
+    if session is None or not len(quotes):
+        return {}
+    day = pd.Timestamp(session.date())
+    index = pd.DatetimeIndex([day - pd.Timedelta(days=1), day])
+    traded_today = quotes["traded"].dt.date == session.date()
+    usable = quotes[traded_today & quotes["close"].notna() & quotes["previous_close"].notna()]
+    nan = float("nan")
+    return {
+        symbol: pd.DataFrame(
+            {
+                "open": [nan, q.open],
+                "high": [nan, q.high],
+                "low": [nan, q.low],
+                "close": [q.previous_close, q.close],
+                "volume": [nan, q.volume],
+            },
+            index=index,
+        )
+        for symbol, q in usable.iterrows()
+    }
+
+
 def judge(frames: dict[str, pd.DataFrame], spec: dict, benchmark: pd.Series | None = None) -> dict[str, tuple]:
     """Every symbol with bars, judged on its own latest bar: ``(its date, whether it passes the
     filters, whether a filter couldn't be judged there for want of history, its values for
@@ -255,6 +305,8 @@ class Screen:
         self.warnings: list[dict] = []
         self.names: dict[str, str] = {}
         self.failed: dict[str, str] = {}
+        # The session today's quotes spoke for, when the pre-filter used them.
+        self.quote_day: pd.Timestamp | None = None
 
     def warn(self, code: str, message: str) -> None:
         if not any(w["code"] == code for w in self.warnings):
@@ -345,21 +397,56 @@ class Screen:
             pool.shutdown(wait=False, cancel_futures=True)
         return out
 
+    def _prefilter(self, symbols: list[str]) -> tuple[dict[str, pd.DataFrame], set[str]]:
+        """Judges the filters today's quote decides, on one batched quote for every symbol. Returns
+        the two-bar frames of the symbols that passed and the symbols it ruled out. Best-effort, like
+        the quote top-up: before the session opens, without a quote, or if anything fails, it rules
+        nothing out and every symbol is read in full."""
+        quick = [c for c in self.spec["filters"] if snapshot_decidable(c)]
+        if not quick or len(symbols) < 2 or os.environ.get(client.NO_SNAPSHOT_ENV):
+            return {}, set()
+        self.progress(1, "Checking today's quotes")
+        try:
+            quotes = api.snapshot(symbols)
+        except client.ProTradeError:
+            return {}, set()
+        frames = snapshot_frames(quotes)
+        if frames:
+            self.quote_day = pd.Timestamp(quotes.attrs["session"].date())
+        judged = judge(frames, {**self.spec, "filters": quick, "columns": []})
+        ruled_out = {s for s, (_, passed, _, _) in judged.items() if not passed}
+        return {s: f for s, f in frames.items() if s not in ruled_out}, ruled_out
+
     def run(self, today: _dt.date | None = None) -> dict:
         started = time.monotonic()
         spec = self.spec
         today = today or _dt.date.today()
-        symbols = self.universe()
+        everything = self.universe()
         start = fetch_start(spec, today)
 
-        # What the market-data store holds up to the latest session comes in one read; only the
-        # rest is topped up and fetched symbol by symbol, as before the store existed.
+        # Today's quote rules out what it can; if it decides every filter and column, the stocks that
+        # pass need no history either. Only the rest are read in full.
+        passed_quote, ruled_out = self._prefilter(everything)
+        quick_only = all(snapshot_decidable(c) for c in spec["filters"]) and all(
+            feat.interval(n) == "D" and feat.canonical(n) in SNAPSHOT_FEATURES for n in output_columns(spec)
+        )
+        loaded = judge(passed_quote, spec) if quick_only else {}
+        symbols = [s for s in everything if s not in ruled_out and s not in loaded]
+        if ruled_out:
+            self.progress(2, f"{len(ruled_out)} of {len(everything)} symbols ruled out by today's quote")
+            self.warn(
+                "prefiltered",
+                f"{len(ruled_out)} symbols were ruled out on today's quote alone, without reading their history.",
+            )
+
+        # What the app holds in memory up to the latest session comes in one read; only the rest is
+        # topped up and fetched symbol by symbol.
         frames_by_symbol, missing = api._from_panel(symbols, start, None, None, naive=True)
         if frames_by_symbol:
-            self.progress(2, f"{len(frames_by_symbol)} of {len(symbols)} symbols read from the market data on this computer")
+            self.progress(2, f"{len(frames_by_symbol)} of {len(symbols)} symbols already loaded")
 
         benchmark = None
-        if spec["benchmark"]:
+        if spec["benchmark"] and symbols:
             try:
                 benchmark = api.bars(spec["benchmark"], "D", start=start, naive=True)["close"]
             except client.FATAL:
@@ -367,18 +454,23 @@ class Screen:
             except client.ProTradeError as e:
                 self.warn("benchmark_missing", f"The benchmark {spec['benchmark']} couldn't be loaded ({e}); relative strength is blank.")
 
-        total = len(symbols)
+        total = len(everything)
         frames_by_symbol.update(self._fetch(missing, start, started))
 
-        self.progress(96, f"Screening {len(frames_by_symbol)} symbols")
-        loaded = judge(frames_by_symbol, spec, benchmark)
+        self.progress(96, f"Screening {len(frames_by_symbol) + len(loaded)} symbols")
+        loaded.update(judge(frames_by_symbol, spec, benchmark))
 
         if self.failed:
             self.warn("load_failed", f"{len(self.failed)} of {total} symbols couldn't be loaded and are left out.")
-        if not loaded:
+        if not loaded and not ruled_out:
             raise client.NotFoundError("No symbol in the universe had any daily data to screen.")
 
-        as_of = max(last for last, *_ in loaded.values())
+        # The day the screen describes is the newest bar it saw, and the quotes' session counts too:
+        # otherwise, with every current stock ruled out by its quote, a suspended one would set it.
+        seen = [last for last, *_ in loaded.values()]
+        if self.quote_day is not None:
+            seen.append(self.quote_day)
+        as_of = max(seen)
         cutoff = as_of - pd.Timedelta(days=STALE_DAYS)
         matches, stale, unknown = [], 0, 0
         for symbol, (last, passed, not_judged, values) in loaded.items():
@@ -419,7 +511,8 @@ class Screen:
                 "seconds": round(time.monotonic() - started, 1),
                 "as_of": f"{as_of:%Y-%m-%d}",
                 "symbols_requested": total,
-                "symbols_loaded": len(loaded),
+                "symbols_loaded": len(loaded) + len(ruled_out),
+                "prefiltered": len(ruled_out),
                 "symbols_failed": len(self.failed),
                 "symbols_stale": stale,
                 "matched": matched,

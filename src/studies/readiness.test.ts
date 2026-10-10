@@ -97,7 +97,7 @@ describe('checkReadiness', () => {
     expect(cost.status).toBe('warning');
     expect(cost.detail).toContain('4,200 symbols');
     expect(cost.detail).toContain('9,000 other listings left out');
-    expect(cost.detail).toContain('200 already stored');
+    expect(cost.detail).toContain('200 already loaded');
     expect(cost.detail).toContain('about 23 min');
     expect(cost.fix?.id).toBe('trial_run');
     expect(applyFix(spec, 'trial_run').universe.max_symbols).toBe(TRIAL_SYMBOLS);

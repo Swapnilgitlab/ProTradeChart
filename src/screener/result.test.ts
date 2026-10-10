@@ -16,7 +16,7 @@ describe('parseScreenResult', () => {
     expect(result!.columns).toEqual(['close', 'return_1', 'ema_50']);
     expect(result!.rows.map((r) => r.symbol)).toEqual(['zerodha:NSE:FAST', 'zerodha:NSE:UP']);
     expect(result!.rows[0]).toMatchObject({ name: 'Fast', date: '2025-06-30' });
-    expect(result!.meta).toMatchObject({ asOf: '2025-06-30', requested: 5, loaded: 4, failed: 1, stale: 1, matched: 2, seconds: 1.5 });
+    expect(result!.meta).toMatchObject({ asOf: '2025-06-30', requested: 5, loaded: 4, failed: 1, stale: 1, matched: 2, prefiltered: 0, seconds: 1.5 });
     expect(result!.warnings.map((w) => w.code)).toEqual(['load_failed', 'stale']);
   });
 
@@ -32,6 +32,7 @@ describe('parseScreenResult', () => {
       ['a name that is not text', (d) => (d.rows[0].name = { html: 'x' })],
       ['fewer matches than rows', (d) => (d.meta.matched = 1)],
       ['no as-of date', (d) => delete d.meta.as_of],
+      ['a pre-filtered count that is not a count', (d) => (d.meta.prefiltered = -1)],
       ['rows that are not a list', (d) => (d.rows = {})],
     ];
     for (const [what, spoil] of cases) {
@@ -40,6 +41,12 @@ describe('parseScreenResult', () => {
       expect(parseScreenResult(data), what).toBeNull();
     }
     expect(parseScreenResult(null)).toBeNull();
+  });
+
+  it('reads a result saved before the quote pre-filter as having ruled nothing out', () => {
+    const data = posted() as Record<string, any>;
+    delete data.meta.prefiltered;
+    expect(parseScreenResult(data)!.meta.prefiltered).toBe(0);
   });
 
   it('keeps well-formed warnings only', () => {

@@ -118,12 +118,22 @@ are used to build and test the project and are not distributed in the app.
 Price data is fetched at runtime, directly from the user's computer, from a
 third-party service: Zerodha, with the user's own account and credentials,
 only if they connect one. No market data is bundled with the app or passes
-through any server of this project, and the service's terms apply to how its
-data is used. See the data-source notes in the [README](README.md#data-sources).
+through any server of this project. The data belongs to the exchanges (NSE,
+BSE, MCX and others) and is licensed to the user, for their own use, under
+Zerodha's Kite Connect terms (<https://kite.trade/terms>) and the exchanges'
+rules: it may not be redistributed or shown to the public. The app never saves
+broker prices on the user's computer: it holds them in memory while it is open.
+See the data-source notes in the [README](README.md#data-sources) and the app's
+*About* dialog.
 
-Zerodha and Kite Connect are trademarks of their respective owners.
-ProTradeChart is not affiliated with, endorsed by or sponsored by either of
-them; their names are used only to say where data comes from.
+## Trademarks
+
+Vela™ is a trademark of LuxAlgo. Pine Script® and TradingView® are registered
+trademarks of TradingView, Inc. Zerodha, Kite and Kite Connect, NSE, BSE, MCX,
+Claude, Anthropic, GPT, OpenAI and Python are trademarks of their respective
+owners. These names are used only to say which services and components the app
+works with; ProTradeChart is not affiliated with, sponsored by or endorsed by
+any of them.
 
 The exact versions of every dependency are pinned in `package-lock.json` and
 `src-tauri/Cargo.lock`.

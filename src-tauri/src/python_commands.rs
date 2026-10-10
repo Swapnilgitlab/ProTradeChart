@@ -19,7 +19,8 @@ use crate::pyapi::valid_run_id;
 use crate::python::runner::{self, Emit, Outcome, Stream};
 use crate::python::scripts::{self, ScriptInfo};
 use crate::python::{self, client_files, env, Paths, PythonState};
-use crate::store::{preferences, research_bars};
+use crate::store::bar_memory::BarMemory;
+use crate::store::preferences;
 
 /// The interpreter the user chose instead of the app's own environment. Empty means none.
 const INTERPRETER_PREF: &str = "python_interpreter";
@@ -416,22 +417,20 @@ pub struct ResearchStats {
     pub bars: i64,
 }
 
-/// How much market data scripts have caused the app to keep.
-#[tauri::command(async)]
-pub fn python_research_stats(db: State<'_, Database>) -> Result<ResearchStats, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let stats = research_bars::stats(&conn).map_err(|e| e.to_string())?;
-    Ok(ResearchStats {
+/// How much market data is held in memory this session, for scripts, the Screener and Studies.
+#[tauri::command]
+pub fn python_research_stats(memory: State<'_, BarMemory>) -> ResearchStats {
+    let stats = memory.stats();
+    ResearchStats {
         series: stats.series,
         bars: stats.bars,
-    })
+    }
 }
 
 /// Forgets it all; the next script that asks fetches from the broker again.
-#[tauri::command(async)]
-pub fn python_clear_research_data(db: State<'_, Database>) -> Result<usize, String> {
-    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
-    research_bars::clear(&mut conn).map_err(|e| e.to_string())
+#[tauri::command]
+pub fn python_clear_research_data(memory: State<'_, BarMemory>) -> usize {
+    memory.clear()
 }
 
 #[cfg(test)]

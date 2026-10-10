@@ -16,6 +16,11 @@ pub fn set(conn: &Connection, key: &str, value: &str) -> rusqlite::Result<()> {
     Ok(())
 }
 
+pub fn delete(conn: &Connection, key: &str) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM ui_preferences WHERE key = ?1", params![key])?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -29,5 +34,7 @@ mod tests {
         set(&conn, "theme", "midnight").unwrap();
         set(&conn, "theme", "daylight").unwrap();
         assert_eq!(get(&conn, "theme").unwrap().as_deref(), Some("daylight"));
+        delete(&conn, "theme").unwrap();
+        assert_eq!(get(&conn, "theme").unwrap(), None);
     }
 }

@@ -1,33 +1,42 @@
-import { Database, Download, RefreshCw, Square } from 'lucide-react';
-import { describeHoldings, describeProgress, describeWhen, isDownloaded } from '../../lib/marketData';
+import { Database, RefreshCw, Square } from 'lucide-react';
+import { describeHoldings, describeProgress, describeWhen } from '../../lib/marketData';
 import { useMarketData } from './useMarketData';
 
-/** The local store of every NSE stock's daily history: its download, the daily update, and what it holds. */
+/** "Keep the market loaded": every NSE stock's daily history, read into memory while the app is open. */
 export function MarketDataSection() {
-  const { status, notice, download, updateNow, stop, setAuto } = useMarketData();
+  const { status, notice, loadNow, stop, setKeepLoaded } = useMarketData();
   if (!status) return null;
   const now = Date.now();
   const running = status.running;
-  const downloaded = isDownloaded(status);
 
   return (
     <section className="prov-detail market-data" aria-label="Market data">
       <h3>
-        <Database size={15} /> Market data on this computer
+        <Database size={15} /> Market data
       </h3>
       <p className="secondary">
-        Five years of daily prices for every NSE stock and index, downloaded once from your broker and kept up to date after
-        each trading day. The Screener, Studies and Python scripts read it straight from disk instead of asking the broker
-        symbol by symbol.
+        Five years of daily prices for every NSE stock and index, read from your broker into memory while the app is open, so
+        the Screener, Studies and Python scripts look at the whole market at once instead of asking the broker symbol by
+        symbol. Nothing is saved on this computer: it is cleared when you close the app and read again the next time.
       </p>
       <div className="prov-status">
+        <label className="prov-status-row market-data-auto">
+          <span>
+            <span className="label">Keep the market loaded</span>
+            <span className="secondary small">
+              Loads a couple of minutes after the app opens, then updates after each trading day (after 4 PM IST). Charts
+              always go first; loading waits its turn at the broker.
+            </span>
+          </span>
+          <input type="checkbox" checked={status.keepLoaded} onChange={(e) => void setKeepLoaded(e.target.checked)} />
+        </label>
         <div className="prov-status-row">
           <div>
-            <div className="label">Stored</div>
+            <div className="label">In memory</div>
             <div>{running ? describeProgress(running.progress) : describeHoldings(status, now)}</div>
             {status.lastError && !running && (
               <div className="neg">
-                Last update failed{status.lastFailure ? ` (${describeWhen(status.lastFailure, now)})` : ''}: {status.lastError}
+                Last load failed{status.lastFailure ? ` (${describeWhen(status.lastFailure, now)})` : ''}: {status.lastError}
               </div>
             )}
             {notice && <div className={notice.error ? 'neg' : undefined}>{notice.text}</div>}
@@ -36,32 +45,18 @@ export function MarketDataSection() {
             <button type="button" className="btn" onClick={() => void stop()}>
               <Square size={13} /> Stop
             </button>
-          ) : downloaded ? (
-            <button type="button" className="btn" onClick={() => void updateNow()}>
-              <RefreshCw size={13} /> Update now
-            </button>
           ) : (
-            <button type="button" className="btn btn-primary" onClick={() => void download()}>
-              <Download size={13} /> {status.provider ? 'Resume download' : 'Download'}
+            <button type="button" className="btn" onClick={() => void loadNow()}>
+              <RefreshCw size={13} /> {status.holdings.series > 0 ? 'Update now' : 'Load now'}
             </button>
           )}
         </div>
-        <label className="prov-status-row market-data-auto">
-          <span>
-            <span className="label">Update after each trading day</span>
-            <span className="secondary small">
-              While the app is open, after 4 PM IST. Charts always go first; the update waits its turn at the broker.
-            </span>
-          </span>
-          <input type="checkbox" checked={status.autoUpdate} onChange={(e) => void setAuto(e.target.checked)} />
-        </label>
       </div>
-      {!downloaded && !running && (
-        <p className="secondary small">
-          The first download takes about 10–15 minutes at the broker&rsquo;s pace and can be stopped and resumed. Charts keep
-          working while it runs.
-        </p>
-      )}
+      <p className="secondary small">
+        A full load takes about 15 minutes at the broker&rsquo;s pace, and needs about 200 MB of memory. Screens on today&rsquo;s
+        prices alone (the day&rsquo;s change, gap, volume) don&rsquo;t need it: they are judged on one quick quote of the whole
+        market.
+      </p>
     </section>
   );
 }

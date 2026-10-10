@@ -83,8 +83,7 @@ hard-deleted: there's no purge job, and nothing tracks them as a special case.
 - **Saved symbols** (`binance:…`, `coinbase:…`, `hyperliquid:…`) fall out of `PROVIDER_LABELS` like any other removed
   provider, so the existing generic handling picks them up for free: `isSupportedSymbol` is false for them, and
   `withoutUnsupportedSymbols` moves an affected tab (or grid cell) to the starter symbol when a layout opens (see
-  above). Nothing deletes their old `bars_cache` rows or `provider_settings`; they're just never
-  read again.
+  above). Nothing deletes their old `provider_settings`; they're just never read again.
 - **Defaults.** `DEFAULT_PROVIDER` moved from `binance` to `zerodha`; `starterSymbol()` (`data/providerStatus.ts`) and
   the seeded "Getting started" watchlist (`store::watchlists::STARTER_SYMBOLS`) moved from crypto pairs to well-known
   NSE names — which, unlike the old crypto starter, need the user's own Zerodha account connected before they actually
@@ -310,11 +309,13 @@ wrapped by the tap**, or its tabs fall back to the poll.
 
 ## Persistence
 
-One SQLite file (`charting.db`, in the OS's per-user app data folder), opened by `src-tauri/src/db.rs`. The UI's commands share
-one connection (`Database`); the research store has two more of its own to the same file (`ResearchDb`: a writer, and a
-`query_only` reader), so a bulk download or a whole-market read never waits on, or holds up, the UI's lock. WAL lets the reader
-run beside a write, and every connection waits up to 5 s (`busy_timeout`) for another's transaction, which the research writer
-keeps to one symbol at a time.
+One SQLite file (`charting.db`, in the OS's per-user app data folder), opened by `src-tauri/src/db.rs`, shared through one
+connection (`Database`). **No table holds broker price history**: Kite Connect's terms restrict permanent copies of its data,
+so every broker bar lives in memory for the session (`store/bar_memory.rs`, see "Python") and is gone when the app closes.
+Databases from before that had three bar tables (`bars_cache`, `research_bars`, `research_coverage`); `store/bar_tables.rs`
+drops them on the first launch after the change and `Database::init` then runs `VACUUM` once to hand the space back. It also
+carries the old market-data preferences over: a user who had downloaded the market (and left its daily update on) gets
+"Keep the market loaded" switched on.
 
 | Table | Holds |
 | --- | --- |
@@ -323,9 +324,7 @@ keeps to one symbol at a time.
 | `pine_scripts` | The user's Pine Script library: name, kind (`indicator` / `strategy`) and source |
 | `watchlists`, `watchlist_items`, `watchlist_sections` | Lists, their symbols (with a colour flag) and their section headings; see "Watchlists" |
 | `datasets`, `dataset_bars` | Imported CSV data |
-| `bars_cache` | Offline fallback for the broker's bars (keys start `zerodha:`) |
-| `research_bars`, `research_coverage` | The research store of the brokers' bars, and which span of each series is complete (see "Python" and "Market data store") |
-| `market_symbols` | Every symbol the market-data store keeps, with when it was first and last listed (see "Market data store") |
+| `market_symbols` | Every symbol "Keep the market loaded" covers, with when it was first and last listed: names, never prices (see "Keep the market loaded") |
 | `studies`, `study_results` | Saved Study Specifications and completed Study runs (see "Studies") |
 | `notebooks`, `notebook_items` | Research Notebooks: Studies and runs grouped with the user's notes |
 | `screeners` | Saved screens and the last run of each (see "Screener") |
@@ -453,14 +452,15 @@ script.
 
 The user's own scripts run as **child processes** of the app and reach market data through a small **local API**, so a
 broker's credentials never leave Rust: a script asks for bars, and Rust fetches (through the same paced clients the charts
-use), keeps them, and answers. It is for research — screening, backtesting, analysis. Nothing here places an order.
+use), holds them in memory for the session, and answers. It is for research — screening, backtesting, analysis. Nothing here
+places an order, and nothing here writes a broker's prices to disk.
 
 ```
  Python tab ─── invoke ──▶ python_commands.rs ── spawn ──▶ <venv>/python script.py   (import protrade as pt)
       ▲                        │  stdout/stderr                       │
       └────── events ◀─────────┘                                      │ HTTP, Authorization: Bearer <token>
                                 pyapi/ (127.0.0.1) ◀──────────────────┘
-                                   │  research store  ── Zerodha client (paced) ──▶ broker
+                                   │  bar memory  ── Zerodha client (paced) ──▶ broker
 ```
 
 | Piece | Where | Notes |
@@ -469,9 +469,9 @@ use), keeps them, and answers. It is for research — screening, backtesting, an
 | Runner | `python/runner.rs` | Starts `python -u script.py` with no stdin (so `input()` fails instead of waiting), streams each line as a `python-output` event, and on Stop ends the whole process tree (`taskkill /T`, or a process group), because a script may use `multiprocessing`. A lone `\r` marks a progress-bar line the console overwrites. Output past 4 MB is dropped with a notice. It knows nothing of Tauri (output goes to a callback), so it is tested against a real Python. |
 | Scripts | `python/scripts.rs` | Plain `.py` files in `<app data>/python/scripts`, so any editor and `git` work on them. The frontend names a script and never sends a path; `validate_name` refuses anything that could leave the folder, a Windows device name, and a name that would shadow a library (`pandas.py` beside a script replaces pandas for it). Examples (`python/examples/`) are copied in and kept current: the app records a hash of what it wrote (`.examples-seeded`), refreshes an example nobody has touched when a newer one ships, and leaves alone one the user edited or deleted. They must work with no setup (a test runs them for a user with no watchlists). |
 | Client | `python/protrade/` | Standard library plus pandas. It is embedded in the app (`python/client_files.rs`), written to `<app data>/python/lib` at each run and put on the child's `PYTHONPATH`, so it is never `pip install`ed and always matches the running app. A debug build (`tauri:dev`) writes the repository's current copy instead of the embedded one, because the dev watcher doesn't rebuild for changes outside `src-tauri/`: a `git pull` of Python takes effect on the next run. A Study prints and records which engine ran (`[engine] protrade 1.0 (<hash>)`, `meta.engine_build`). A test fails if a module is added to the folder without being listed in `FILES`. |
-| Local API | `pyapi/` | `data.rs` (bars: store reads plus broker fetches; also `sync_daily`, the quote top-up), `routes.rs` (auth and routing, against a `Backend` trait), `server.rs` (hyper), `backend.rs` (the real `Backend`, plus the error mapping), `wire.rs` (JSON, and the panel's binary columns). Read-only `GET`s: `/v1/bars`, `/v1/instruments`, `/v1/watchlists`, `/v1/watchlist`, `/v1/providers`, `/v1/ping`; and `POST /v1/panel`, a read posted only because a market's symbol list doesn't fit a URL (see "Market data store"). `POST /v1/results` (which, for kind `watchlist`, writes a watchlist: see "Scripts writing watchlists") and `POST /v1/bars/sync` (brings many symbols' daily coverage up to date from a batched broker quote and answers a per-symbol status, never bars — see "Screener") are the two writes. |
+| Local API | `pyapi/` | `data.rs` (bars: memory reads plus broker fetches; also `sync_daily`, the quote top-up, and `snapshot`, a whole market's quote), `routes.rs` (auth and routing, against a `Backend` trait), `server.rs` (hyper), `backend.rs` (the real `Backend`, plus the error mapping), `wire.rs` (JSON, and the panel's binary columns). Read-only `GET`s: `/v1/bars`, `/v1/instruments`, `/v1/watchlists`, `/v1/watchlist`, `/v1/providers`, `/v1/ping`; and `POST /v1/panel` and `POST /v1/snapshot`, reads posted only because a market's symbol list doesn't fit a URL (see "Keep the market loaded" and "Screener"). `POST /v1/results` (which, for kind `watchlist`, writes a watchlist: see "Scripts writing watchlists") and `POST /v1/bars/sync` (brings many symbols' daily coverage up to date from a batched broker quote and answers a per-symbol status, never bars — see "Screener") are the two writes. |
 | Results | `pyapi` `POST /v1/results` → `python-result` → `python/results.ts` → `features/python/Results*.tsx` | What a script shows: `pt.show` (a table), `pt.report` (a backtest) and `pt.plot` (a matplotlib PNG); a Study's result is kind `study` (see "Studies"), and one sent by a script in the Python tab is stored with the Studies' results. Rust checks only what makes forwarding safe — the run id, the kind, a title's length, and that a figure's bytes really start like a PNG — and the webview validates the shape before drawing. The report reuses the Strategy Tester's `EquityChart`. |
-| Research store | `store/research_bars.rs` | Bars kept for the API, with a *coverage* per series. See below. |
+| Bar memory | `store/bar_memory.rs`, `store/research_bars.rs` | Every broker bar the app holds, in memory only, with a *coverage* per series (`bar_memory`), and the pure sync policy over it (`research_bars::plan`). See below. |
 | UI | `features/python/`, `python/` (TS) | **A tab of its own**, beside the charts (`features/workspace/tabs.ts`), holding the script list, the editor, the console and the results. `python/console.ts`, `format.ts` and `results.ts` are pure and tested. It loads nothing until the tab is first shown: no Python is probed and no example is written for someone who never opens it. |
 
 - **A script's output is data, never markup.** A script is code the user wrote, so `python/results.ts` refuses anything it
@@ -487,9 +487,12 @@ use), keeps them, and answers. It is for research — screening, backtesting, an
   timeout and there is a cap on connections, so a stalled or runaway client can't hold it up. **Who is asking is settled before any
   body is read** (`server.rs` calls `authorize` first), so an unauthorised caller can't make the app buffer megabytes; a body is
   capped at 16 MB, by its declared length and again as it arrives.
-- **The store is not `bars_cache`.** `bars_cache` is the charts' offline fallback and its pruning is tuned for them. The research store
-  is never pruned, and records per `(symbol, interval)` the span whose bars are complete, because "no bars" (a holiday, a stock not
-  yet listed) and "not fetched yet" look alike in the bars table. `research_bars::plan` is the whole sync policy and is pure: given
+- **Bars live in memory, never on disk.** `BarMemory` (Tauri state, one per process) holds every series the session has read: the
+  Python API's, the Screener's and Studies', "Keep the market loaded"'s, and the charts' recent bars (put there without coverage,
+  as the offline fallback when the network drops). It has a budget (about 400 MB) and drops the series read least recently, bars
+  and coverage together, so a dropped series is simply fetched again. Its lock is never held across an await. It records per
+  `(symbol, interval)` the span whose bars are complete, because "no bars" (a holiday, a stock not yet listed) and "not fetched
+  yet" look alike. `research_bars::plan` is the whole sync policy and is pure: given
   the coverage, the request and the time it says which ranges to fetch. Ranges always touch the existing coverage, so it stays one
   span, and a series whose last sync reached the present is served as it stands rather than refetched because "now" moved. An
   intraday tail is refetched from a few bars back (to replace the forming bar) once it is older than its ttl. A **daily** series
@@ -504,10 +507,11 @@ use), keeps them, and answers. It is for research — screening, backtesting, an
   every 350 ms however many are waiting, so `bars_many`'s workers only overlap the waiting: 984 symbols is about six minutes, once.
   A daily request's span is rounded up to 90-day blocks (`lookback_ms`) so two screens asking for 250 and 257 bars start on the
   same date; otherwise each symbol needs a second request for the few days between them, which doubled the run. **Every run after
-  that first one is fast**: `store::day_topup` and `pyapi::data::sync_daily` bring a symbol's coverage up to date from one batched
-  quote instead (`POST /v1/bars/sync`, called by `api._top_up` ahead of the Screener's and a Study's own fetch loop) — `GET /quote`,
-  up to 200 symbols a call, not Kite's `/quote/ohlc`, whose `ohlc.close` is the *previous* close (today's is `last_price`) and which
-  carries no volume. A quote is trusted only when its previous close matches what is already stored; a mismatch (a corporate
+  that first one is fast** while the app stays open: `store::day_topup` and `pyapi::data::sync_daily` bring a symbol's coverage up
+  to date from one batched quote instead (`POST /v1/bars/sync`, called by `api._top_up` ahead of the Screener's and a Study's own
+  fetch loop) — `GET /quote`, up to 500 symbols a call (Kite's own limit; `zerodha::live` checks Kite accepts the URL a batch of
+  its longest symbols makes), not Kite's `/quote/ohlc`, whose `ohlc.close` is the *previous* close (today's is `last_price`) and
+  which carries no volume. A quote is trusted only when its previous close matches what is already held; a mismatch (a corporate
   action, a missed session) falls back to the historical endpoint instead, which re-fetches and self-corrects, and a series that
   has volume is never silently given a blank one.
 - **Record what was fetched, not what was asked.** The brokers' clients answer a range longer than one call may span with only its
@@ -555,26 +559,26 @@ names from the instrument lists; section headings are untouched. The script is a
 prints. `watchlists-changed` tells every window, and `watchlistBus` relays it to the panel. It is the only write the local API
 makes besides showing a result.
 
-## Market data store
+## Keep the market loaded
 
 Five years of daily bars for every NSE stock (EQ series, one listing per company by the Studies' own rule) and every NSE index,
-kept in the research store so the Screener, Studies and scripts read a whole market from disk instead of a request per symbol.
+read into memory while the app is open, so the Screener, Studies and scripts read a whole market at once instead of a request
+per symbol. It is opt-in (the preference `marketData.keepLoaded`) and nothing of it reaches the disk: after a relaunch the
+market is read again.
 
 | Piece | Where | Notes |
 | --- | --- | --- |
-| Rules | `marketdata/plan.rs` | Pure: the universe (`study_universe::pick_listings` over the instrument list), how far back (`HISTORY_DAYS`), when the daily update is due (once per settled session, `market::last_settled_ms`; an hour's wait after a failure), how a corporate action shows (`disagrees`: a stored close on an already-settled day that the broker's differs from) and how a holiday shows (`was_holiday`). |
-| Job | `marketdata/job.rs` | One update over the listing, tested against a fake broker: record the listing (`market_symbols`; a new row is a new listing), download any history the store lacks through `pyapi::data::load_bars`, then top up every series with the batched quote (`sync_daily`). A quote rejected for `PreviousCloseMismatch` refetches the symbol's whole span (`research_bars::replace`); any other rejection reads the tail from a week back and refetches in full if the overlap disagrees. Quotes that last traded before the session trigger one probe (NIFTY 50): on a holiday every current series is marked current through it, and nothing else is read. |
-| Engine, commands | `marketdata/mod.rs`, `marketdata_commands.rs` | One job at a time (`MarketData` state), stoppable, `market-data-progress` / `market-data-finished` events. The daily loop starts in `lib.rs`, first looks two minutes after launch, and does nothing until the user has started the download (which remembers the provider). |
+| Rules | `marketdata/plan.rs` | Pure: the universe (`study_universe::pick_listings` over the instrument list), how far back (`HISTORY_DAYS`, more than the deepest screen), when the daily update is due (once per settled session, `market::last_settled_ms`; an hour's wait after a failure) and how a holiday shows (`was_holiday`). |
+| Job | `marketdata/job.rs` | One pass over the listing, tested against a fake broker: record the listing (`market_symbols`; a new row is a new listing), read into memory any history it lacks through `pyapi::data::load_bars` (the user's watchlist symbols first), then top up every series with the batched quote (`sync_daily`). A series the quote can't update is dropped and read again whole (`BarMemory::forget`): Kite serves five years of daily bars in one call, so that costs what reading the missing tail would, and old and adjusted prices are never mixed after a split. Quotes that last traded before the session trigger one probe (NIFTY 50): on a holiday every current series is marked current through it (`carry_daily_through`), and nothing else is read. |
+| Engine, commands | `marketdata/mod.rs`, `marketdata_commands.rs` | One job at a time (`MarketData` state, which also keeps the session's record of the last load, in memory), stoppable, `market-data-progress` / `market-data-finished` events. The loop starts in `lib.rs`, first looks two minutes after launch, and does nothing unless the user has switched loading on. Switching it on starts a load at once; off stops one. |
 | Broker lanes | `throttle.rs` | Every job runs inside `throttle::in_background`: its broker requests wait while any interactive one (a chart, a script) is queued, at the same gap, so the broker's limit holds and a chart waits at most one gap. The lane is a task-local, so it must wrap each spawned task. |
-| Panel | `pyapi/data.rs` `read_panel`, `wire.rs` `panel_body`, `protrade/panels.py` | Many symbols' stored daily bars in one answer, from the store alone (never a broker call), each marked `current` when a `/v1/bars` read of the same span would fetch nothing. Binary columns (a JSON header, then `ts` i64 and `o h l c v` f64, every series back to back): a market's history is millions of numbers. `pt.panel`, and `pt.bars_many` for daily bars, read it first and fetch only what isn't current. |
+| Panel | `pyapi/data.rs` `read_panel`, `wire.rs` `panel_body`, `protrade/panels.py` | Many symbols' held daily bars in one answer, from memory alone (never a broker call), each marked `current` when a `/v1/bars` read of the same span would fetch nothing. Binary columns (a JSON header, then `ts` i64 and `o h l c v` f64, every series back to back): a market's history is millions of numbers. `pt.panel`, and `pt.bars_many` for daily bars, read it first and fetch only what isn't current. |
 | Wide features | `protrade/wide.py` | `WideFeatures` computes a feature for many symbols at once on a table with a column per symbol, **aligned on bar position** (each symbol's bars fill the bottom of its column), so rolling windows, `ewm` and `shift` count that symbol's own bars and the numbers equal `Features`'. `features.py` is written to work on a Series and a DataFrame alike; `tests/test_wide.py` checks every family. The Screener judges all symbols with it; a Study computes detection's features per batch with it. |
-| Charts | `marketdata::chart_daily` | A daily (so weekly and monthly) chart of a stored symbol is answered from the store, with what it lacks read through `load_bars` on the interactive lane and kept. Intraday is unchanged. |
+| Charts | `marketdata::chart_daily` | A daily (so weekly and monthly) chart of a held symbol is answered from memory, with what it lacks read through `load_bars` on the interactive lane and held. Intraday is unchanged. |
 
 - **These are Rust jobs, not scripts.** Nothing here starts Python, so the rule that a script runs only on a press or a
-  user-made schedule is untouched. The update runs only while the app is open, never during startup, and never makes up a
+  user-made schedule is untouched. Loading runs only while the app is open, never during startup, and never makes up a
   run: coverage decides what is fetched.
-- **Corporate actions.** The store keeps what the broker served. When the broker's history stops agreeing with it (a split,
-  a bonus), the whole series is fetched again rather than mixed.
 
 ## Screener
 
@@ -584,18 +588,19 @@ grammar, so an RSI in a screen is the same number a Study measures.
 | Piece | Where | Notes |
 | --- | --- | --- |
 | Screen | `src/screener/spec.ts`, `protrade/screen.py` `normalize_screen` | Universe (the Study universe's shape, without the size filters), `filters` (Study conditions, all must hold), `columns` (features), `sort` and `benchmark`. The two validators run `src/screener/fixtures/screen-cases.json`. A result's columns are the chosen ones plus every feature a filter reads (`outputColumns` / `output_columns`). |
-| Engine | `protrade/screen.py`, `protrade/run_screen.py`, `screener_commands.rs` | `screen_run` writes the screen to a file and starts `python -m protrade.run_screen`. It reads every symbol the market-data store holds in one `POST /v1/panel`; only the rest are offered for the quote top-up (`POST /v1/bars/sync`) and loaded through `/v1/bars` (`LOAD_WORKERS` in flight, as a Study). Bars reach back far enough for every column to settle (`history_bars`: twice the slowest warm-up, at least 260 bars) and judges every symbol together (`judge`, on `wide.WideFeatures`) on its **latest bar**: `crosses_above` means it crossed on that bar. A symbol whose last bar is a week older than the universe's is left out as stale; one with too little history for a filter doesn't match, and both are counted in warnings. Matches are sorted and capped at 5,000. |
+| Engine | `protrade/screen.py`, `protrade/run_screen.py`, `screener_commands.rs` | `screen_run` writes the screen to a file and starts `python -m protrade.run_screen`. First the **quote pre-filter**: the filters today's quote alone decides (`snapshot_decidable`: every feature in `SNAPSHOT_FEATURES` — the day's own prices, `gap*`, `return_1`, `change_1` — on the daily interval, and a crossing only of the close) are judged on one `POST /v1/snapshot` for the whole universe, on two-bar frames (the previous close, then the quote) that give exactly the number the full history's latest bar would; symbols that fail are counted as screened (`meta.prefiltered`) and never read further. If every filter and column is such a feature, the ones that pass need no history either. A symbol whose quote isn't this session's (suspended) or has no previous close is left to history, and the pre-filter is skipped in the pre-open window (`sessionDay` null), on any failure, or with `PROTRADE_NO_SNAPSHOT=1`. Then it reads every remaining symbol the app holds in memory in one `POST /v1/panel`; only the rest are offered for the quote top-up (`POST /v1/bars/sync`) and loaded through `/v1/bars` (`LOAD_WORKERS` in flight, as a Study). Bars reach back far enough for every column to settle (`history_bars`: twice the slowest warm-up, at least 260 bars) and judges every symbol together (`judge`, on `wide.WideFeatures`) on its **latest bar**: `crosses_above` means it crossed on that bar. A symbol whose last bar is a week older than the universe's is left out as stale; one with too little history for a filter doesn't match, and both are counted in warnings. Matches are sorted and capped at 5,000. |
 | Result | `src/screener/result.ts` | Posted as kind `screen`; untrusted, so checked whole (spec through `normalizeScreen`, columns equal to the spec's, every row's shape) and drawn as text. `fixtures/engine-result.json` is real engine output; `python/tests/test_screen.py` fails when the engine's output drifts from it. |
 | Storage | `store/screeners.rs`; `screeners` | Saved screens, each with only its **last** run — a screen asks what qualifies now, so older runs aren't kept. A run of an unsaved screen is shown, not stored. |
 | UI | `features/screener/` | A workspace tab like Studies (`WORKSPACE_LABELS` in `tabs.ts`), opened from the rail. Filters (`ConditionList`, shared with Studies) and columns on the left; name, universe and the pre-run readiness (`screener/readiness.ts`, using `study_estimate` for the cost) on the right; the results table below (sortable, a row opens its chart, add all to a watchlist, CSV). Eight presets (`screener/presets.ts`). |
 
-With the market data downloaded, a whole-NSE screen is one panel read and one wide computation: seconds. Without it, the very
-first screen over a whole exchange fetches every symbol's full history at the broker's pace (about 12 minutes for NSE on Kite);
-what is fetched is kept. After that, each symbol's daily coverage is brought current with one batched broker
-quote instead of a rate-limited history call each (`POST /v1/bars/sync`, `store/day_topup.rs`), so a new trading day's first
-screen — and Study, which shares the same top-up — finishes in seconds rather than minutes. A symbol the quote can't vouch
-for (its previous close doesn't match what's stored, or it's missing volume a series normally has) falls back to the
-historical endpoint automatically, never a wrong bar.
+A screen on today's prices alone is one quote of the whole universe: seconds, with or without anything loaded. With the market
+loaded, a whole-NSE screen that needs history is one panel read and one wide computation: seconds. Without it, the first such
+screen after launch fetches every surviving symbol's history at the broker's pace (about 15 minutes for all of NSE on Kite);
+what is fetched is held until the app closes. After that, each symbol's daily coverage is brought current with one batched
+broker quote instead of a rate-limited history call each (`POST /v1/bars/sync`, `store/day_topup.rs`). A symbol the quote can't
+vouch for (its previous close doesn't match what's held, or it's missing volume a series normally has) falls back to the
+historical endpoint automatically, never a wrong bar. `python/tests/test_screen.py`'s property test runs random screens with
+and without the pre-filter and requires identical results.
 
 ## Studies
 
@@ -606,7 +611,7 @@ what did they look like 3, 6 and 12 months before?* It is research, not a scanne
 ```
  Studies tab ── spec (JSON) ── invoke study_run ──▶ study_commands.rs ── writes <app data>/python/studies/<run>.json
       ▲                                                   │ spawn: python -m protrade.run_study <file>   (start_python)
-      │ python-result (kind "study") ◀── pyapi POST /v1/results ◀── protrade/study.py ── GET /v1/bars … ── research store
+      │ python-result (kind "study") ◀── pyapi POST /v1/results ◀── protrade/study.py ── GET /v1/bars … ── bar memory
       └── studies/result.ts validates ── save_study_result ── study_results table
 ```
 

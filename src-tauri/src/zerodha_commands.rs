@@ -15,7 +15,7 @@ use crate::models::{BarsResponse, Quote, SymbolMatch};
 use crate::provider_commands::TestResult;
 use crate::providers;
 use crate::secrets::Secrets;
-use crate::store::bars_cache;
+use crate::store::bar_memory::BarMemory;
 use crate::store::provider_settings::{self as settings, Table};
 use crate::store::research_bars::canonical_interval;
 use crate::zerodha::callback;
@@ -426,15 +426,18 @@ pub async fn zerodha_fetch_bars(
     };
 
     let cache_key = format!("zerodha:{}", inst.ticker);
-    let cache_interval = interval.to_uppercase();
+    // The session's memory, under the same spelling the Python API uses. Never the disk: broker
+    // price history isn't kept on this computer.
+    let cache_interval = canonical_interval(&interval);
+    let memory = app.state::<BarMemory>();
     let response = |bars, from_cache| BarsResponse {
         bars,
         gmt_offset: IST_OFFSET_SECS,
         timezone: Some("Asia/Kolkata".into()),
         from_cache,
     };
-    // Daily (and the weekly and monthly charts made from it) comes from the market-data store
-    // when it holds the symbol; only what the store lacks is read from Kite.
+    // Daily (and the weekly and monthly charts made from it) comes from memory when the market is
+    // loaded or a script read the symbol; only what memory lacks is read from Kite.
     if let (true, Some(from)) = (canonical_interval(&interval).as_deref() == Some("D"), from_ms) {
         match crate::marketdata::chart_daily(&app, &cache_key, from, to_ms).await {
             Some(Ok(bars)) => return Ok(response(bars, false)),
@@ -448,24 +451,30 @@ pub async fn zerodha_fetch_bars(
         .await
     {
         Ok(bars) => {
-            if !bars.is_empty() {
-                if let Err(e) = bars_cache::put(&mut *lock(&db)?, &cache_key, &cache_interval, &bars) {
-                    log::warn!("could not cache Zerodha bars for {}: {e}", inst.ticker);
+            // Kept for the session only, without coverage: it answers this chart when the network
+            // drops, and nothing ever treats it as a complete series.
+            if let Some(interval) = cache_interval.as_deref().filter(|_| !bars.is_empty()) {
+                // Daily bars sit on IST midnight in memory, as the Python API stores them.
+                let mut kept = bars.clone();
+                if interval == "D" {
+                    crate::pyapi::data::normalise_daily(&mut kept);
                 }
+                memory.put(&cache_key, interval, &kept);
             }
             Ok(response(bars, false))
         }
-        // Only a network failure falls back to the cache: a rejected token must
+        // Only a network failure falls back to memory: a rejected token must
         // be fixed, not papered over with stale data.
         Err(e) if e.kind == ZerodhaErrorKind::Network => {
-            let cached = sql(bars_cache::get(
-                &*lock(&db)?,
-                &cache_key,
-                &cache_interval,
-                from_ms,
-                to_ms,
-                None,
-            ))?;
+            let cached = cache_interval.as_deref().map_or_else(Vec::new, |interval| {
+                memory.get(
+                    &cache_key,
+                    interval,
+                    from_ms.unwrap_or(i64::MIN),
+                    to_ms.unwrap_or(i64::MAX),
+                    None,
+                )
+            });
             if cached.is_empty() {
                 return Err(e.message());
             }

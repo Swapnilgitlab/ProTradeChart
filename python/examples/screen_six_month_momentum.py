@@ -1,8 +1,8 @@
 """Ranks stocks by their six-month return, reading every symbol's history in one go.
 
-pt.panel reads the market data the app keeps on this computer (Data providers -> Market data), so
-a whole universe arrives in about a second instead of one broker request per symbol. Symbols it
-doesn't hold yet are listed and left out; pt.bars_many would fetch them from the broker instead.
+pt.panel reads the market data the app holds in memory (Data providers -> Market data -> Keep the
+market loaded), so a whole universe arrives in about a second instead of one broker request per
+symbol. Symbols it doesn't hold yet are listed and left out; pt.bars_many would fetch them instead.
 
 Like the other screens it works with no setup: the watchlist named in WATCHLIST, else your first
 watchlist with Zerodha symbols, else ten large NSE stocks.
@@ -18,9 +18,9 @@ TOP = 20
 
 symbols = pt.universe(WATCHLIST)
 stored = pt.panel(symbols, bars=DAYS + 1)
-print(f"{len(stored.held)} of {len(symbols)} symbols read from the market data on this computer.")
+print(f"{len(stored.held)} of {len(symbols)} symbols read from the market data the app holds.")
 if stored.missing:
-    print(f"Not held yet (download the market data to include them): {', '.join(stored.missing[:10])}")
+    print(f"Not loaded yet (keep the market loaded to include them): {', '.join(stored.missing[:10])}")
 
 closes = stored.wide("close")
 rows = []

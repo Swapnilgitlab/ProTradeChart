@@ -50,8 +50,9 @@ data needs no account; Indian market data needs your own Zerodha account.
   a control-group comparison and each event on its chart. See [Studies](#studies).
 - **Six themes.** Daylight, Paper, Midnight, Graphite, Ocean and Terminal. The starting theme follows your OS's
   light/dark setting.
-- **Private by design.** No account and no telemetry. Everything (layouts, watchlists, imported data, a small offline
-  price cache) lives in one SQLite file on your machine; the app talks only to the data sources you turn on and, to check
+- **Private by design.** No account and no telemetry. Everything you make (layouts, watchlists, imported data) lives in
+  one SQLite file on your machine, and broker prices are only ever held in memory; the app talks only to the data sources
+  you turn on and, to check
   for updates, GitHub ([details](SECURITY.md#what-the-app-does-and-doesnt-do)).
 - **Updates.** ProTradeChart checks GitHub for a newer release about once a day and offers to install it (*About → Updates*).
   Each update is verified against a signing key built into the app before it runs, and the daily check can be switched off.
@@ -155,10 +156,18 @@ time,open,high,low,close,volume
 
 A few things worth knowing:
 
-- **Broker data is yours alone.** Data from a Zerodha account is licensed to you for your own use under your
-  broker's and the exchanges' rules: don't rebroadcast it (on a public stream or website, say). The app only reads market
-  data from your account; it never places orders.
-- This software is for information only and is **not financial advice**.
+- **Broker data is yours alone.** Data from a Zerodha account is licensed to you for your own use under
+  [Kite Connect's terms](https://kite.trade/terms) and the exchanges' rules: don't publish, share or sell it, show it to
+  the public (on a stream or website, say) or use it for mock trading or games. The app only reads market data from your
+  account; it never places orders.
+- **Never saved on your computer.** Kite Connect's terms restrict building databases or permanent copies of its data,
+  so broker prices are held only in memory while the app is open: the bars charts show, what scripts, the Screener and
+  Studies read, and, with *Keep the market loaded* (*Data providers → Market data*), five years of every NSE stock. All of
+  it is gone when the app closes. The data folder keeps only what is yours (layouts, watchlists, alerts, scripts,
+  imported files, and the results of screens and Studies you ran). Nothing goes to this project or anyone else; AI
+  features send your question, symbols, watchlist names and a Study's summary statistics, never price history.
+- This software is for information only and is **not financial advice**. ProTradeChart is not a broker or a
+  SEBI-registered investment adviser.
 
 ## Connecting Zerodha
 
@@ -232,10 +241,13 @@ screens (200-day average, RSI, 52-week highs) and a moving-average crossover bac
   environment of your own instead (conda, uv), give its interpreter in the panel's settings (the gear).
 - **Your credentials stay in the app.** The app never hands a script a broker key or token. A script asks the app for bars over a
   local connection (`127.0.0.1`, protected by a one-off token that only scripts the app starts receive); the app fetches, paces
-  and keeps them. Only Zerodha and your imported CSV files are available to scripts, and only for reading.
-- **Quick the second time.** The app keeps what it fetched, so the first screen over a few hundred symbols takes minutes at the
-  brokers' rate limits (Kite allows three history requests a second), and later runs fetch only what is new: outside market
-  hours, nothing at all, because a finished day's bar never changes. The settings show how much is kept and can forget it.
+  and holds them in memory. Only Zerodha and your imported CSV files are available to scripts, and only for reading.
+- **Quick the second time.** The app holds what it fetched in memory while it is open (never on disk), so the first screen
+  over a few hundred symbols takes minutes at the brokers' rate limits (Kite allows three history requests a second), and
+  later runs fetch only what is new: outside market hours, nothing at all, because a finished day's bar never changes.
+  *Keep the market loaded* (*Data providers → Market data*) loads every NSE stock's history after launch, so even the first
+  screen is quick, and `pt.snapshot` quotes a whole market in a few seconds. The settings show how much is held and can
+  clear it.
 - **Timeframes.** Kite serves 1, 3, 5, 10, 15, 30 and 60 minutes and daily. `pt.resample` builds
   the rest, starting each bucket at the session open like the charts do. Daily bars are on a timezone-aware IST index.
 - **Your scripts are plain files** in the app's data folder (**Open folder** in the panel): edit them anywhere and keep them in
@@ -270,11 +282,11 @@ A Study measures what stocks looked like around historical events. Open **Studie
    from these sources**: a market-cap filter can't run, and the builder offers a traded-value floor instead (only if you pick
    it); results warn about survivorship bias.
 4. **Run Study.** Python does the work (the same setup as the Python tab), with a progress bar and the time left. The data
-   check says beforehand how many stocks will be loaded, how many are already stored and roughly how long the rest take:
-   the very first run over a whole exchange fetches every stock's history at your broker's rate limit (Zerodha: about three
-   stocks a second, so NSE's ~2,000 shares take ~12 minutes; adding BSE takes several times longer). After that, a quick
-   batched quote check brings each stock's latest bar up to date instead of fetching it again, so reruns — including a new
-   trading day's first — take seconds. Bonds, gold bonds, T-bills and funds on an exchange's list are left out; tick
+   check says beforehand how many stocks will be loaded, how many are already loaded and roughly how long the rest take:
+   the first run over a whole exchange after the app opens fetches every stock's history at your broker's rate limit
+   (Zerodha: about three stocks a second, so NSE's ~2,000 shares take ~12 minutes; adding BSE takes several times longer),
+   unless the market is already loaded. After that, a quick batched quote check brings each stock's latest bar up to date
+   instead of fetching it again, so reruns while the app stays open take seconds. Bonds, gold bonds, T-bills and funds on an exchange's list are left out; tick
    *Trade-for-trade* or *SME* to include those series. *Try it on the first 100 symbols* makes a quick trial.
 5. **Read the results.** A summary, the table of every event (click the chart icon to open that stock framed around the
    event, with a mark on it), the typical price path through the event, distributions of each metric at each observation
@@ -345,7 +357,7 @@ src/                     React + TypeScript frontend
   lib/                   Pure helpers: timeframes & resampling, CSV and watchlist parsers, IPC wrappers
   theme/                 Theme registry and provider
 src-tauri/               Rust backend
-  src/store/             SQLite persistence (layouts, watchlists, datasets, Pine scripts, bar cache)
+  src/store/             SQLite persistence (layouts, watchlists, datasets, Pine scripts), and the in-memory bar store
   src/providers.rs       The catalogue of data providers and their settings
   src/secrets.rs         Credentials: OS keychain, with an explicit fallback
   src/zerodha/           Zerodha (Kite Connect): protocol, instrument list, HTTP client, live feed, login
@@ -380,7 +392,13 @@ this app is too. "Pine Script" and "TradingView" are registered trademarks of Tr
 affiliated with, sponsored by, or endorsed by TradingView. The script editor is [CodeMirror](https://codemirror.net) (MIT).
 
 Charts are rendered by [**Vela™**](https://luxalgo.com/vela) by LuxAlgo, licensed under Apache-2.0 with an attribution
-requirement — the small logomark at the bottom-left of every chart must stay visible. See
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for that and the other components this project is built on, and
+requirement — the small logomark at the bottom-left of every chart must stay visible. The app ships Vela with small
+changes of its own (the `patches/` folder). See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (in the app, *About → Third-party notices*) for that and the other
+components this project is built on, and
 [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) (also in the app, under *About → Third-party licences*) for the licence
 text of every one of them.
+
+Zerodha, Kite and Kite Connect, NSE, BSE, MCX, Claude, Anthropic, GPT, OpenAI and Python are trademarks of their
+respective owners, named only to say which services the app works with; this project is not affiliated with, sponsored by
+or endorsed by any of them.

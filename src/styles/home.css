@@ -68,6 +68,24 @@
 .home-card svg {
   color: var(--accent);
 }
+.home-card:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.home-card:disabled:hover {
+  background: var(--surface-1);
+  border-color: var(--border);
+}
+.home-card-toggle {
+  cursor: pointer;
+}
+.home-card-toggle input {
+  margin: 0 4px 0 0;
+  vertical-align: -2px;
+}
+.home-market-data-line {
+  margin: -4px 0 10px;
+}
 
 /* A setup step worth tracking: done fades into the grid, pending stands out from it. */
 .home-card-pending {

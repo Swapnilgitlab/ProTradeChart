@@ -3,7 +3,7 @@
 
 import { splitSymbol } from '../lib/symbols';
 import { formatCost, TRIAL_SYMBOLS, type ReadinessFacts, type UniverseEstimate } from '../studies/readiness';
-import type { ScreenSpec } from './spec';
+import { quoteUse, type ScreenSpec } from './spec';
 
 export interface ScreenCheck {
   ok: boolean;
@@ -52,19 +52,29 @@ export function screenReadiness(spec: ScreenSpec, facts: Omit<ReadinessFacts, 't
   }
 
   let offerTrial = false;
+  const quote = quoteUse(spec);
   const e: UniverseEstimate | null | undefined = facts.estimate;
   if (e) {
-    offerTrial = e.seconds / 60 > LONG_FETCH_MINUTES && u.max_symbols === null && e.symbols > TRIAL_SYMBOLS;
+    // When the quote decides everything, a stock quoted today needs no history: the history estimate doesn't apply.
+    offerTrial = quote !== 'all' && e.seconds / 60 > LONG_FETCH_MINUTES && u.max_symbols === null && e.symbols > TRIAL_SYMBOLS;
     const parts = [
       `${e.symbols.toLocaleString()} symbol${e.symbols === 1 ? '' : 's'}`,
-      `${e.stored.toLocaleString()} already stored`,
-      formatCost(e),
+      ...(quote === 'all' ? ['one quick quote check of them all'] : [`${e.stored.toLocaleString()} already loaded`, formatCost(e)]),
     ];
     checks.push(
       e.symbols === 0
         ? { ok: false, blocking: u.source === 'instruments', text: 'No stocks in this universe. Update the instrument list in Data providers.' }
         : { ok: true, blocking: false, text: `${parts.join('; ')}.` },
     );
+    if (e.symbols > 0 && quote === 'some') {
+      checks.push({ ok: true, blocking: false, text: 'Today’s quote rules stocks out first, so history is read only for the ones that pass: at most that.' });
+    } else if (e.symbols > 0 && quote === 'none' && e.requests > 0) {
+      checks.push({
+        ok: true,
+        blocking: false,
+        text: 'Every stock’s history is read at the broker’s pace (about three a second). Keep the market loaded (Data providers → Market data) to make it seconds.',
+      });
+    }
   }
   return { ready: !checks.some((c) => c.blocking), checks, offerTrial };
 }

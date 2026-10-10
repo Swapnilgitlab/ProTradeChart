@@ -50,7 +50,7 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
 ## Gotchas
 
 - A plain `#[tauri::command] pub fn` runs on the **window's main thread**: if it waits (the `Database` mutex held by an
-  instrument-list refresh, `ResearchDb`'s reader held by a whole-market panel read, a slow query), the window freezes until
+  instrument-list refresh, a slow query), the window freezes until
   it's done. So every command that touches the database or the disk is `#[tauri::command(async)]` (a worker thread; it must
   return a `Result`); keep that for new commands, and only leave a command synchronous when it touches neither. Never hold
   a lock across an `.await` either (`std` guards aren't `Send`, so spawning would refuse it anyway).
@@ -150,8 +150,8 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   made canonical there (a bare broker ticker is NSE). `replace` keeps surviving rows where they are, with their flags, and never
   touches section headings. Every write emits `watchlists-changed`, which `watchlistBus` relays to the panel. Don't add any
   other route that gives a script a way to change something a window shows (a layout, an alert, a setting) — `POST
-  /v1/bars/sync` is not one of these: like `GET /v1/bars`'s own caching, it only ever writes to the research store, never
-  anything a script asked it to store, and a script can't tell it what to write.
+  /v1/bars/sync` (and `POST /v1/snapshot`'s top-up) is not one of these: like `GET /v1/bars`'s own caching, it only ever
+  writes broker bars to the session's memory, never anything a script asked it to store, and a script can't tell it what to write.
 - A screen (the Screener tab, `src/screener/`, `protrade/screen.py`) judges its filters on each symbol's **latest bar** only, in
   the Studies' feature grammar. `normalizeScreen` and `normalize_screen` apply the same rules (both run
   `src/screener/fixtures/screen-cases.json`), and `src/screener/fixtures/engine-result.json` is real engine output that
@@ -175,14 +175,21 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   as a column, and immediately opens its new chip's editor. The period `<select>` always injects the condition's actual
   window as an option even when it isn't one of `WINDOW_CHOICES`' curated ones (a hand-edited or older spec, or a short
   period like RSI's 14) — never silently rounds it to the nearest offered choice.
-- The Screener's and a Study's first run over a whole exchange pays Kite's historical rate limit once (`store/day_topup.rs`,
-  `pyapi/data.rs`'s `sync_daily`); every run after that calls `api._top_up` (`POST /v1/bars/sync`, from `screen.py`'s `Screen.run`
-  and `study.py`'s `Study.load`, right before their own fetch loop) to bring already-cached symbols' latest bar up to date from one
-  batched broker quote instead of a historical call each. `candidate()` only offers a symbol with no unaccounted weekday gap since
+- The Screener's and a Study's first run over a whole exchange after launch pays Kite's historical rate limit once (unless the
+  market is loaded; `store/day_topup.rs`, `pyapi/data.rs`'s `sync_daily`); every run after that, while the app stays open, calls
+  `api._top_up` (`POST /v1/bars/sync`, from `screen.py`'s `Screen.run` and `study.py`'s `Study.load`, right before their own fetch
+  loop) to bring already-held symbols' latest bar up to date from one batched broker quote instead of a historical call each. `candidate()` only offers a symbol with no unaccounted weekday gap since
   its last settled session; `snapshot_bar()` then only trusts a quote whose previous close matches the prior stored bar (within a
   tick) and whose volume isn't newly missing — anything it rejects, or any provider whose quote call fails, falls back to the
   existing per-symbol `/v1/bars` read untouched, so a mismatch degrades to slow-but-correct, never a wrong bar. `_top_up` itself
   never raises (`PROTRADE_NO_TOPUP=1` disables it outright); don't let it block a run.
+- Before any of that, a screen judges the filters today's quote alone decides on one `POST /v1/snapshot` for the whole universe
+  (`screen.py`'s `_prefilter`, `snapshot_decidable`, `SNAPSHOT_FEATURES`; `spec.ts`'s `snapshotDecidable`/`quoteUse` mirror it for
+  the readiness text, keep the two lists in step). It must give **exactly** the full run's answer: a feature qualifies only if a
+  two-bar frame (previous close, then the quote) yields the number the history's latest bar would, a crossing only of the close,
+  and a symbol whose quote isn't this session's (or that has no previous close) goes to history. `as_of` counts the quotes'
+  session, or a suspended stock would set it. It's best-effort like the top-up (skipped pre-open, on any error, or with
+  `PROTRADE_NO_SNAPSHOT=1`); `test_screen.py`'s `PrefilterTests` runs random screens both ways and requires identical results.
 - Drawings belong to the symbol (`chart/symbolDrawings.ts`, `store/symbol_drawings.rs`), not the chart: every chart swaps
   them on a symbol change. A symbol with no stored row adopts a layout's drawings; an *empty* document means "cleared" — never
   delete the row instead. Anything that replaces a chart's drawings must go through the port (deselect, `fromJSON`, deselect,
@@ -195,7 +202,13 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   places that must agree — a `ToolSpec` in `ai/prompts.rs::ask_ai_tools` and a matching case in `prepareAction` — and a tool
   without a case there is dropped silently, never run. Keep the allowlist to what's already reversible and non-financial; don't
   add anything that deletes a watchlist or layout, touches a secret, or reaches Python or Studies.
-- The Python API serves from its own store (`store/research_bars.rs`), not `bars_cache`, and records what a broker call *really*
+- **Broker price history never touches disk** (Kite Connect's terms restrict permanent copies of its data). Every broker bar
+  lives in `store::bar_memory::BarMemory` (Tauri state) for the session: the Python API's, the Screener's and Studies', "Keep the
+  market loaded"'s, and the charts' recent bars (put without coverage, as the offline fallback). Only the user's imported
+  datasets are persisted. Don't add a table, file or cache that holds a broker's prices; derived results (a screen's or Study's
+  last run) are the one thing kept, and `market_symbols` holds names, never prices. `store/bar_tables.rs` drops the old bar
+  tables once (then `VACUUM`). `BarMemory`'s lock is never held across an await.
+- The Python API serves from that memory and records what a broker call *really*
   covered: the brokers' clients silently answer an over-long range with only its newest part, so `Fetcher::fetch` reports where it
   began. Daily bars sit on IST midnight. A new broker fetch path must keep both. A daily series' freshness follows the exchange's
   calendar (`market.rs`), not the age of the last sync: a settled session's bar never changes, and an age-based ttl re-fetched every
@@ -241,9 +254,10 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   it the same way rather than duplicating logic. Add a feature here too, and it belongs on the Home tab: update its section
   in `HomePage.tsx` in the same change, the same rule the Help Center gotcha above already follows. The Setup section is the
   one exception to "no state of its own": it reads its cards' Done/Pending status itself (a broker connected, an AI key set,
-  a dataset imported, Python ready, `research_bars` non-empty), on its own mount, since Home may be the first thing opened —
+  a dataset imported, Python ready), on its own mount, since Home may be the first thing opened —
   it can't assume `Workspace.tsx` or another tab has already loaded any of that. Give a new Setup card a status only if it
-  has a genuine finished state; an ongoing action (open a tool, import another file) stays unmarked.
+  has a genuine finished state; an ongoing action (open a tool, import another file) stays unmarked, and so does Market data,
+  whose loaded state goes when the app closes.
 - The window has no native title bar (`"decorations": false` on every window, `tauri.conf.json` and `lib/windows.ts`'s
   `openNewWindow`): the tab bar is it. `.tab-brand` (the logo and "ProTradeChart") and `.tab-bar-drag` (the spacer before
   the actions) are what's draggable (`data-tauri-drag-region`, `app.css`); double-click either to maximize needs no code —
@@ -300,14 +314,14 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   don't start runs any other way). A synthesis is a separate press, drawn as text; follow-ups are *questions* that become a new
   plan needing a new approval. Claude's answers stream (`SseAccumulator`): judge `stop_reason` at the end, and drop text written
   before a `fallback` block.
-- The market-data store (`marketdata/`, "Market data store" in `docs/ARCHITECTURE.md`) keeps five years of every NSE stock's
-  and index's daily bars in `research_bars`. Its jobs are **Rust jobs, not scripts**: the daily update runs only after the user
-  started the download, only while the app is open, never during startup (first look two minutes after launch), and always inside
-  `throttle::in_background` so charts and user-run scripts go ahead of it at the broker (the lane is a task-local: wrap every task
-  a job spawns). Bulk work uses `ResearchDb`'s own connections, never the UI's `Database` lock, and writes one symbol per
-  transaction. A series whose broker history disagrees with the store (a split or bonus) is refetched whole with
-  `research_bars::replace`, never mixed. New listings are found through `market_symbols`, which outlives the instrument tables.
-- `POST /v1/panel` is a read (posted because the symbol list doesn't fit a URL): it answers from the store alone, never the broker,
+- "Keep the market loaded" (`marketdata/`, "Keep the market loaded" in `docs/ARCHITECTURE.md`) reads five years of every NSE
+  stock's and index's daily bars into memory. It is opt-in (`marketData.keepLoaded`). Its jobs are **Rust jobs, not scripts**:
+  they run only after the user switched it on, only while the app is open, never during startup (first look two minutes after
+  launch), and always inside `throttle::in_background` so charts and user-run scripts go ahead of it at the broker (the lane is a
+  task-local: wrap every task a job spawns). A series the quote can't update is dropped and read again whole
+  (`BarMemory::forget`), never mixed across a split. The session's record of loads is in memory too. New listings are found
+  through `market_symbols`, which outlives the instrument tables.
+- `POST /v1/panel` is a read (posted because the symbol list doesn't fit a URL): it answers from memory alone, never the broker,
   in the binary layout documented on `wire::panel_body`, which `protrade/panels.py` reads — change both together. A series not
   `current` is the caller's to read through `/v1/bars`.
 - A feature name may carry an interval, `rsi_14@W` / `ema_50@M` (bare = daily): weekly (to Friday) and monthly bars are built

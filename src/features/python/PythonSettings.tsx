@@ -49,10 +49,10 @@ export function PythonSettings({ env, onEnvChanged, say }: Props) {
 
   const clearData = async () => {
     if (!stats) return;
-    if (!(await confirmDelete(`Forget the ${stats.bars.toLocaleString()} bars kept for scripts? The next run fetches from your broker again.`))) return;
+    if (!(await confirmDelete(`Clear the ${stats.bars.toLocaleString()} bars held in memory? The next run fetches from your broker again.`))) return;
     try {
       const removed = await clearPythonResearchData();
-      say('info', `Forgot ${removed.toLocaleString()} bars.`);
+      say('info', `Cleared ${removed.toLocaleString()} bars from memory.`);
       loadStats();
     } catch (err) {
       say('error', errorMessage(err));
@@ -114,13 +114,16 @@ export function PythonSettings({ env, onEnvChanged, say }: Props) {
       </div>
 
       <div className="python-settings-section">
-        <div className="menu-heading">Market data kept for scripts</div>
+        <div className="menu-heading">Market data in memory</div>
         <div className="small">
           {stats ? `${stats.bars.toLocaleString()} bars across ${stats.series.toLocaleString()} series.` : 'Not available.'}
         </div>
-        <div className="muted small">Kept on this computer, so a screen over many symbols only asks your broker for what is new.</div>
+        <div className="muted small">
+          Held while the app is open, so a screen over many symbols only asks your broker for what is new. Never saved on this
+          computer: it is cleared when the app closes.
+        </div>
         <button type="button" className="btn pine-btn" disabled={!stats || stats.bars === 0} onClick={() => void clearData()}>
-          Forget it
+          Clear it
         </button>
       </div>
     </div>

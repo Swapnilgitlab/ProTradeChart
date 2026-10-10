@@ -145,7 +145,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Where your data is kept',
         blocks: [
           p(
-            'Everything you create — layouts, watchlists, alerts, scripts, Studies, screens and imported data — is stored in a single database file on your computer. Its location is shown under **About → Your data**. Broker credentials and AI keys are kept separately, in your operating system’s secure credential store. See **Privacy and security** for details.',
+            'Everything you create — layouts, watchlists, alerts, scripts, Studies, screens and imported data — is stored in a single database file on your computer. Its location is shown under **About → Your data**. Broker prices are not saved: they are held in memory while the application is open. Broker credentials and AI keys are kept separately, in your operating system’s secure credential store. See **Privacy and security** for details.',
           ),
         ],
       },
@@ -173,7 +173,8 @@ export const HELP_TOPICS: HelpTopic[] = [
             '**Charts** — start a new chart tab or window, and open any of your saved layouts with one click.',
             '**Watchlists and alerts** — show the watchlist panel or the price alerts list.',
             '**Research** — Ask AI, Python, Studies and the Screener.',
-            '**Setup** — Data providers, AI providers, importing your own data, Python setup, and **Market data** (five years of every NSE stock’s daily prices on this computer). Each shows **Done** once it is, or a highlighted **Pending** while it isn’t.',
+            '**Setup** — Data providers, AI providers, importing your own data, Python setup, and **Market data** (whether the market is loaded). Each of the first four shows **Done** once it is, or a highlighted **Pending** while it isn’t; Market data has no Done, because what is loaded goes when the application closes.',
+            '**Market data** — what is loaded, the **Keep the market loaded** switch, and **Load market data now** (**Update market data** once loaded, **Stop loading** while it runs).',
             '**Config** — the theme, the keyboard shortcut list and where to check for updates.',
             '**About** and **Help** — the same dialogs the right rail opens.',
           ),
@@ -316,7 +317,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'History',
         blocks: [
           p(
-            'A chart opens with about 500 bars — roughly two years of daily candles. As you scroll or zoom towards the oldest bar, the application loads older history in the background, for as long as the source has any. There is nothing to click. Broker bars you have loaded are kept in a small local cache so that a chart can still be drawn when you are offline.',
+            'A chart opens with about 500 bars — roughly two years of daily candles. As you scroll or zoom towards the oldest bar, the application loads older history in the background, for as long as the source has any. There is nothing to click. Broker bars you have loaded are held in memory while the application is open, so a chart can still be drawn if the connection drops; they are never saved on your computer.',
           ),
         ],
       },
@@ -744,7 +745,8 @@ export const HELP_TOPICS: HelpTopic[] = [
         blocks: [
           list(
             '**Save** keeps the screen under **My screens**. A saved screen keeps its last result, which reappears when you open it.',
-            'With **Market data** downloaded (Data providers → **Market data**), a screen reads every NSE stock’s history from this computer in one go and finishes in a couple of seconds. Without it, the very first screen over a whole exchange fetches every stock’s full history at the broker’s rate limit — about 12 minutes for NSE through Zerodha — and later runs top up each stock with one quick batched quote check.',
+            'Filters on today’s prices alone (close, open, high, low, volume, gap, and the day’s change or return) are judged first on one quick quote of the whole universe, so only the stocks that pass have their history read. A screen made only of such filters and columns finishes in seconds.',
+            'With **Keep the market loaded** on (Data providers → **Market data**), every NSE stock’s history is in memory and a screen reads it in one go, in a couple of seconds. Without it, the first screen that needs history over a whole exchange fetches it at the broker’s rate limit — about 15 minutes for NSE through Zerodha. What it fetched is held until the application closes, so later runs only top up each stock with a quick quote check.',
             '**Before it runs** estimates how many broker requests, and quick quote checks, the run needs and how long they take. Use **Try it on the first 100 symbols first** for a quick trial.',
           ),
         ],
@@ -767,7 +769,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             'Press **Set up Python**. The application creates a private environment in its data folder and installs pandas and numpy into it.',
           ),
           p(
-            'To use an environment of your own instead (for example conda or uv), open the gear icon (**Python settings**) and choose its interpreter. The settings also show how much market data scripts have caused the application to keep, and can clear it.',
+            'To use an environment of your own instead (for example conda or uv), open the gear icon (**Python settings**) and choose its interpreter. The settings also show how much market data the application holds in memory for scripts, the Screener and Studies (it is cleared when the application closes), and **Clear it** empties it now.',
           ),
         ],
       },
@@ -799,8 +801,9 @@ export const HELP_TOPICS: HelpTopic[] = [
             ['Function', 'Purpose'],
             [
               ['`pt.bars(symbol, interval, start, end, limit)`', 'Price history for one symbol, as a pandas DataFrame.'],
-              ['`pt.bars_many(symbols, …)`', 'History for many symbols: a dictionary of DataFrames. Daily bars the market data holds come in one read; the rest are fetched in parallel.'],
-              ['`pt.panel(symbols, start, end, bars)`', 'Stored daily bars for many symbols in one read from the market data on this computer. `.frame(symbol)` is one symbol’s DataFrame, `.wide("close")` a dates × symbols table, and `.missing` the symbols it doesn’t hold yet.'],
+              ['`pt.bars_many(symbols, …)`', 'History for many symbols: a dictionary of DataFrames. Daily bars already in memory come in one read; the rest are fetched in parallel.'],
+              ['`pt.panel(symbols, start, end, bars)`', 'Daily bars for many symbols in one read from what the application holds in memory. `.frame(symbol)` is one symbol’s DataFrame, `.wide("close")` a dates × symbols table, and `.missing` the symbols it doesn’t hold yet.'],
+              ['`pt.snapshot(symbols)`', 'Today’s quote for many symbols in a few seconds: open, high, low, close, previous close, volume and when each last traded, one row per symbol. `.attrs["session"]` is the day the quotes speak for (none before 9:15 IST).'],
               ['`pt.universe(name)` / `pt.watchlist(name)`', 'The symbols of a watchlist.'],
               ['`pt.watchlists()` / `pt.instruments(provider, …)`', 'Your watchlists, or a broker’s instrument list.'],
               ['`pt.resample(df, rule)`', 'Builds coarser bars, starting each bucket at the session open.'],
@@ -818,7 +821,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           list(
             '**Data sources.** Scripts can read Zerodha and your imported CSV data, only for reading. Crypto data is not available to scripts.',
             '**Timeframes.** Zerodha serves 1, 3, 5, 10, 15, 30 and 60 minutes and daily. Use `pt.resample` for others.',
-            '**Speed.** With **Market data** downloaded, `pt.panel` and `pt.bars_many` read daily bars for every NSE stock from this computer in one request. Anything else is fetched from your broker at its pace (Zerodha allows about three a second) and kept, so later runs are fast.',
+            '**Speed.** With **Keep the market loaded** on, `pt.panel` and `pt.bars_many` read daily bars for every NSE stock from memory in one request. Anything else is fetched from your broker at its pace (Zerodha allows about three a second) and held until the application closes, so later runs are fast. `pt.snapshot` quotes a whole market in a few seconds.',
             '**Your credentials stay in the application.** A script never receives a broker key or token; it asks the application for data over a private local connection.',
           ),
           note('Python is not a sandbox. A script runs with your own permissions, exactly as if you ran it from a terminal. Run only code you trust. Nothing in the Python tab places orders.'),
@@ -931,10 +934,10 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Data readiness',
         blocks: [
           list(
-            'The readiness panel shows what is available: prices and volume from your broker, index data for relative strength, and how many stocks will be loaded, how many are already stored and roughly how long the rest will take.',
+            'The readiness panel shows what is available: prices and volume from your broker, index data for relative strength, and how many stocks will be loaded, how many are already loaded and roughly how long the rest will take.',
             '**Market cap, sectors and historical index membership are not available** from these data sources. A Study that needs market cap cannot run; the builder offers a floor on average traded value instead, applied only if you choose it.',
             'Results carry a survivorship-bias warning: today’s instrument list does not include companies delisted in the past.',
-            'With **Market data** downloaded (Data providers → **Market data**), a Study reads NSE stocks’ history from this computer in batches instead of asking the broker. Anything it doesn’t hold (BSE listings, history older than five years) is fetched at the broker’s rate limit — about 12 minutes for all of NSE through Zerodha, several times longer with BSE — and kept, so reruns take seconds.',
+            'With **Keep the market loaded** on (Data providers → **Market data**), a Study reads NSE stocks’ history from memory in batches instead of asking the broker. Anything it doesn’t hold (BSE listings, history older than five years) is fetched at the broker’s rate limit — about 15 minutes for all of NSE through Zerodha, several times longer with BSE — and held until the application closes, so reruns that day take seconds.',
           ),
         ],
       },
@@ -1105,8 +1108,8 @@ export const HELP_TOPICS: HelpTopic[] = [
             'Press **Make default** to decide which source a ticker typed without a source uses.',
             'See the state of its **Instrument list** (used for symbol search), which is refreshed weekly.',
           ),
-          p('Below the sources, **Market data** downloads every NSE stock’s daily history to this computer. See **Market data on this computer**.'),
-          note('Market data from your broker account is licensed for your own use. Do not rebroadcast it, for example on a public stream or website.'),
+          p('Below the sources, **Market data** keeps every NSE stock’s daily history loaded in memory while the application is open. See **Keep the market loaded**.'),
+          note('Market data from your broker account is licensed for your own use. Do not rebroadcast it, for example on a public stream or website. See **Market data terms and storage**.'),
         ],
       },
     ],
@@ -1114,44 +1117,55 @@ export const HELP_TOPICS: HelpTopic[] = [
   },
   {
     id: 'market-data',
-    title: 'Market data on this computer',
+    title: 'Keep the market loaded',
     group: 'Data and settings',
-    summary: 'Five years of every NSE stock’s daily prices, downloaded once and kept current, so research runs in seconds.',
+    summary: 'Every NSE stock’s daily prices in memory while the application is open, so research runs in seconds.',
     sections: [
       {
         heading: 'What it is',
         blocks: [
           p(
-            'The Screener, Studies and Python scripts look at hundreds or thousands of stocks at once. Asking your broker for each one is slow — Zerodha allows about three history requests a second. **Market data** keeps five years of daily prices for every NSE stock (regular EQ series) and every NSE index on this computer instead, so a whole-market screen reads them in a second or two.',
+            'The Screener, Studies and Python scripts look at hundreds or thousands of stocks at once. Asking your broker for each one is slow — Zerodha allows about three history requests a second. With **Keep the market loaded** on, the application reads five years of daily prices for every NSE stock (regular EQ series) and every NSE index into memory, so a whole-market screen reads them in a second or two.',
           ),
           p('Daily, weekly and monthly charts of those stocks draw from it too, fetching only the latest bar. Intraday charts (1 minute, 5 minutes…) still come from your broker as before.'),
+          note('Nothing is saved on this computer: Kite Connect’s terms restrict permanent copies of its data. What is loaded is cleared when you close the application and read again the next time. It needs about 200 MB of memory.'),
         ],
       },
       {
-        heading: 'Downloading it',
+        heading: 'Turning it on',
         blocks: [
           steps(
-            'Connect Zerodha under **Data providers** — the history comes from your own account.',
-            'In the same dialog, under **Market data on this computer**, press **Download**. It takes about 10–15 minutes at the broker’s pace.',
-            'Keep working: charts always go ahead of the download at the broker. **Stop** pauses it; **Resume download** carries on from where it stopped.',
+            'Connect Zerodha under **Data providers** — the prices come from your own account.',
+            'In the same dialog, under **Market data**, tick **Keep the market loaded** (or tick it in the Home tab’s **Market data** section). Loading starts at once and takes about 15 minutes at the broker’s pace.',
+            'Keep working: charts always go ahead of it at the broker. **Stop** pauses it; **Load now** carries on from where it stopped.',
           ),
-          p('The Home tab’s **Market data** card shows **Done** once the download has finished.'),
+          p('From then on, every time you open the application it loads the market again by itself, a couple of minutes after launch (never during startup).'),
         ],
       },
       {
         heading: 'Keeping it current',
         blocks: [
           list(
-            'With **Update after each trading day** on, the application brings the data up to date by itself once each session has settled (after 4 PM IST), whenever it is open — or a couple of minutes after you open it, if it missed a day. It never runs during startup. **Update now** does it straight away.',
-            'Each update adds the latest prices, downloads the history of any newly listed stock (an IPO), and, after a split or bonus, reads that stock’s whole history again so old and adjusted prices are never mixed.',
+            'While the application is open, the market is brought up to date by itself once each session has settled (after 4 PM IST). **Update now** (or **Update market data** on the Home tab) does it straight away.',
+            'Each update adds the latest prices from one quick quote, loads any newly listed stock (an IPO), and reads again any stock the quote couldn’t update (after a split or bonus, for example), so old and adjusted prices are never mixed.',
             'A holiday is noticed from the market itself and costs nothing.',
-            'A Zerodha login lasts until the next morning. If it has expired, the update says so and waits; log in again under **Data providers**.',
+            'A Zerodha login lasts until the next morning. If it has expired, the load says so and waits; log in again under **Data providers**.',
           ),
-          note('Prices are your broker’s, as it supplies them. The store holds about 150–200 MB.'),
+          note('Prices are your broker’s, as it supplies them.'),
+        ],
+      },
+      {
+        heading: 'Without it',
+        blocks: [
+          list(
+            'Screens on today’s prices alone (the day’s change, gap, close or volume) are still quick: they are judged on one quote of the whole market.',
+            'Anything that needs history is read from your broker at its pace the first time, and held until the application closes.',
+            'Switch it off to stop loading. What is already loaded stays until you close the application, or **Clear it** in the Python tab’s settings.',
+          ),
         ],
       },
     ],
-    related: ['data-providers', 'screener', 'studies', 'python'],
+    related: ['data-terms', 'data-providers', 'screener', 'studies', 'python'],
   },
   {
     id: 'zerodha',
@@ -1304,7 +1318,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         blocks: [
           list(
             'The application checks for a newer release about once a day and offers to install it. A dot on the **About** button and a message tell you when one is waiting.',
-            '**About → Updates** checks now, installs a waiting update and switches the daily check on or off.',
+            '**About → Updates** checks now, installs a waiting update and switches the daily check on or off. When nothing newer has been published it says **You’re up to date** and names your version.',
             'Every update is verified against a signing key built into the application before it is installed.',
           ),
         ],
@@ -1313,12 +1327,12 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'About',
         blocks: [
           p(
-            'The **About** dialog (the information icon in the right rail) shows the version, the location of your data, the licence (GNU AGPL-3.0, free software with no warranty), the source code, credits and the keyboard shortcuts.',
+            'The **About** dialog (the information icon in the right rail) shows the version, the location of your data, the licence (GNU AGPL-3.0, free software with no warranty), the source code, credits, the keyboard shortcuts, trademark notices and how market data may be used and is stored. **Read the licence**, **Third-party licences** and **Third-party notices** open the full texts.',
           ),
         ],
       },
     ],
-    related: ['privacy'],
+    related: ['privacy', 'data-terms'],
   },
 
   // ---- Reference --------------------------------------------------------------------------------
@@ -1375,7 +1389,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'What stays on your computer',
         blocks: [
           list(
-            'There is no account and no telemetry. Layouts, watchlists, alerts, scripts, Studies, screens, imported data and cached prices are kept in one database file on your computer.',
+            'There is no account and no telemetry. Layouts, watchlists, alerts, scripts, Studies, screens and imported data are kept in one database file on your computer. Broker prices are never saved there: they are held in memory while the application is open.',
             'Broker credentials and AI keys are kept in your operating system’s credential store (Windows Credential Manager, macOS Keychain or the Linux Secret Service). If none is available, the application stores them in its database and clearly warns that they are unencrypted.',
             'Credentials are read only by the application’s backend. The user interface, Python scripts and the AI assistant never receive them.',
           ),
@@ -1387,8 +1401,9 @@ export const HELP_TOPICS: HelpTopic[] = [
           list(
             'The data sources you switch on, for market data.',
             'GitHub, to check for updates (the daily check can be switched off).',
-            'The AI provider you configured, only when you use an AI feature.',
+            'The AI provider you configured, only when you use an AI feature. It receives your question, symbols, watchlist names and a Study’s summary statistics, never price history.',
           ),
+          p('What you may do with your broker’s market data, and what the application keeps, is in **Market data terms and storage**.'),
         ],
       },
       {
@@ -1400,7 +1415,59 @@ export const HELP_TOPICS: HelpTopic[] = [
         ],
       },
     ],
-    related: ['python', 'schedules', 'ai-providers'],
+    related: ['data-terms', 'python', 'schedules', 'ai-providers'],
+  },
+  {
+    id: 'data-terms',
+    title: 'Market data terms and storage',
+    group: 'Reference',
+    summary: 'Whose market data it is, what you may do with it, and what the application keeps.',
+    sections: [
+      {
+        heading: 'Whose data it is',
+        blocks: [
+          p(
+            'Prices come from the exchanges (NSE, BSE, MCX and others) through your own Zerodha Kite Connect account and API key, or from files you import. Broker data is licensed to you, for your own use, under Zerodha’s Kite Connect terms and the exchanges’ rules. ProTradeChart supplies no data, holds no data licence, and has no server that market data passes through: the application fetches it directly from Zerodha on your computer.',
+          ),
+        ],
+      },
+      {
+        heading: 'What you may not do with it',
+        blocks: [
+          list(
+            'Publish, share, sell or show it to the public: on a live stream, a website or a public dashboard, or by passing on the application’s data folder or prices exported from it. Kite’s terms say live market data may not be displayed to the public at large, and the exchanges license redistribution separately.',
+            'Use it for mock or virtual trading apps or trading games, which Kite’s terms forbid.',
+            'Share your API key, secret or login: Kite’s terms say they are for your use only.',
+          ),
+        ],
+      },
+      {
+        heading: 'What the application keeps',
+        blocks: [
+          p(
+            'Kite Connect’s terms restrict building databases or permanent copies of the content its APIs return, unless Zerodha permits it, and ask you to delete stored content when you stop using the APIs. So broker prices are never saved on this computer: the application holds them in memory while it is open (the bars charts show, what scripts, the Screener and Studies read, and the whole market if you keep it loaded) and they are gone when it closes.',
+          ),
+          p('What the data folder keeps (its location is shown in **About**) is your own:'),
+          list(
+            'Layouts, watchlists, alerts, drawings, scripts and your settings.',
+            'Files you import, which are yours.',
+            'The last result of each screen and Study you ran. These are your analysis; a result can include a few figures from that day, such as a matched stock’s closing price.',
+            'Zerodha’s instrument list (names and codes, public and needing no login), and the list of symbols the market covers (names, not prices).',
+          ),
+          p('None of it is sent to this project or to anyone else. AI features send the AI provider your question, symbols, watchlist names and a Study’s summary statistics (counts, medians and test results), never price history.'),
+          note('Earlier versions kept broker prices on disk. The first launch of this version deletes them and shrinks the data file.'),
+        ],
+      },
+      {
+        heading: 'No advice',
+        blocks: [
+          p(
+            'Prices can be delayed, incomplete or wrong. ProTradeChart is not a broker or a SEBI-registered investment adviser and places no orders; nothing in it is financial advice. Following your broker’s terms and the rules that apply to you is your responsibility.',
+          ),
+        ],
+      },
+    ],
+    related: ['privacy', 'market-data', 'zerodha', 'updates'],
   },
   {
     id: 'troubleshooting',
@@ -1434,7 +1501,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'A run takes a long time',
         blocks: [
           p(
-            'The first run over many symbols is limited by your broker’s rate limit. The estimate before a run shows how long it will take; use a trial on 100 symbols or a watchlist universe to try an idea quickly. Data is kept, so the second run is fast.',
+            'The first run over many symbols is limited by your broker’s rate limit. The estimate before a run shows how long it will take; use a trial on 100 symbols or a watchlist universe to try an idea quickly. What it fetched is held until the application closes, so a second run that day is fast; **Keep the market loaded** (Data providers → **Market data**) makes even the first one fast.',
           ),
         ],
       },

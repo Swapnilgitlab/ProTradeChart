@@ -7,7 +7,6 @@ import {
   Code,
   Compass,
   Database,
-  Download,
   FlaskConical,
   Info,
   Keyboard,
@@ -20,13 +19,15 @@ import {
   RefreshCw,
   Settings2,
   Sparkles,
+  Square,
   SquareTerminal,
   Star,
   type LucideIcon,
 } from 'lucide-react';
 import { ThemeSelect } from '../../components/ThemeSelect';
-import { listDatasets, marketDataStatus, pythonEnvStatus, type AiProviders } from '../../lib/ipc';
-import { isDownloaded } from '../../lib/marketData';
+import { listDatasets, pythonEnvStatus, type AiProviders } from '../../lib/ipc';
+import { describeHoldings, describeProgress, isLoaded } from '../../lib/marketData';
+import { useMarketData } from '../marketdata/useMarketData';
 import { useProviderState } from '../providers/useProviderState';
 import { ZerodhaHomeCard } from '../providers/ZerodhaLogin';
 import type { LayoutSummary } from '../layouts/LayoutMenu';
@@ -41,6 +42,7 @@ interface HomeCard {
   description: string;
   onClick: () => void;
   status?: CardStatus;
+  disabled?: boolean;
 }
 
 interface Props {
@@ -79,9 +81,9 @@ function StatusBadge({ status }: { status: CardStatus }) {
   );
 }
 
-function Card({ icon: Icon, title, description, onClick, status }: HomeCard) {
+function Card({ icon: Icon, title, description, onClick, status, disabled }: HomeCard) {
   return (
-    <button type="button" className={`home-card${status ? ` home-card-${status}` : ''}`} onClick={onClick}>
+    <button type="button" className={`home-card${status ? ` home-card-${status}` : ''}`} onClick={onClick} disabled={disabled}>
       {status && <StatusBadge status={status} />}
       <Icon size={18} aria-hidden="true" />
       <span className="home-card-title">{title}</span>
@@ -107,7 +109,8 @@ function Section({ title, cards }: { title: string; cards: HomeCard[] }) {
  *  starting a chart, the research tools, connecting data, configuring the app, and About and Help.
  *  Every card just does what its rail or tab-bar equivalent does. The one thing it does hold is the
  *  Setup section's done/pending status — read fresh here (not from `Workspace.tsx`, since Home may
- *  be the first thing opened, before Python or a broker dialog has ever loaded anything). */
+ *  be the first thing opened, before Python or a broker dialog has ever loaded anything) — and the
+ *  market-data store's live status, through the same `useMarketData` the Data providers dialog uses. */
 export function HomePage({
   layouts,
   aiProviders,
@@ -134,7 +137,6 @@ export function HomePage({
 
   const [datasetCount, setDatasetCount] = useState<number | null>(null);
   const [pythonReady, setPythonReady] = useState<boolean | null>(null);
-  const [historyDownloaded, setHistoryDownloaded] = useState<boolean | null>(null);
   useEffect(() => {
     listDatasets()
       .then((rows) => setDatasetCount(rows.length))
@@ -142,10 +144,9 @@ export function HomePage({
     pythonEnvStatus()
       .then((s) => setPythonReady(s.state === 'ready'))
       .catch(() => setPythonReady(null));
-    marketDataStatus()
-      .then((s) => setHistoryDownloaded(isDownloaded(s)))
-      .catch(() => setHistoryDownloaded(null));
   }, []);
+  const marketData = useMarketData();
+  const market = marketData.status;
   // `undefined` while still loading: no card is marked pending on a guess before its answer is in.
   const statusOf = (known: boolean | null): CardStatus | undefined => (known == null ? undefined : known ? 'done' : 'pending');
 
@@ -241,14 +242,67 @@ export function HomePage({
             status: statusOf(pythonReady),
           },
           {
-            icon: Download,
+            // No Done badge: the market is held in memory, so whatever is loaded goes when the app closes.
+            icon: Database,
             title: 'Market data',
-            description: 'Download five years of daily prices for every NSE stock once, so the Screener, Studies and Python read them from disk.',
+            description:
+              market == null
+                ? 'Every NSE stock’s daily prices, in memory while the app is open.'
+                : isLoaded(market)
+                  ? 'Loaded: the Screener, Studies and Python read the whole market at once.'
+                  : market.keepLoaded
+                    ? 'Not loaded yet: it loads a couple of minutes after the app opens.'
+                    : 'Not loaded. Keep the market loaded for faster screens and Studies.',
             onClick: onOpenDataProviders,
-            status: statusOf(historyDownloaded),
           },
         ]}
       />
+
+      <section className="home-section">
+        <h2>Market data</h2>
+        {market && (
+          <p className={`muted small home-market-data-line${marketData.notice?.error ? ' neg' : ''}`}>
+            {marketData.notice?.text ?? (market.running ? describeProgress(market.running.progress) : describeHoldings(market, Date.now()))}
+          </p>
+        )}
+        <div className="home-grid">
+          <label className="home-card home-card-control home-card-toggle">
+            <span className="home-card-title">
+              <input
+                type="checkbox"
+                checked={market?.keepLoaded ?? false}
+                disabled={!market}
+                onChange={(e) => void marketData.setKeepLoaded(e.target.checked)}
+              />{' '}
+              Keep the market loaded
+            </span>
+            <span className="home-card-description">
+              Five years of every NSE stock&rsquo;s daily prices in memory while the app is open, updated after each trading day.
+              Never saved on this computer.
+            </span>
+          </label>
+          {market?.running ? (
+            <Card
+              icon={Square}
+              title="Stop loading"
+              description="Stop for now; the next load picks up where this one left off."
+              onClick={() => void marketData.stop()}
+            />
+          ) : (
+            <Card
+              icon={RefreshCw}
+              title={market && market.holdings.series > 0 ? 'Update market data' : 'Load market data now'}
+              description={
+                market && market.holdings.series > 0
+                  ? 'Fetch the latest session and any new listings from your broker now.'
+                  : 'Read every NSE stock’s history from your broker into memory now (about 15 minutes).'
+              }
+              onClick={() => void marketData.loadNow()}
+              disabled={!market}
+            />
+          )}
+        </div>
+      </section>
 
       <section className="home-section">
         <h2>Config</h2>

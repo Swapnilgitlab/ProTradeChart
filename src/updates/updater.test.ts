@@ -3,6 +3,7 @@ import {
   Updater,
   autoCheckEnabled,
   describeUpdateError,
+  isNoRelease,
   progressPercent,
   type DownloadEvent,
   type UpdateOffer,
@@ -46,9 +47,20 @@ describe('describeUpdateError', () => {
     expect(describeUpdateError(new Error('signature verification failed'), 'install')).toMatch(/security check/);
   });
   it('explains an unreachable server differently for a check and for a download', () => {
-    const error = new Error('Could not fetch a valid release JSON from the remote');
-    expect(describeUpdateError(error, 'check')).toMatch(/update server/);
+    const error = new Error('error sending request for url (https://github.com/x/latest.json)');
+    expect(describeUpdateError(error, 'check')).toMatch(/Couldn't reach the update server/);
     expect(describeUpdateError(error, 'install')).toMatch(/downloaded/);
+  });
+  it('treats a missing download as a failed download', () => {
+    expect(describeUpdateError(new Error('Download request failed with status: 404 Not Found'), 'install')).toMatch(/downloaded/);
+  });
+});
+
+describe('isNoRelease', () => {
+  it("recognises the plugin's answer to a 404, and nothing that is a real failure", () => {
+    expect(isNoRelease(new Error('Could not fetch a valid release JSON from the remote'))).toBe(true);
+    expect(isNoRelease(new Error('error sending request for url (https://github.com/x/latest.json)'))).toBe(false);
+    expect(isNoRelease(new Error('signature verification failed'))).toBe(false);
   });
   it('keeps the detail for anything unrecognised', () => {
     expect(describeUpdateError('disk is full', 'install')).toContain('disk is full');
@@ -67,6 +79,18 @@ describe('Updater.check', () => {
     const { updater } = updaterWith(async () => offerOf('0.2.0'));
     await updater.check();
     expect(updater.getState()).toEqual({ kind: 'available', version: '0.2.0', date: '2026-10-01T00:00:00Z' });
+  });
+
+  it('reports up to date when the server has no published release', async () => {
+    const noRelease = async () => {
+      throw new Error('Could not fetch a valid release JSON from the remote');
+    };
+    const { updater } = updaterWith(noRelease);
+    await updater.check();
+    expect(updater.getState()).toEqual({ kind: 'current' });
+    const background = updaterWith(noRelease).updater;
+    await background.check(true);
+    expect(background.getState()).toEqual({ kind: 'current' });
   });
 
   it('shows why a manual check failed', async () => {

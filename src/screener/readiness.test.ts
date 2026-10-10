@@ -43,12 +43,25 @@ describe('screenReadiness', () => {
     const estimate = { symbols: 2000, stored: 0, requests: 2000, quoteRequests: 0, seconds: 700, listingsSkipped: 0 };
     const long = screenReadiness(fromPreset('near_high'), { ...facts, estimate });
     expect(long.offerTrial).toBe(true);
-    expect(long.checks[long.checks.length - 1]?.text).toContain('2,000 broker requests, about 12 min');
+    expect(long.checks.map((c) => c.text).join(' | ')).toContain('2,000 broker requests, about 12 min');
     const cached = screenReadiness(fromPreset('near_high'), { ...facts, estimate: { ...estimate, stored: 2000, requests: 0, seconds: 0 } });
     expect(cached.offerTrial).toBe(false);
     expect(cached.checks[cached.checks.length - 1]?.text).toContain('nothing to fetch');
     const empty = screenReadiness(fromPreset('near_high'), { ...facts, estimate: { ...estimate, symbols: 0 } });
     expect(empty.ready).toBe(false);
+  });
+
+  it('says when today’s quote decides the screen, and when the broker’s pace bounds it', () => {
+    const estimate = { symbols: 2000, stored: 0, requests: 2000, quoteRequests: 0, seconds: 700, listingsSkipped: 0 };
+    const texts = (spec: ScreenSpec) => screenReadiness(spec, { ...facts, estimate }).checks.map((c) => c.text).join(' | ');
+    const quick = { ...fromPreset('near_high'), filters: [{ left: 'return_1', op: '>' as const, right: 0.03 }], columns: ['close'] };
+    expect(texts(quick)).toContain('one quick quote check');
+    expect(texts(quick)).not.toContain('broker requests');
+    expect(screenReadiness(quick, { ...facts, estimate }).offerTrial).toBe(false);
+    const mixed = { ...quick, filters: [...quick.filters, { left: 'close', op: '>' as const, right: 'sma_200' }] };
+    expect(texts(mixed)).toContain('rules stocks out first');
+    const slow = { ...quick, filters: [{ left: 'close', op: '>' as const, right: 'sma_200' }] };
+    expect(texts(slow)).toContain('Keep the market loaded');
   });
 
   it('prices an already-synced universe at the quote top-up, not a broker request each', () => {

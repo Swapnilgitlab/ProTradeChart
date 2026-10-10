@@ -79,7 +79,7 @@ MAX_FINDINGS = 10
 # Requests kept in flight to the app. It paces the broker itself; this only has to be enough that
 # a request is always waiting at that pace, whatever each round trip costs.
 LOAD_WORKERS = 8
-# Symbols per read from the market-data store: a few years of a few hundred symbols is a few MB, and
+# Symbols per panel read from the app's memory: a few years of a few hundred symbols is a few MB, and
 # the features detection needs are computed for each batch together.
 PANEL_BATCH = 400
 
@@ -617,7 +617,7 @@ class ResearchStudy:
     def load(self, symbols, on_symbol=None) -> dict[str, feat.Features]:
         """Daily bars for each symbol (and the benchmark), from the study's first needed date.
 
-        Symbols the app's market-data store holds come in batches, one read each, with the features
+        Symbols the app holds in memory come in batches, one read each, with the features
         event detection needs computed for the whole batch at once; only the rest are fetched one by
         one. ``on_symbol(symbol, features)`` is called as each symbol arrives; a falsy answer leaves
         that symbol out of the result (it can never be used). The result is in universe order, so

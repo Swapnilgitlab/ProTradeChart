@@ -5,6 +5,25 @@ project uses [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Changed
+
+- **Broker prices are never saved on your computer.** Kite Connect's terms restrict permanent copies of its data, so every
+  bar from Zerodha (what charts show, what scripts, the Screener and Studies read) is now held in memory while the app is
+  open and is gone when it closes. The first launch deletes the prices earlier versions kept and shrinks the data file;
+  your layouts, watchlists, alerts, scripts, imported files and results are untouched.
+- **"Market data" is now Keep the market loaded.** Instead of a five-year download kept on disk, a switch (Data providers →
+  Market data, or the Home tab) reads every NSE stock's daily history into memory a couple of minutes after the app opens
+  and keeps it current after each trading day. If you had downloaded the market data, it is switched on for you. A full
+  load takes about 15 minutes at Kite's pace and about 200 MB of memory.
+
+### Added
+
+- **Screens on today's prices are quick without loading anything.** Filters the day's quote alone decides (close, open,
+  high, low, volume, gap, the day's change or return) are judged first on one batched quote of the whole universe, and
+  history is read only for the stocks that pass; a screen made only of such filters takes seconds. Its results are
+  exactly what a full read would give. **Before it runs** says when a screen can use it.
+- **`pt.snapshot(symbols)`** gives scripts today's quote for a whole market in a few seconds.
+
 ## [0.2.0] — 2026-10-04
 
 ### Added

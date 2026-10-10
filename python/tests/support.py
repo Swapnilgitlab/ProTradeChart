@@ -151,7 +151,7 @@ class Case(unittest.TestCase):
     run_id = None  # set to a run id to give the script one
 
     def setUp(self):
-        keys = (client.API_ENV, client.TOKEN_ENV, client.TIMEOUT_ENV, client.RUN_ENV, client.NO_TOPUP_ENV)
+        keys = (client.API_ENV, client.TOKEN_ENV, client.TIMEOUT_ENV, client.RUN_ENV, client.NO_TOPUP_ENV, client.NO_SNAPSHOT_ENV)
         self._saved = {k: os.environ.get(k) for k in keys}
         self.stub = Stub(dict(self.routes), dict(self.posts))
         os.environ[client.API_ENV] = self.stub.url
@@ -162,6 +162,7 @@ class Case(unittest.TestCase):
         else:
             os.environ.pop(client.RUN_ENV, None)
         os.environ.pop(client.NO_TOPUP_ENV, None)
+        os.environ.pop(client.NO_SNAPSHOT_ENV, None)
 
     def tearDown(self):
         self.stub.close()

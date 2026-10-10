@@ -199,7 +199,7 @@ export function checkReadiness(spec: StudySpec, facts: ReadinessFacts): Readines
     const parts = [
       `${e.symbols.toLocaleString()} symbol${e.symbols === 1 ? '' : 's'}`,
       e.listingsSkipped ? `${e.listingsSkipped.toLocaleString()} other listings left out (bonds, SGBs, funds, second listings)` : null,
-      `${e.stored.toLocaleString()} already stored`,
+      `${e.stored.toLocaleString()} already loaded`,
       formatCost(e),
     ].filter(Boolean);
     items.push({

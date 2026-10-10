@@ -45,6 +45,32 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 
 /** The columns a result has: those asked for, then every feature a filter reads that isn't one
  *  already, so each match shows why it matched. The engine's `output_columns`. */
+/** Features today's quote alone decides: the day's own bar and the previous close. The same list as
+ *  `SNAPSHOT_FEATURES` in `protrade/screen.py`; keep the two in step. */
+export const SNAPSHOT_FEATURES: readonly string[] = ['open', 'high', 'low', 'close', 'volume', 'gap', 'gap_up', 'gap_down', 'return_1', 'change_1'];
+
+const conditionFeatures = (c: Condition): string[] => [c.left, ...(typeof c.right === 'string' ? [c.right] : [])];
+
+const quoteFeature = (name: string) => {
+  const key = canonicalFeature(name);
+  return key !== null && featureInterval(key) === 'D' && SNAPSHOT_FEATURES.includes(key);
+};
+
+/** Whether the engine judges a filter on today's quote before reading history (`snapshot_decidable`
+ *  in `protrade/screen.py`): every feature it reads is a quote one, and a crossing compares the close. */
+export function snapshotDecidable(c: Condition): boolean {
+  const names = conditionFeatures(c);
+  if (!names.every(quoteFeature)) return false;
+  return (c.op !== 'crosses_above' && c.op !== 'crosses_below') || names.every((n) => canonicalFeature(n) === 'close');
+}
+
+/** How a run uses today's quote: `all` when it decides every filter and column (a stock quoted today
+ *  needs no history at all), `some` when it can rule stocks out first, `none` otherwise. */
+export function quoteUse(spec: Pick<ScreenSpec, 'columns' | 'filters'>): 'all' | 'some' | 'none' {
+  if (!spec.filters.some(snapshotDecidable)) return 'none';
+  return spec.filters.every(snapshotDecidable) && outputColumns(spec).every(quoteFeature) ? 'all' : 'some';
+}
+
 export function outputColumns(spec: Pick<ScreenSpec, 'columns' | 'filters'>): string[] {
   const names = [...spec.columns];
   for (const c of spec.filters) {

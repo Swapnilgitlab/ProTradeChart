@@ -43,9 +43,11 @@ impl Default for Pacing {
 }
 
 const MAX_RETRIES: u32 = 3;
-/// Instruments per `/quote/ohlc` or `/quote` request. Kite allows 1000; a shorter URL is safer.
-/// Also what `study_universe::estimate` prices a quote top-up's batching at.
-pub(crate) const QUOTE_BATCH: usize = 200;
+/// Instruments per `/quote/ohlc` or `/quote` request: the most Kite allows a full `/quote` (1000 for
+/// `/quote/ohlc`), so the Screener's pre-filter quotes all of NSE in six calls. Kite accepts the URL
+/// a batch this size of its longest symbols makes (`zerodha::live`). Also what
+/// `study_universe::estimate` prices a quote top-up's batching at.
+pub(crate) const QUOTE_BATCH: usize = 500;
 const VERSION_HEADER: (&str, &str) = ("X-Kite-Version", "3");
 
 pub struct ZerodhaClient {
@@ -531,9 +533,13 @@ mod tests {
     async fn a_long_list_of_quotes_is_split_into_batches() {
         let empty = || ok(json!({"status":"success","data":{}}));
         let (base, log) = mock(vec![empty(), empty()]).await;
-        let many: Vec<Instrument> = (0..250).map(|i| inst(&format!("S{i}"))).collect();
+        let many: Vec<Instrument> = (0..QUOTE_BATCH + 50).map(|i| inst(&format!("S{i}"))).collect();
         let q = client(&base).quotes(&creds(), &many).await.unwrap();
-        assert_eq!(q.len(), 250, "every instrument gets an answer, even if only an error");
+        assert_eq!(
+            q.len(),
+            QUOTE_BATCH + 50,
+            "every instrument gets an answer, even if only an error"
+        );
         let log = log.lock().unwrap();
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].query().len(), QUOTE_BATCH);
