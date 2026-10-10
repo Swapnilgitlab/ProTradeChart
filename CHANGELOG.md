@@ -5,6 +5,8 @@ project uses [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-10
+
 ### Changed
 
 - **Broker prices are never saved on your computer.** Kite Connect's terms restrict permanent copies of its data, so every

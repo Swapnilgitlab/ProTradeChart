@@ -1,7 +1,7 @@
 {
   "name": "protradechart",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Open-source desktop charting software — fast candlestick charts, indicators, drawing tools, watchlists and saved layouts.",
   "license": "AGPL-3.0-only",
   "author": "Swapnil Pawar",
