@@ -12,7 +12,7 @@ watchlists, saved layouts, and the ability to chart your own data — all runnin
 data needs no account; Indian market data needs your own Zerodha account.
 
 <p align="center">
-  <img src="docs/images/screenshot-dark.png" alt="ProTradeChart showing an AAPL daily chart with the watchlist docked on the right" width="900">
+  <img src="docs/images/screenshot-dark.png" alt="ProTradeChart showing a daily chart of synthetic sample data, with the watchlist docked on the right" width="900">
 </p>
 
 ## Features
