@@ -823,11 +823,13 @@ properties on `<html>` and persists the choice. To add a theme, append one entry
 
 ## Security model
 
-- The webview's Content-Security-Policy (`tauri.conf.json`) blocks remote scripts, frames and images, and allows
-  outbound connections (`connect-src https: wss:`) — broader than either remaining provider needs, since both
-  `zerodha` and `csv` call out through Rust over Tauri IPC rather than fetching from the webview directly. That
-  `connect-src` allowance dates from when Vela's own crypto providers fetched straight from the webview; narrowing it
-  now that they're gone would need testing against a release build (the dev server doesn't enforce the CSP).
+- The webview's Content-Security-Policy (`tauri.conf.json`) blocks remote scripts, frames and images, and allows no
+  outbound connections beyond the app itself and Tauri IPC (`connect-src 'self' ipc: http://ipc.localhost`). Both
+  providers, `zerodha` and `csv`, call out through Rust over IPC, as do Ask AI, Studies and the updater, so nothing in
+  the webview needs the network. Vela and PineTS still ship their own Binance, Coinbase and FMP fetchers; under this
+  policy any path that reaches one fails instead of contacting those hosts, and a Pine script — which runs in a worker
+  with `'unsafe-eval'` — can't send chart data anywhere. The workers inherit the page's policy. Check a release build
+  after changing it: the dev server doesn't enforce the CSP.
 - **`script-src` includes `'unsafe-eval'`, and only for Pine.** PineTS compiles a script to JavaScript with
   `new Function`, which the policy otherwise blocks (checked: without it every script fails to compile). The engine is
   always the worker one (`PineWorkerEngine`): a Worker has no DOM and no Tauri IPC, so a pasted script can't reach the
