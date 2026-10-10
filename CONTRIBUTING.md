@@ -61,13 +61,16 @@ font from npm). Cargo doesn't notice changed icon files, so after regenerating t
 
 Installed copies of ProTradeChart update themselves from the newest GitHub release, and only accept an update signed with the
 updater key. `src-tauri/tauri.conf.json` holds its public half (`plugins.updater.pubkey`); the private half is **never
-committed** and lives in two repository secrets, which the release workflow needs or the build fails:
+committed** and lives in two secrets of the repository's `release` environment, which the release workflow needs or the
+build fails:
 
 - `TAURI_SIGNING_PRIVATE_KEY` — the contents of the key file;
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — its password.
 
-Set them with `gh secret set TAURI_SIGNING_PRIVATE_KEY < path/to/updater.key` and
-`gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD < path/to/password-file`. Keep a backup of the key and its password
+Set them with `gh secret set TAURI_SIGNING_PRIVATE_KEY --env release < path/to/updater.key` and
+`gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --env release < path/to/password-file`. The environment's deployment
+rules let only `v*.*.*` tags and `main` use them, so a workflow run from any other branch or a pull request can't read the
+key. Keep a backup of the key and its password
 somewhere safe (a password manager): **if the private key is lost, installed copies can never be updated again** — users
 would have to download a new build by hand — and a leaked key lets anyone push code to every install. A new pair comes
 from `npx tauri signer generate -w <path>`; replacing the key means shipping one build, signed with the old key, that
