@@ -1,5 +1,5 @@
-import { zerodhaQuotes } from '../lib/ipc';
-import { splitSymbol } from '../lib/symbols';
+import { marketQuotes } from '../lib/ipc';
+import { INDIA, splitSymbol } from '../lib/symbols';
 import { getProvider } from './providers';
 import { ensureProvidersLoaded, isProviderUsable } from './providerStatus';
 
@@ -11,10 +11,10 @@ export interface QuoteView {
 const EMPTY: QuoteView = { price: null, changePercent: null };
 /** How often a watchlist refreshes its prices. */
 const QUOTE_REFRESH_MS = 20_000;
-/** Sources whose whole list is quoted in a handful of requests (Zerodha: up to 200
- *  symbols each), or with no network at all (imported data).
- *  Everything else costs about one request per symbol. */
-const CHEAP_TO_QUOTE = new Set(['zerodha', 'csv']);
+/** Sources whose whole list is quoted in a handful of requests (the Indian brokers batch
+ *  them, and FYERS's are answered from one shared cache), or with no network at all
+ *  (imported data). Everything else costs about one request per symbol. */
+const CHEAP_TO_QUOTE = new Set([INDIA, 'csv']);
 const MS_PER_UNBATCHED_SYMBOL = 700;
 /** Crypto and imported-data quotes are derived from two daily bars each; cap how many run at once. */
 const BAR_QUOTE_CONCURRENCY = 4;
@@ -87,12 +87,12 @@ async function batchQuotes(
 export async function fetchQuotes(symbols: string[]): Promise<Map<string, QuoteView>> {
   await ensureProvidersLoaded();
   const out = new Map<string, QuoteView>();
-  const zerodha: string[] = [];
+  const india: string[] = [];
   const other: string[] = [];
   for (const s of symbols) {
     const provider = splitSymbol(s).provider;
     if (!isProviderUsable(provider) && provider !== 'csv') out.set(s, EMPTY);
-    else if (provider === 'zerodha') zerodha.push(s);
+    else if (provider === INDIA) india.push(s);
     else other.push(s);
   }
 
@@ -101,7 +101,7 @@ export async function fetchQuotes(symbols: string[]): Promise<Map<string, QuoteV
   });
 
   await Promise.all([
-    batchQuotes(zerodha, out, zerodhaQuotes),
+    batchQuotes(india, out, marketQuotes),
     otherJob,
   ]);
   return out;

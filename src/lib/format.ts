@@ -1,3 +1,5 @@
+import type { BrokerId } from './symbols';
+
 const DASH = '—';
 
 /** Fixed to `max` decimals, then trailing zeros trimmed down to no fewer than `min`. */
@@ -42,15 +44,25 @@ export function formatSpan(seconds: number): string {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
-/** An estimated expiry for a Zerodha access token. Kite gives tokens no expiry
- *  of their own; they simply stop working at about 06:00 IST, so the caller
- *  passes that estimate (or `null` when it isn't known). */
-export function describeKiteTokenExpiry(
+/** When each broker's access tokens stop working, as the expiry text says it. */
+const TOKEN_RESETS: Record<BrokerId, string> = {
+  zerodha: 'Kite tokens reset around 6 AM',
+  fyers: 'FYERS tokens reset at 6:30 AM',
+};
+
+/** An estimated expiry for a broker's access token. Neither broker gives tokens an
+ *  expiry of their own; they simply stop working each morning (Kite at about 06:00
+ *  IST, FYERS at 06:30), so the caller passes that estimate (or `null` when it isn't known). */
+export function describeTokenExpiry(
+  broker: BrokerId,
   expiresAtSecs: number | null,
   nowMs: number,
 ): { text: string; expired: boolean; soon: boolean } {
   if (expiresAtSecs === null) return { text: "Saved, but when it was issued isn't known.", expired: false, soon: false };
   const left = expiresAtSecs - nowMs / 1000;
   if (left <= 0) return { text: `Expired ${formatSpan(left)} ago — log in again.`, expired: true, soon: false };
-  return { text: `Should work for another ${formatSpan(left)} (Kite tokens reset around 6 AM).`, expired: false, soon: left < 2 * 3600 };
+  return { text: `Should work for another ${formatSpan(left)} (${TOKEN_RESETS[broker]}).`, expired: false, soon: left < 2 * 3600 };
 }
+
+export const describeKiteTokenExpiry = (expiresAtSecs: number | null, nowMs: number) =>
+  describeTokenExpiry('zerodha', expiresAtSecs, nowMs);

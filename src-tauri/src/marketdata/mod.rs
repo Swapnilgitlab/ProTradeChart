@@ -23,15 +23,18 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::{now_ms, Database};
+use crate::fyers::client::FyersClient;
+use crate::fyers::protocol::Plan;
 use crate::pyapi::backend::AppBackend;
 use crate::pyapi::ApiError;
 use crate::secrets::Secrets;
 use crate::store::bar_memory::BarMemory;
 use crate::store::instrument_list::{self, Filter, Source};
 use crate::store::{market_symbols, preferences, watchlists};
+use crate::symbols::{india_broker, Broker, INDIA};
 use crate::throttle::in_background;
 use crate::zerodha::client::ZerodhaClient;
-use crate::{providers, zerodha_commands};
+use crate::{fyers_commands, providers, zerodha_commands};
 use job::{Progress, Summary};
 
 pub const PROGRESS_EVENT: &str = "market-data-progress";
@@ -40,12 +43,17 @@ pub const FINISHED_EVENT: &str = "market-data-finished";
 /// "true" once the user has chosen to keep the market loaded.
 pub const PREF_KEEP_LOADED: &str = "marketData.keepLoaded";
 
+/// Why the market isn't loaded through FYERS's free plan: five years of every NSE stock and index is
+/// about 2,100 symbols at five 366-day requests each, some 10,500 requests, where the Standard plan
+/// allows 5,000 a day (and blocks an account that keeps going over).
+pub const FYERS_STANDARD_REFUSAL: &str = "Keeping the market loaded takes about 10,500 requests to FYERS, and FYERS's \
+     Standard plan allows 5,000 a day. It works with FYERS Prime (set the plan under Data providers → FYERS), or \
+     through Zerodha.";
+
 const FIRST_LOOK: Duration = Duration::from_secs(120);
 const LOOK_EVERY: Duration = Duration::from_secs(300);
 /// More than any exchange lists, so the whole list comes back.
 const LIST_ALL: usize = 100_000;
-/// The only broker the market is loaded from.
-const PROVIDER: &str = "zerodha";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -139,14 +147,22 @@ pub fn set_keep_loaded(conn: &rusqlite::Connection, on: bool) -> rusqlite::Resul
 
 /// Starts a load unless one is running.
 pub fn start(app: &AppHandle, trigger: Trigger) -> Result<(), String> {
-    {
+    let broker = {
         let db = app.state::<Database>();
         let secrets = app.state::<Secrets>();
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
-        if !providers::is_usable(&conn, &secrets, PROVIDER).unwrap_or(false) {
-            return Err("Connect Zerodha under Data providers first: the prices come from your broker.".to_string());
+        let broker = india_broker(&conn, &secrets).map_err(|e| e.to_string())?;
+        if !providers::is_usable(&conn, &secrets, broker.id()).unwrap_or(false) {
+            return Err(format!(
+                "Connect {} under Data providers first: the prices come from your broker.",
+                broker.label()
+            ));
         }
-    }
+        if broker == Broker::Fyers && app.state::<FyersClient>().plan() == Plan::Standard {
+            return Err(FYERS_STANDARD_REFUSAL.to_string());
+        }
+        broker
+    };
 
     let state = app.state::<MarketData>();
     {
@@ -165,6 +181,16 @@ pub fn start(app: &AppHandle, trigger: Trigger) -> Result<(), String> {
     let app = app.clone();
     tauri::async_runtime::spawn(in_background(async move {
         let outcome = run_once(&app).await;
+        // Another broker started serving `india:` while this ran: what it wrote came from the old
+        // one, and two brokers' bars are never mixed, so it goes (`market_commands` dropped the rest).
+        let now_serving = {
+            let db = app.state::<Database>();
+            let conn = db.conn.lock().ok();
+            conn.and_then(|c| india_broker(&c, &app.state::<Secrets>()).ok())
+        };
+        if now_serving.is_some_and(|b| b != broker) {
+            app.state::<BarMemory>().forget_provider(INDIA);
+        }
         let state = app.state::<MarketData>();
         state.remember(&outcome, now_ms());
         match &outcome {
@@ -193,10 +219,22 @@ pub fn start(app: &AppHandle, trigger: Trigger) -> Result<(), String> {
 async fn run_once(app: &AppHandle) -> Result<Summary, ApiError> {
     let db = app.state::<Database>();
     let secrets = app.state::<Secrets>();
-    let client = app.state::<ZerodhaClient>();
-    zerodha_commands::refresh_instruments_if_stale(&db, &secrets, &client, plan::INSTRUMENTS_MAX_AGE_MS).await;
+    let broker = {
+        let conn = db.conn.lock().map_err(|e| ApiError::internal(e.to_string()))?;
+        india_broker(&conn, &secrets)?
+    };
+    match broker {
+        Broker::Zerodha => {
+            let client = app.state::<ZerodhaClient>();
+            zerodha_commands::refresh_instruments_if_stale(&db, &secrets, &client, plan::INSTRUMENTS_MAX_AGE_MS).await;
+        }
+        Broker::Fyers => {
+            let client = app.state::<FyersClient>();
+            fyers_commands::refresh_instruments_if_stale(&db, &secrets, &client, plan::INSTRUMENTS_MAX_AGE_MS).await;
+        }
+    }
     let (listed, first) = {
-        let source = Source::parse(PROVIDER).ok_or_else(|| ApiError::bad_request("unknown provider"))?;
+        let source = Source::of(broker);
         let conn = db.conn.lock().map_err(|e| ApiError::internal(e.to_string()))?;
         let nse = |kind: &str| Filter {
             exchange: Some("NSE".to_string()),
@@ -206,7 +244,7 @@ async fn run_once(app: &AppHandle) -> Result<Summary, ApiError> {
         let equities = instrument_list::list(&conn, source, &nse("EQUITY"), LIST_ALL)?;
         let indices = instrument_list::list(&conn, source, &nse("INDEX"), LIST_ALL)?;
         let first: Vec<String> = watchlists::members(&conn)?.into_iter().map(|(_, s)| s).collect();
-        (plan::universe(PROVIDER, &equities, &indices), first)
+        (plan::universe(INDIA, &equities, &indices), first)
     };
     if listed.is_empty() {
         return Err(ApiError::new(

@@ -7,7 +7,7 @@ The package Python scripts import to reach ProTradeChart's market data. Scripts 
 ```python
 import protrade as pt
 
-bars = pt.bars("zerodha:NSE:RELIANCE", "D", start="2023-01-01")   # a DataFrame
+bars = pt.bars("india:NSE:RELIANCE", "D", start="2023-01-01")     # a DataFrame
 ```
 
 It needs **Python 3.10+ and pandas**, and nothing else: HTTP is the standard library. It is not installed with `pip`: the app
@@ -17,13 +17,13 @@ writes a copy that matches the running app next to its virtual environment and p
 
 | | |
 | --- | --- |
-| `pt.bars(symbol, interval="D", start=None, end=None, limit=None, tz=None, naive=False)` | OHLCV as a DataFrame (`open high low close volume`) on a time index. `symbol` is `provider:EXCHANGE:TICKER` (`zerodha:NSE:RELIANCE`) or `csv:NAME`. Without `start` you get the newest `limit` bars (500). |
+| `pt.bars(symbol, interval="D", start=None, end=None, limit=None, tz=None, naive=False)` | OHLCV as a DataFrame (`open high low close volume`) on a time index. `symbol` is `provider:EXCHANGE:TICKER` (`india:NSE:RELIANCE`; the older `zerodha:` spelling still works) or `csv:NAME`. Without `start` you get the newest `limit` bars (500). |
 | `pt.bars_many(symbols, interval="D", start=None, end=None, limit=None, workers=4, errors="raise", progress=True)` | `{symbol: DataFrame}` for many symbols, in order. `errors="skip"` leaves failed symbols out and lists them in `result.errors`. |
 | `pt.instruments(provider, exchange=None, kind=None, q=None, limit=None)` | A broker's instruments, to build a universe from. `kind` is `EQUITY`, `INDEX` or `FUT`. |
 | `pt.watchlists()` / `pt.watchlist(name_or_id, providers=None)` | The app's watchlists; the symbols on one, optionally only from some sources. |
 | `pt.providers()` | Which sources are set up (`usable`). |
 | `pt.resample(bars, rule, session_open="09:15")` | Coarser bars from finer ones. Intraday rules (`"15min"`, `"4h"`) restart at each day's session open. |
-| `pt.universe(name=None, providers=("zerodha",))` | The symbols to work on, so a script runs with nothing set up: that watchlist, else your first with readable symbols, else ten large NSE stocks. `.source` says which. |
+| `pt.universe(name=None, providers=("india",))` | The symbols to work on, so a script runs with nothing set up: that watchlist, else your first with readable symbols, else ten large NSE stocks. `.source` says which. |
 | `pt.status()` | The app's version; a quick connection check. |
 
 ## Showing results
@@ -72,7 +72,7 @@ from protrade.study import ResearchStudy
 
 study = ResearchStudy({
     "name": "100% Winners",
-    "universe": {"source": "instruments", "provider": "zerodha", "exchanges": ["NSE"], "min_avg_traded_value": 1e7},
+    "universe": {"source": "instruments", "provider": "india", "exchanges": ["NSE"], "min_avg_traded_value": 1e7},
     "period": {"start": "2018-01-01"},
     "event": {"conditions": ["return_12m crosses_above 1.0"]},
     "metrics": ["return_63", "rsi_14", "dist_high_252", "rvol_20"],

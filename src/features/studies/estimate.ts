@@ -1,4 +1,5 @@
 import { getWatchlist, studyEstimate } from '../../lib/ipc';
+import { INDIA, splitSymbol } from '../../lib/symbols';
 import type { UniverseEstimate } from '../../studies/readiness';
 import type { StudySpec } from '../../studies/spec';
 
@@ -14,7 +15,7 @@ export async function estimateUniverse(
   if (u.source === 'watchlist') {
     const row = watchlists.find((w) => w.name.toLowerCase() === (u.watchlist ?? '').toLowerCase());
     if (!row) return null;
-    symbols = (await getWatchlist(row.id)).items.map((i) => i.symbol).filter((sym) => /^zerodha:/.test(sym));
+    symbols = (await getWatchlist(row.id)).items.map((i) => i.symbol).filter((sym) => splitSymbol(sym).provider === INDIA);
   }
   return studyEstimate({
     provider: u.provider,

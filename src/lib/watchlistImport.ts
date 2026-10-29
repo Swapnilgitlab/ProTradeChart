@@ -1,4 +1,4 @@
-import { joinSymbol, PROVIDER_LABELS, resolveTypedSymbol, type ProviderId } from './symbols';
+import { canonicalProvider, INDIA, isSupportedProvider, joinSymbol, resolveTypedSymbol, type ProviderId } from './symbols';
 
 export interface ImportedWatchlistItem {
   symbol: string;
@@ -11,19 +11,17 @@ export interface WatchlistImportResult {
   skipped: string[];
 }
 
-const PASS_THROUGH_PROVIDERS = new Set<string>(Object.keys(PROVIDER_LABELS));
-
 export interface MapOptions {
-  /** Where NSE and BSE symbols go: the user's own broker account
-   *  (`zerodha:NSE:RELIANCE`). With none, they can't be charted and are skipped. */
-  indianProvider?: 'zerodha';
+  /** Whether NSE and BSE symbols can be charted: a broker account is set up to serve
+   *  them (`india:NSE:RELIANCE`). With none, they can't be charted and are skipped. */
+  indian?: boolean;
   /** Where an entry with no exchange goes (default: the app's default provider). */
   defaultProvider?: ProviderId;
 }
 
-/** TradingView's NSE index shorthands → the ticker Zerodha's instrument list
- *  uses (its index names have spaces, which tickers write as underscores). */
-const ZERODHA_INDEX: Record<string, string> = {
+/** TradingView's NSE index shorthands → the app's ticker for the index (index names have
+ *  spaces, which tickers write as underscores). */
+const INDIA_INDEX: Record<string, string> = {
   NIFTY: 'NIFTY_50',
   NIFTY50: 'NIFTY_50',
   BANKNIFTY: 'NIFTY_BANK',
@@ -47,16 +45,15 @@ export function mapSymbol(entry: string, options: MapOptions = {}): string | nul
   const lowerPrefix = prefix.toLowerCase();
   const upper = ticker.toUpperCase();
 
-  // Already one of our own provider:TICKER symbols (e.g. a re-imported export).
-  // Our prefixes are lowercase; TradingView's exchange codes are uppercase.
-  if (prefix === lowerPrefix && PASS_THROUGH_PROVIDERS.has(lowerPrefix)) {
-    return joinSymbol(lowerPrefix as ProviderId, lowerPrefix === 'csv' ? upper : ticker);
+  // Already one of our own provider:TICKER symbols (e.g. a re-imported export, or one saved
+  // under a broker's name). Our prefixes are lowercase; TradingView's exchange codes are uppercase.
+  const ours = canonicalProvider(lowerPrefix);
+  if (prefix === lowerPrefix && isSupportedProvider(ours)) {
+    return joinSymbol(ours as ProviderId, ours === 'csv' ? upper : ticker);
   }
 
-  if (exchange === 'NSE' || exchange === 'BSE') {
-    if (options.indianProvider === 'zerodha') {
-      return joinSymbol('zerodha', `${exchange}:${(exchange === 'NSE' && ZERODHA_INDEX[upper]) || upper}`);
-    }
+  if ((exchange === 'NSE' || exchange === 'BSE') && options.indian) {
+    return joinSymbol(INDIA, `${exchange}:${(exchange === 'NSE' && INDIA_INDEX[upper]) || upper}`);
   }
   return null;
 }

@@ -12,7 +12,7 @@ import pandas as pd
 
 import protrade as pt
 
-SYMBOL = None  # like "zerodha:NSE:RELIANCE"; None uses the first stock pt.universe() gives
+SYMBOL = None  # like "india:NSE:RELIANCE"; None uses the first stock pt.universe() gives
 START = "2018-01-01"
 FAST, SLOW = 20, 50  # days in the two averages
 CAPITAL = 1_000_000

@@ -70,20 +70,20 @@ describe('quoteRefreshMs', () => {
 
   it('refreshes every 20 seconds however long a Zerodha or imported list is', () => {
     expect(quoteRefreshMs([])).toBe(20_000);
-    expect(quoteRefreshMs(many('zerodha', 500))).toBe(20_000);
-    expect(quoteRefreshMs([...many('zerodha', 300), ...many('csv', 50)])).toBe(20_000);
+    expect(quoteRefreshMs(many('india', 500))).toBe(20_000);
+    expect(quoteRefreshMs([...many('india', 300), ...many('csv', 50)])).toBe(20_000);
   });
 
   it('stretches for symbols that cost one request each', () => {
     expect(quoteRefreshMs(many('binance', 10))).toBe(20_000);
     expect(quoteRefreshMs(many('binance', 100))).toBe(70_000);
-    expect(quoteRefreshMs([...many('zerodha', 100), ...many('coinbase', 100)])).toBe(70_000);
+    expect(quoteRefreshMs([...many('india', 100), ...many('coinbase', 100)])).toBe(70_000);
   });
 });
 
 describe('quoteRefreshMs with Zerodha', () => {
   it('quotes a whole Zerodha list in a few requests, so a long one refreshes as often as a short one', () => {
-    const many = Array.from({ length: 500 }, (_, i) => `zerodha:NSE:S${i}`);
+    const many = Array.from({ length: 500 }, (_, i) => `india:NSE:S${i}`);
     expect(quoteRefreshMs(many)).toBe(20_000);
   });
 });

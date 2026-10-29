@@ -384,18 +384,12 @@ pub async fn test(db: &Database, secrets: &Secrets, client: &ZerodhaClient) -> R
 }
 
 // ---- Market data ------------------------------------------------------------
+//
+// Not commands of their own: `market_commands` calls these while Zerodha is the broker serving
+// `india:` symbols.
 
-#[tauri::command(async)]
-pub fn zerodha_search_instruments(
-    query: String,
-    limit: Option<u32>,
-    db: State<Database>,
-) -> Result<Vec<SymbolMatch>, String> {
-    sql(instruments::search(
-        &*lock(&db)?,
-        &query,
-        limit.unwrap_or(8).clamp(1, 25) as usize,
-    ))
+pub fn search_instruments(db: &Database, query: &str, limit: usize) -> Result<Vec<SymbolMatch>, String> {
+    sql(instruments::search(&*lock(db)?, query, limit))
 }
 
 fn resolve_or_explain(conn: &Connection, ticker: &str) -> Result<Instrument, String> {
@@ -406,29 +400,28 @@ fn resolve_or_explain(conn: &Connection, ticker: &str) -> Result<Instrument, Str
     })
 }
 
-#[tauri::command]
-pub async fn zerodha_fetch_bars(
-    ticker: String,
-    interval: String,
+pub async fn fetch_bars(
+    app: &AppHandle,
+    ticker: &str,
+    interval: &str,
     from_ms: Option<i64>,
     to_ms: Option<i64>,
-    app: AppHandle,
-    db: State<'_, Database>,
-    client: State<'_, ZerodhaClient>,
 ) -> Result<BarsResponse, String> {
+    let db = app.state::<Database>();
+    let client = app.state::<ZerodhaClient>();
     let secrets = app.state::<Secrets>();
     let interval_kind =
-        Interval::parse(&interval).ok_or_else(|| format!("Zerodha doesn't serve a '{interval}' interval"))?;
+        Interval::parse(interval).ok_or_else(|| format!("Zerodha doesn't serve a '{interval}' interval"))?;
     let (creds, inst) = {
         let conn = lock(&db)?;
         let creds = zerodha_credentials(&conn, &secrets).map_err(|e| e.message())?;
-        (creds, resolve_or_explain(&conn, &ticker)?)
+        (creds, resolve_or_explain(&conn, ticker)?)
     };
 
-    let cache_key = format!("zerodha:{}", inst.ticker);
+    let cache_key = format!("{}:{}", crate::symbols::INDIA, inst.ticker);
     // The session's memory, under the same spelling the Python API uses. Never the disk: broker
     // price history isn't kept on this computer.
-    let cache_interval = canonical_interval(&interval);
+    let cache_interval = canonical_interval(interval);
     let memory = app.state::<BarMemory>();
     let response = |bars, from_cache| BarsResponse {
         bars,
@@ -438,8 +431,8 @@ pub async fn zerodha_fetch_bars(
     };
     // Daily (and the weekly and monthly charts made from it) comes from memory when the market is
     // loaded or a script read the symbol; only what memory lacks is read from Kite.
-    if let (true, Some(from)) = (canonical_interval(&interval).as_deref() == Some("D"), from_ms) {
-        match crate::marketdata::chart_daily(&app, &cache_key, from, to_ms).await {
+    if let (true, Some(from)) = (canonical_interval(interval).as_deref() == Some("D"), from_ms) {
+        match crate::marketdata::chart_daily(app, &cache_key, from, to_ms).await {
             Some(Ok(bars)) => return Ok(response(bars, false)),
             Some(Err((_, stored))) if !stored.is_empty() => return Ok(response(stored, true)),
             Some(Err((message, _))) => return Err(message),
@@ -484,13 +477,10 @@ pub async fn zerodha_fetch_bars(
     }
 }
 
-#[tauri::command]
-pub async fn zerodha_quotes(
-    tickers: Vec<String>,
-    db: State<'_, Database>,
-    secrets: State<'_, Secrets>,
-    client: State<'_, ZerodhaClient>,
-) -> Result<Vec<Quote>, String> {
+pub async fn quotes(app: &AppHandle, tickers: &[String]) -> Result<Vec<Quote>, String> {
+    let db = app.state::<Database>();
+    let secrets = app.state::<Secrets>();
+    let client = app.state::<ZerodhaClient>();
     let (creds, resolved) = {
         let conn = lock(&db)?;
         let creds = zerodha_credentials(&conn, &secrets).map_err(|e| e.message())?;

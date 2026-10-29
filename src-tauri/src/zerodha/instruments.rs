@@ -6,32 +6,23 @@
 
 use std::io::Read;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::Connection;
 
 use crate::models::SymbolMatch;
+pub use crate::store::instrument_list::Instrument;
+use crate::store::instrument_list::{self, Source};
 
 /// The exchanges whose lists are downloaded. Each file carries its own
 /// options, which are dropped.
 pub const EXCHANGES: [&str; 7] = ["NSE", "BSE", "NFO", "BFO", "MCX", "CDS", "BCD"];
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Instrument {
-    /// `NSE:RELIANCE` — the chart symbol without its `zerodha:` prefix.
-    pub ticker: String,
-    pub exchange: String,
-    pub token: i64,
-    /// `EQUITY`, `INDEX` or `FUT`.
-    pub instrument: String,
-    /// The trading symbol exactly as Kite spells it (`NIFTY 50`, `M&M`).
-    pub symbol: String,
-    pub name: Option<String>,
-    /// `YYYY-MM-DD`, for futures.
-    pub expiry: Option<String>,
+/// How Kite's quote requests name an instrument: `EXCHANGE:TRADINGSYMBOL`.
+pub trait QuoteKey {
+    fn quote_key(&self) -> String;
 }
 
-impl Instrument {
-    /// How quote requests name it: `EXCHANGE:TRADINGSYMBOL`.
-    pub fn quote_key(&self) -> String {
+impl QuoteKey for Instrument {
+    fn quote_key(&self) -> String {
         format!("{}:{}", self.exchange, self.symbol)
     }
 }
@@ -40,17 +31,6 @@ impl Instrument {
 /// underscores (`NIFTY_50`) so a ticker never contains whitespace.
 pub fn make_ticker(exchange: &str, symbol: &str) -> String {
     format!("{exchange}:{}", symbol.trim().to_uppercase().replace(' ', "_"))
-}
-
-/// Normalises typed or stored text to a ticker key: upper-case, spaces to
-/// underscores, and a bare symbol assumed to be NSE.
-pub fn normalize_ticker(text: &str) -> String {
-    let t = text.trim().to_uppercase().replace(' ', "_");
-    if t.contains(':') {
-        t
-    } else {
-        format!("NSE:{t}")
-    }
 }
 
 const MONTHS: [&str; 12] = [
@@ -144,169 +124,34 @@ pub fn parse_master(reader: impl Read, today: &str) -> Result<Vec<Instrument>, S
 }
 
 // ---- Storage ---------------------------------------------------------------
+//
+// Zerodha's own table (`zerodha_instruments`), through the code both brokers share.
 
 /// Replaces the stored instrument list. One transaction, so a failed refresh
 /// never leaves search half-empty.
 pub fn replace_all(conn: &mut Connection, items: &[Instrument]) -> rusqlite::Result<usize> {
-    let tx = conn.transaction()?;
-    tx.execute("DELETE FROM zerodha_instruments", [])?;
-    {
-        let mut stmt = tx.prepare(
-            "INSERT OR IGNORE INTO zerodha_instruments (ticker, exchange, token, instrument, symbol, name, expiry)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        )?;
-        for i in items {
-            stmt.execute(params![
-                i.ticker,
-                i.exchange,
-                i.token,
-                i.instrument,
-                i.symbol,
-                i.name,
-                i.expiry
-            ])?;
-        }
-    }
-    tx.commit()?;
-    count(conn).map(|n| n as usize)
+    instrument_list::replace_all(conn, Source::Zerodha, items)
 }
 
 pub fn count(conn: &Connection) -> rusqlite::Result<i64> {
-    conn.query_row("SELECT COUNT(*) FROM zerodha_instruments", [], |r| r.get(0))
+    instrument_list::count(conn, Source::Zerodha)
 }
 
-const COLUMNS: &str = "ticker, exchange, token, instrument, symbol, name, expiry";
-
-fn from_row(r: &rusqlite::Row) -> rusqlite::Result<Instrument> {
-    Ok(Instrument {
-        ticker: r.get(0)?,
-        exchange: r.get(1)?,
-        token: r.get(2)?,
-        instrument: r.get(3)?,
-        symbol: r.get(4)?,
-        name: r.get(5)?,
-        expiry: r.get(6)?,
-    })
-}
-
-/// A stock NSE trades in a special segment is listed with its series after a
-/// hyphen — `HFCL` is `NSE:HFCL-BE`, `KODYTECH` is `NSE:KODYTECH-ST` — while lists,
-/// imports and people use the bare name. Only a two-letter series counts, so `BAJAJ`
-/// is not taken for `BAJAJ-AUTO`, a different company. `-BE` wins if there are several.
-fn nse_series_ticker(conn: &Connection, symbol: &str) -> rusqlite::Result<Option<String>> {
-    conn.query_row(
-        "SELECT ticker FROM zerodha_instruments
-         WHERE exchange = 'NSE' AND instrument = 'EQUITY' AND ticker LIKE ?1 ESCAPE '\\'
-         ORDER BY (ticker LIKE '%-BE') DESC, ticker LIMIT 1",
-        params![format!("NSE:{}-__", escape_like(symbol))],
-        |r| r.get(0),
-    )
-    .optional()
-}
-
-fn by_ticker(conn: &Connection, ticker: &str) -> rusqlite::Result<Option<Instrument>> {
-    conn.query_row(
-        &format!("SELECT {COLUMNS} FROM zerodha_instruments WHERE ticker = ?1"),
-        params![ticker],
-        from_row,
-    )
-    .optional()
-}
-
-/// Looks an instrument up by chart ticker (`NSE:RELIANCE`, or just `RELIANCE`). A stock
-/// NSE lists under a series (`NSE:HFCL-BE`) is found by its bare name too, so a list or
-/// an import that says `NSE:HFCL` charts, quotes and streams the same as any other.
+/// Looks an instrument up by chart ticker (`NSE:RELIANCE`, or just `RELIANCE`); see
+/// [`instrument_list::resolve`].
 pub fn resolve(conn: &Connection, ticker: &str) -> rusqlite::Result<Option<Instrument>> {
-    let key = normalize_ticker(ticker);
-    if let Some(found) = by_ticker(conn, &key)? {
-        return Ok(Some(found));
-    }
-    match key.strip_prefix("NSE:") {
-        Some(symbol) => match nse_series_ticker(conn, symbol)? {
-            Some(series) => by_ticker(conn, &series),
-            None => Ok(None),
-        },
-        None => Ok(None),
-    }
+    instrument_list::resolve(conn, Source::Zerodha, ticker)
 }
 
-/// Lists up to this long are "short": they leave room for other providers' results.
-const SHORT_LIST: usize = 10;
-const MAX_FUTURES_IN_SHORT_LIST: usize = 3;
-
-fn escape_like(text: &str) -> String {
-    text.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
-}
-
-/// Searches symbols and names. Exact symbol first, then prefix, then anywhere
-/// in the symbol, then in the name; ties prefer indices over stocks over
-/// futures, NSE over BSE, and shorter symbols.
 pub fn search(conn: &Connection, query: &str, limit: usize) -> rusqlite::Result<Vec<SymbolMatch>> {
-    // A short list is for picking a stock; a stock's monthly futures would
-    // crowd it out. A long list (someone scoped to Zerodha) has room for them.
-    let future_cap = if limit <= SHORT_LIST {
-        MAX_FUTURES_IN_SHORT_LIST
-    } else {
-        usize::MAX
-    };
-    let q = query.trim().to_lowercase();
-    // A query of nothing but separators or wildcards ("_", "%", "-") would
-    // match everything, which is never what was meant.
-    if !q.chars().any(char::is_alphanumeric) {
-        return Ok(Vec::new());
-    }
-    let exact = q.replace('_', " ");
-    let (prefix, any) = (
-        format!("{}%", escape_like(&exact)),
-        format!("%{}%", escape_like(&exact)),
-    );
-    let ticker_prefix = format!("{}%", escape_like(&q.replace(' ', "_")));
-
-    let mut stmt = conn.prepare(
-        "SELECT ticker, name, exchange, instrument FROM zerodha_instruments
-         WHERE LOWER(symbol) LIKE ?3 ESCAPE '\\' OR LOWER(name) LIKE ?3 ESCAPE '\\' OR LOWER(ticker) LIKE ?4 ESCAPE '\\'
-         ORDER BY
-           CASE WHEN LOWER(symbol) = ?1 THEN 0
-                WHEN LOWER(symbol) LIKE ?2 ESCAPE '\\' OR LOWER(ticker) LIKE ?4 ESCAPE '\\' THEN 1
-                WHEN LOWER(symbol) LIKE ?3 ESCAPE '\\' THEN 2 ELSE 3 END,
-           CASE instrument WHEN 'INDEX' THEN 0 WHEN 'EQUITY' THEN 1 ELSE 2 END,
-           CASE exchange WHEN 'NSE' THEN 0 WHEN 'BSE' THEN 1 WHEN 'NFO' THEN 2 WHEN 'MCX' THEN 3
-                         WHEN 'CDS' THEN 4 WHEN 'BFO' THEN 5 ELSE 6 END,
-           LENGTH(symbol)
-         LIMIT ?5",
-    )?;
-    // Over-fetch so that skipping surplus futures still leaves `limit` rows.
-    let rows = stmt.query_map(params![exact, prefix, any, ticker_prefix, (limit * 6) as i64], |r| {
-        Ok(SymbolMatch {
-            symbol: r.get(0)?,
-            name: r.get(1)?,
-            exchange: r.get(2)?,
-            kind: r.get(3)?,
-        })
-    })?;
-
-    let mut out = Vec::with_capacity(limit);
-    let mut futures = 0;
-    for row in rows {
-        let m = row?;
-        if m.kind.as_deref() == Some("FUT") {
-            futures += 1;
-            if futures > future_cap {
-                continue;
-            }
-        }
-        out.push(m);
-        if out.len() == limit {
-            break;
-        }
-    }
-    Ok(out)
+    instrument_list::search(conn, Source::Zerodha, query, limit)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::Database;
+    use crate::store::instrument_list::normalize_ticker;
 
     const HEADER: &str =
         "instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type,segment,exchange";

@@ -232,6 +232,24 @@ impl BarMemory {
         }
     }
 
+    /// Drops every series of one namespace (`india`): what a change of broker does, since another
+    /// broker's bars must never be stitched onto these. Returns how many series went.
+    pub fn forget_provider(&self, provider: &str) -> usize {
+        let prefix = format!("{provider}:");
+        let mut inner = self.write();
+        let before = inner.series.len();
+        let mut dropped_bars = 0;
+        inner.series.retain(|(symbol, _), series| {
+            let keep = !symbol.starts_with(&prefix);
+            if !keep {
+                dropped_bars += series.bars.len();
+            }
+            keep
+        });
+        inner.bars -= dropped_bars;
+        before - inner.series.len()
+    }
+
     /// Marks every daily series that was current up to `before` as current through `now`: after a
     /// holiday, which has no bar to fetch. Returns how many it marked.
     pub fn carry_daily_through(&self, before: i64, now: i64) -> usize {
@@ -286,7 +304,18 @@ impl BarMemory {
 mod tests {
     use super::*;
 
-    const SYM: &str = "zerodha:NSE:RELIANCE";
+    const SYM: &str = "india:NSE:RELIANCE";
+
+    #[test]
+    fn forgetting_a_namespace_drops_its_series_and_keeps_the_rest() {
+        let m = BarMemory::default();
+        m.put(SYM, "D", &[bar(1, 10.0), bar(2, 11.0)]);
+        m.put("india:NSE:TCS", "5", &[bar(1, 10.0)]);
+        m.put("csv:MINE", "D", &[bar(1, 10.0)]);
+        assert_eq!(m.forget_provider("india"), 2);
+        assert_eq!(m.stats(), Stats { series: 1, bars: 1 });
+        assert_eq!(m.get("csv:MINE", "D", i64::MIN, i64::MAX, None).len(), 1);
+    }
 
     fn bar(time: i64, close: f64) -> Bar {
         Bar {
@@ -346,7 +375,7 @@ mod tests {
         let m = BarMemory::default();
         m.extend_coverage(SYM, "D", range(1, 2), 3);
         assert_eq!(m.coverage(SYM, "5"), None);
-        assert_eq!(m.coverage("zerodha:NSE:INFY", "D"), None);
+        assert_eq!(m.coverage("india:NSE:INFY", "D"), None);
     }
 
     #[test]

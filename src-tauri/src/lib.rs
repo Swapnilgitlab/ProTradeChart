@@ -3,7 +3,11 @@ mod ai_commands;
 mod alert_commands;
 mod commands;
 mod db;
+mod fyers;
+mod fyers_commands;
+mod login_callback;
 mod market;
+mod market_commands;
 mod marketdata;
 mod marketdata_commands;
 mod models;
@@ -19,6 +23,7 @@ mod screener_commands;
 mod secrets;
 mod store;
 mod study_commands;
+mod symbols;
 mod throttle;
 mod update_commands;
 mod zerodha;
@@ -29,6 +34,7 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager};
 
 use crate::db::Database;
+use crate::fyers::client::FyersClient;
 use crate::secrets::Secrets;
 use crate::zerodha::client::ZerodhaClient;
 use crate::zerodha::feed::{Feed as ZerodhaFeed, FeedConfig as ZerodhaFeedConfig};
@@ -74,6 +80,7 @@ pub fn run() {
                 let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
                 store::watchlists::seed_starter_list_once(&mut conn)?;
             }
+            let fyers_plan = fyers_commands::saved_plan(&*db.conn.lock().map_err(|e| e.to_string())?);
             log::info!("database ready at {}", data_dir.display());
 
             app.manage(db);
@@ -87,7 +94,13 @@ pub fn run() {
                 .timeout(std::time::Duration::from_secs(30))
                 .user_agent(concat!("protradechart/", env!("CARGO_PKG_VERSION")))
                 .build()?;
-            app.manage(ZerodhaClient::new(broker_http));
+            app.manage(ZerodhaClient::new(broker_http.clone()));
+            let fyers = FyersClient::new(broker_http);
+            fyers.set_plan(fyers_plan);
+            app.manage(fyers);
+            app.manage(fyers::session::FyersSession::default());
+            app.manage(fyers::quotes::QuoteCache::default());
+            app.manage(fyers::poller::Poller::default());
             // AI's own clients: their requests set their own, longer, timeouts.
             let ai_http = reqwest::Client::builder()
                 .user_agent(concat!("protradechart/", env!("CARGO_PKG_VERSION")))
@@ -114,13 +127,15 @@ pub fn run() {
                 }),
             )));
 
+            // FYERS's live charts, from polled quotes: one loop for the whole app, idle until a chart subscribes.
+            fyers::poller::start(app.handle().clone());
             // Scripts the user scheduled. Only ever started here, once.
             scheduler::engine::start(app.handle().clone());
             // The market-data store's daily update; idle until the user has started the download,
             // and its first look is minutes after launch.
             marketdata::start_engine(app.handle().clone());
 
-            // Keep the broker's instrument list fresh in the background.
+            // Keep each set-up broker's instrument list fresh in the background.
             let refresh_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let db = refresh_handle.state::<Database>();
@@ -131,6 +146,14 @@ pub fn run() {
                     &secrets,
                     &zerodha,
                     zerodha_commands::INSTRUMENTS_MAX_AGE_MS,
+                )
+                .await;
+                let fyers = refresh_handle.state::<FyersClient>();
+                fyers_commands::refresh_instruments_if_stale(
+                    &db,
+                    &secrets,
+                    &fyers,
+                    fyers_commands::INSTRUMENTS_MAX_AGE_MS,
                 )
                 .await;
             });
@@ -183,11 +206,23 @@ pub fn run() {
             zerodha_commands::zerodha_login_in_browser,
             zerodha_commands::zerodha_redirect_url,
             zerodha_commands::zerodha_update_instruments,
-            zerodha_commands::zerodha_search_instruments,
-            zerodha_commands::zerodha_fetch_bars,
-            zerodha_commands::zerodha_quotes,
             zerodha_commands::zerodha_subscribe,
             zerodha_commands::zerodha_unsubscribe,
+            fyers_commands::fyers_status,
+            fyers_commands::fyers_login_url,
+            fyers_commands::fyers_redirect_url,
+            fyers_commands::fyers_login_in_browser,
+            fyers_commands::fyers_complete_login,
+            fyers_commands::fyers_set_pin,
+            fyers_commands::fyers_set_plan,
+            fyers_commands::fyers_update_instruments,
+            fyers_commands::fyers_subscribe,
+            fyers_commands::fyers_unsubscribe,
+            market_commands::market_source,
+            market_commands::set_market_source,
+            market_commands::market_fetch_bars,
+            market_commands::market_quotes,
+            market_commands::market_search_instruments,
             alert_commands::list_price_alerts,
             alert_commands::save_price_alert,
             alert_commands::delete_price_alert,

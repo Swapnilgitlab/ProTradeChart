@@ -1,6 +1,6 @@
 import type { VelaWorkspace } from '@luxalgo/vela/workspace';
 import { getSymbolNames } from '../lib/ipc';
-import { normalizeSymbol, splitSymbol } from '../lib/symbols';
+import { INDIA, normalizeSymbol, splitSymbol } from '../lib/symbols';
 
 type Cell = ReturnType<VelaWorkspace['cells']>[number];
 
@@ -9,7 +9,7 @@ const found = new Map<string, string>();
 
 /** Only the brokers' instrument lists carry company names; a crypto pair or an imported
  *  file has none, so asking the backend about one would be a wasted round trip. */
-const HAS_NAMES = new Set(['zerodha']);
+const HAS_NAMES = new Set([INDIA]);
 
 /** The company name for `symbol`, or null if none is known. */
 export async function companyName(symbol: string): Promise<string | null> {

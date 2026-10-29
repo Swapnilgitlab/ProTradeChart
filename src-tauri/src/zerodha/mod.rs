@@ -37,7 +37,7 @@ mod live {
 
     use super::client::{Credentials, ZerodhaClient};
     use super::feed::{Feed, FeedConfig};
-    use super::instruments::{self, Instrument};
+    use super::instruments::{self, Instrument, QuoteKey};
     use super::protocol::{Interval, ZerodhaErrorKind};
     use crate::db::Database;
 

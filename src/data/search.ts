@@ -1,10 +1,10 @@
 import type { SymbolDescriptor } from '@luxalgo/vela';
-import { listDatasets, zerodhaSearchInstruments } from '../lib/ipc';
-import { joinSymbol, type ProviderId } from '../lib/symbols';
+import { listDatasets, marketSearchInstruments } from '../lib/ipc';
+import { INDIA, joinSymbol, type ProviderId } from '../lib/symbols';
 import { ensureProvidersLoaded, isProviderUsable } from './providerStatus';
 
 export interface SymbolResult {
-  /** Fully-qualified chart symbol, e.g. `zerodha:NSE:RELIANCE`. */
+  /** Fully-qualified chart symbol, e.g. `india:NSE:RELIANCE`. */
   symbol: string;
   ticker: string;
   provider: ProviderId;
@@ -16,7 +16,7 @@ export interface SymbolResult {
 /** Search everything, or one provider only. */
 export type SearchScope = 'all' | ProviderId;
 
-const ZERODHA_RESULTS = 8;
+const INDIA_RESULTS = 8;
 const IMPORTED_RESULTS = 4;
 /** With a single source picked there's room to show more of it. */
 const SCOPED_RESULTS = 20;
@@ -48,12 +48,13 @@ export function rankSymbols(query: string, symbols: SymbolDescriptor[], limit: n
   return scored.slice(0, limit).map((s) => s.symbol);
 }
 
-async function zerodhaResults(query: string, limit: number): Promise<SymbolResult[]> {
-  const matches = await zerodhaSearchInstruments(query, limit);
+/** The active broker's instrument list, searched in Rust. */
+async function indiaResults(query: string, limit: number): Promise<SymbolResult[]> {
+  const matches = await marketSearchInstruments(query, limit);
   return matches.map((m) => ({
-    symbol: joinSymbol('zerodha', m.symbol),
+    symbol: joinSymbol(INDIA, m.symbol),
     ticker: m.symbol,
-    provider: 'zerodha',
+    provider: INDIA,
     name: m.name ?? undefined,
     tag: m.kind === 'EQUITY' ? m.exchange ?? undefined : (m.kind ?? m.exchange ?? undefined),
   }));
@@ -84,7 +85,7 @@ export async function searchSymbols(query: string, scope: SearchScope = 'all'): 
 
   const jobs: Promise<SymbolResult[]>[] = [];
   if (wants('csv')) jobs.push(importedResults(q, size(IMPORTED_RESULTS)));
-  if (wants('zerodha')) jobs.push(zerodhaResults(q, size(ZERODHA_RESULTS)));
+  if (wants(INDIA)) jobs.push(indiaResults(q, size(INDIA_RESULTS)));
 
   const groups = await Promise.allSettled(jobs);
   return groups.flatMap((g) => (g.status === 'fulfilled' ? g.value : []));

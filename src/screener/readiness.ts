@@ -1,7 +1,7 @@
 /** Before a screen runs: what it needs, whether the app has it, and what the data will cost. Pure.
  *  The same facts, and the same wording for them, as a Study's readiness (`studies/readiness.ts`). */
 
-import { splitSymbol } from '../lib/symbols';
+import { INDIA, splitSymbol } from '../lib/symbols';
 import { formatCost, TRIAL_SYMBOLS, type ReadinessFacts, type UniverseEstimate } from '../studies/readiness';
 import { quoteUse, type ScreenSpec } from './spec';
 
@@ -22,8 +22,6 @@ export interface ScreenReadiness {
 /** Above this many minutes of fetching, a trial run is offered. */
 const LONG_FETCH_MINUTES = 3;
 
-const label = (id: string) => (id === 'zerodha' ? 'Zerodha' : id);
-
 export function screenReadiness(spec: ScreenSpec, facts: Omit<ReadinessFacts, 'today'>): ScreenReadiness {
   const checks: ScreenCheck[] = [];
   checks.push(
@@ -34,16 +32,17 @@ export function screenReadiness(spec: ScreenSpec, facts: Omit<ReadinessFacts, 't
 
   const u = spec.universe;
   const usable = new Set(facts.providers.filter((p) => p.usable).map((p) => p.id));
+  const label = (id: string) => facts.providers.find((p) => p.id === id)?.label ?? id;
   if (u.source === 'watchlist') {
     const known = facts.watchlists.some((w) => w.toLowerCase() === (u.watchlist ?? '').toLowerCase());
     checks.push({ ok: known, blocking: !known, text: known ? `Watchlist “${u.watchlist}”.` : `There is no watchlist called “${u.watchlist}”.` });
   }
   // A watchlist's sources are only known when it runs; the engine leaves out what it can't read.
   const sources = u.source === 'instruments' ? [u.provider] : u.source === 'symbols' ? [...new Set(u.symbols.map((s) => splitSymbol(s).provider))] : [];
-  const unsupported = sources.filter((p) => p !== 'zerodha');
-  const missing = sources.filter((p) => p === 'zerodha' && !usable.has(p));
+  const unsupported = sources.filter((p) => p !== INDIA);
+  const missing = sources.filter((p) => p === INDIA && !usable.has(p));
   if (unsupported.length) {
-    checks.push({ ok: false, blocking: true, text: `The Screener reads Zerodha data only, not ${unsupported.join(', ')}.` });
+    checks.push({ ok: false, blocking: true, text: `The Screener reads Indian market data only, not ${unsupported.join(', ')}.` });
   } else if (missing.length) {
     checks.push({ ok: false, blocking: true, text: `${missing.map(label).join(' and ')} isn't set up and switched on (Data providers).` });
   }

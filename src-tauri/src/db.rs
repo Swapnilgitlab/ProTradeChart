@@ -8,6 +8,8 @@ use crate::schema::SCHEMA_SQL;
 use crate::store::bar_tables;
 
 const FILE: &str = "charting.db";
+/// The copy made before the stored symbols moved to the `india:` namespace (`store::india_symbols`).
+const BEFORE_INDIA: &str = "charting.before-india.db";
 /// How long a statement waits for another connection's transaction before failing.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -31,15 +33,16 @@ impl Database {
         // in-memory databases the tests use.
         conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
         conn.busy_timeout(BUSY_TIMEOUT)?;
-        Self::init(conn)
+        Self::init(conn, Some(&data_dir.join(BEFORE_INDIA)))
     }
 
     #[cfg(test)]
     pub fn open_in_memory() -> rusqlite::Result<Self> {
-        Self::init(Connection::open_in_memory()?)
+        Self::init(Connection::open_in_memory()?, None)
     }
 
-    fn init(conn: Connection) -> rusqlite::Result<Self> {
+    /// `backup` is where a copy goes before a one-time rewrite of the user's data (none in memory).
+    fn init(conn: Connection, backup: Option<&Path>) -> rusqlite::Result<Self> {
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         conn.execute_batch(SCHEMA_SQL)?;
         // Columns added to a table that may already exist on disk (`CREATE TABLE IF NOT EXISTS` won't add them).
@@ -49,6 +52,9 @@ impl Database {
         if bar_tables::drop_disk_bars(&conn)? {
             conn.execute_batch("VACUUM;")?;
         }
+        // Symbols saved as `zerodha:` move to the Indian namespace, `india:` — after the old bar tables
+        // went, so the copy made first doesn't carry them.
+        crate::store::india_symbols::migrate(&conn, backup)?;
         Ok(Database { conn: Mutex::new(conn) })
     }
 }
@@ -115,6 +121,46 @@ mod tests {
             fs::metadata(path(&dir)).unwrap().len() < before / 4,
             "the space was handed back"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn symbols_in(file: &Path) -> Vec<String> {
+        let conn = Connection::open(file).unwrap();
+        let mut stmt = conn.prepare("SELECT symbol FROM watchlist_items ORDER BY id").unwrap();
+        let rows = stmt.query_map([], |r| r.get(0)).unwrap();
+        rows.map(Result::unwrap).collect()
+    }
+
+    #[test]
+    fn symbols_saved_as_zerodha_move_to_india_after_a_copy_of_the_old_file_is_kept() {
+        let dir = std::env::temp_dir().join(format!("protrade-india-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        {
+            let conn = Connection::open(path(&dir)).unwrap();
+            conn.execute_batch(SCHEMA_SQL).unwrap();
+            conn.execute_batch(
+                "INSERT INTO watchlists (id, name) VALUES (1, 'Mine');
+                 INSERT INTO watchlist_items (watchlist_id, symbol, position) VALUES (1, 'zerodha:NSE:TCS', 1);",
+            )
+            .unwrap();
+        }
+        let backup = dir.join(BEFORE_INDIA);
+
+        drop(Database::open(&dir).unwrap());
+        assert_eq!(symbols_in(&path(&dir)), ["india:NSE:TCS"]);
+        assert_eq!(symbols_in(&backup), ["zerodha:NSE:TCS"], "the copy is the way back");
+
+        // Opening again changes nothing, and never overwrites the copy.
+        let copied_at = fs::metadata(&backup).unwrap().modified().unwrap();
+        drop(Database::open(&dir).unwrap());
+        assert_eq!(fs::metadata(&backup).unwrap().modified().unwrap(), copied_at);
+        let _ = fs::remove_dir_all(&dir);
+
+        // A new database has nothing to move, so nothing is copied.
+        fs::create_dir_all(&dir).unwrap();
+        drop(Database::open(&dir).unwrap());
+        assert!(!dir.join(BEFORE_INDIA).exists());
         let _ = fs::remove_dir_all(&dir);
     }
 }

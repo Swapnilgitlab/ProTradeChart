@@ -12,6 +12,7 @@ import pandas as pd
 
 from . import client, frames
 from . import panels as _panel
+from .client import INDIA, canonical_provider, canonical_symbol_prefix
 
 
 class DataLimitWarning(UserWarning):
@@ -24,15 +25,16 @@ def status() -> dict:
 
 
 def providers() -> pd.DataFrame:
-    """The data sources a script can read, and whether each is set up (``usable``)."""
-    return pd.DataFrame(client.get("/v1/providers"), columns=["id", "label", "usable"])
+    """The data sources a script can read, and whether each is set up (``usable``): ``india`` (Indian
+    markets, through the broker the app uses, named in ``broker``) and ``csv`` (imported files)."""
+    return pd.DataFrame(client.get("/v1/providers"), columns=["id", "label", "usable", "broker"])
 
 
 def instruments(provider: str, exchange: str | None = None, kind: str | None = None,
                 q: str | None = None, limit: int | None = None) -> pd.DataFrame:
-    """A broker's instrument list, to build a universe from.
+    """The broker's instrument list, to build a universe from.
 
-    ``provider`` is ``"zerodha"``. ``exchange`` is ``"NSE"``, ``"BSE"``,
+    ``provider`` is ``"india"``. ``exchange`` is ``"NSE"``, ``"BSE"``,
     ``"NFO"``, ``"MCX"``...; ``kind`` is ``"EQUITY"``, ``"INDEX"`` or ``"FUT"``; ``q`` matches
     the symbol or name. The ``symbol`` column can be passed straight to :func:`bars`.
     """
@@ -49,13 +51,13 @@ def watchlist(which: str | int, providers: tuple[str, ...] | list[str] | None = 
     """The symbols on one of the app's watchlists, by name or id.
 
     Symbols from sources a script can't read (the crypto exchanges) are easy to have on a
-    list; pass ``providers=("zerodha",)`` to keep only the ones that can be.
+    list; pass ``providers=("india",)`` to keep only the ones that can be.
     """
     key = "id" if isinstance(which, int) and not isinstance(which, bool) else "name"
     symbols = [row["symbol"] for row in client.get("/v1/watchlist", **{key: which})["symbols"]]
     if providers is not None:
-        wanted = {p.lower() for p in providers}
-        symbols = [s for s in symbols if s.split(":", 1)[0].lower() in wanted]
+        wanted = {canonical_provider(p) for p in providers}
+        symbols = [s for s in symbols if canonical_provider(s.split(":", 1)[0]) in wanted]
     return symbols
 
 
@@ -71,14 +73,14 @@ class Universe(list):
         self.source = source
 
 
-def universe(name: str | None = None, providers: tuple[str, ...] | list[str] = ("zerodha",)) -> Universe:
+def universe(name: str | None = None, providers: tuple[str, ...] | list[str] = (INDIA,)) -> Universe:
     """The symbols to work on, so a script runs the first time with nothing set up.
 
     With a ``name``, that watchlist (`NotFoundError` if there is none, or nothing on it comes from
     ``providers``). Without one: your first watchlist that has symbols from ``providers``; failing
     that, ten large NSE stocks through the first of ``providers`` that is set up. ``.source`` says which.
     """
-    wanted = tuple(p.lower() for p in providers)
+    wanted = tuple(dict.fromkeys(canonical_provider(p) for p in providers))
     if name is not None:
         symbols = watchlist(name, providers=wanted)
         if not symbols:
@@ -92,7 +94,7 @@ def universe(name: str | None = None, providers: tuple[str, ...] | list[str] = (
     broker = next((p for p in wanted if p in usable), None)
     if broker is None:
         raise client.NotConfiguredError(
-            "No broker is set up yet. Open Data providers, add Zerodha, log in, and switch it on."
+            "No broker is set up yet. Open Data providers, connect Zerodha or FYERS, log in, and switch it on."
         )
     return Universe([f"{broker}:NSE:{ticker}" for ticker in SAMPLE_TICKERS], "a sample of large NSE stocks")
 
@@ -101,9 +103,10 @@ def bars(symbol: str, interval: str = "D", start=None, end=None, limit: int | No
          tz: str | None = None, naive: bool = False) -> pd.DataFrame:
     """OHLCV bars for one symbol, as a DataFrame.
 
-    ``symbol`` is ``provider:EXCHANGE:TICKER``, like ``"zerodha:NSE:RELIANCE"``, or
+    ``symbol`` is ``provider:EXCHANGE:TICKER``, like ``"india:NSE:RELIANCE"``, or
     ``"csv:NAME"`` for a file imported in the app. ``interval`` is ``"D"`` or minutes
-    (``"1"``, ``"5"``, ``"15"``, ``"60"``); Zerodha serves 1, 3, 5, 10, 15, 30, 60 and D.
+    (``"1"``, ``"5"``, ``"15"``, ``"60"``): what your broker serves natively (Zerodha: 1, 3, 5, 10,
+    15, 30, 60 and D; FYERS also 2, 20, 120 and 240).
     For anything else fetch a finer interval and use
     :func:`resample`.
 
@@ -154,7 +157,7 @@ def panel(symbols, start=None, end=None, bars: int | None = None) -> _panel.Pane
     ``result.frame(symbol)`` is one symbol's DataFrame, as :func:`bars` gives it;
     ``result.wide("close")`` is a dates × symbols table.
     """
-    symbols = list(dict.fromkeys(symbols))
+    symbols = list(dict.fromkeys(canonical_symbol_prefix(s) for s in symbols))
     if bars is not None and (isinstance(bars, bool) or not isinstance(bars, int) or bars < 1):
         raise ValueError("bars must be a whole number of bars, at least 1")
     start_ms, end_ms = frames.to_millis(start), frames.to_millis(end, end=True)
@@ -181,8 +184,10 @@ def _from_panel(symbols, start, end, limit, tz=None, naive=False) -> tuple[dict,
         raise
     except client.ProTradeError:
         return {}, list(symbols)
-    held = stored.held
-    return {s: stored.frame(s, tz=tz, naive=naive) for s in held}, stored.missing
+    held = set(stored.held)
+    # Keyed and listed as the caller spelled them (a script may still write `zerodha:`).
+    frames_ = {s: stored.frame(s, tz=tz, naive=naive) for s in symbols if canonical_symbol_prefix(s) in held}
+    return frames_, [s for s in symbols if canonical_symbol_prefix(s) not in held]
 
 
 def snapshot(symbols) -> pd.DataFrame:
@@ -202,7 +207,8 @@ def snapshot(symbols) -> pd.DataFrame:
     symbols = list(dict.fromkeys(symbols))
     rows, session = [], None
     for i in range(0, len(symbols), _SNAPSHOT_BATCH):
-        answer = client.post("/v1/snapshot", {"symbols": symbols[i : i + _SNAPSHOT_BATCH]})
+        batch = [canonical_symbol_prefix(s) for s in symbols[i : i + _SNAPSHOT_BATCH]]
+        answer = client.post("/v1/snapshot", {"symbols": batch})
         session = answer.get("sessionDay")
         rows.extend(answer.get("snapshots", []))
     nan = float("nan")
@@ -215,7 +221,8 @@ def snapshot(symbols) -> pd.DataFrame:
             "previous_close": [nan if r.get("previousClose") is None else r["previousClose"] for r in rows],
             "volume": [nan if r.get("volume") is None else r["volume"] for r in rows],
         },
-        index=pd.Index([r["symbol"] for r in rows], name="symbol"),
+        # The app answers in the order asked; the index keeps the caller's own spelling.
+        index=pd.Index(symbols[: len(rows)], name="symbol"),
     )
     traded = pd.to_datetime(pd.Series([r.get("tradedAt") for r in rows], dtype="float64"), unit="ms", utc=True)
     frame["traded"] = traded.dt.tz_convert(frames.MARKET_TZ).array
@@ -353,7 +360,7 @@ def _top_up(symbols, interval: str = "D", start=None, end=None, limit: int | Non
     counts = {"current": 0, "updated": 0, "fetch": 0, "skipped": 0}
     try:
         for i in range(0, len(symbols), _SYNC_BATCH):
-            batch = symbols[i : i + _SYNC_BATCH]
+            batch = [canonical_symbol_prefix(s) for s in symbols[i : i + _SYNC_BATCH]]
             answer = client.post(
                 "/v1/bars/sync",
                 {"symbols": batch, "interval": "D", "from": body_from, "to": body_to, "limit": limit},

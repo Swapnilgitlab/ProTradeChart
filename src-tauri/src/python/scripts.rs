@@ -169,6 +169,10 @@ pub fn exists(dir: &Path, name: &str) -> bool {
 pub const EXAMPLES: &[(&str, &str)] = &[
     ("hello.py", include_str!("../../../python/examples/hello.py")),
     (
+        "check_history.py",
+        include_str!("../../../python/examples/check_history.py"),
+    ),
+    (
         "screen_above_200dma.py",
         include_str!("../../../python/examples/screen_above_200dma.py"),
     ),

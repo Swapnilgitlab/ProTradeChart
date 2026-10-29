@@ -90,6 +90,44 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         quotes: true,
         docs_url: Some("https://kite.trade/docs/connect/v3/"),
     },
+    ProviderSpec {
+        id: "fyers",
+        label: "FYERS",
+        description: "Indian equities, indices, futures and commodities from your own FYERS API app: historical \
+                      candles, and quotes that keep charts live. Free with a FYERS account (the Standard plan's \
+                      limits are tight; Prime allows far more), and a fresh login each morning unless you let the \
+                      app renew it with your PIN.",
+        category: "broker",
+        fields: &[
+            FieldSpec {
+                key: "appId",
+                label: "App ID",
+                secret: false,
+                help: "From your app at myapi.fyers.in, like XXXXXXXXXX-100.",
+                placeholder: "ABCD1234EF-100",
+            },
+            FieldSpec {
+                key: "appSecret",
+                label: "Secret ID",
+                secret: true,
+                help: "From the same app. Used only to log in from here; it never leaves this computer.",
+                placeholder: "••••••••••",
+            },
+            FieldSpec {
+                key: "accessToken",
+                label: "Access token",
+                secret: true,
+                help: "Filled in for you when you log in below. FYERS tokens expire every morning at 6:30 AM.",
+                placeholder: "set by logging in",
+            },
+        ],
+        can_disable: true,
+        history: true,
+        live: true,
+        search: true,
+        quotes: true,
+        docs_url: Some("https://fyers.in/api-docs/"),
+    },
 ];
 
 pub fn spec(id: &str) -> Option<&'static ProviderSpec> {

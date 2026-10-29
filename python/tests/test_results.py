@@ -32,7 +32,7 @@ class InApp(Case):
 
 class ShowTests(InApp):
     def test_a_table_is_posted_to_the_run_that_started_the_script(self):
-        pt.show(pd.DataFrame({"symbol": ["zerodha:NSE:TCS"], "close": [4000.5]}), title="Above 200-DMA")
+        pt.show(pd.DataFrame({"symbol": ["india:NSE:TCS"], "close": [4000.5]}), title="Above 200-DMA")
         request = self.stub.requests[0]
         self.assertEqual((request["method"], request["path"]), ("POST", "/v1/results"))
         self.assertEqual(request["auth"], f"Bearer {TOKEN}")
@@ -40,7 +40,7 @@ class ShowTests(InApp):
         posted = self.single()
         self.assertEqual((posted["runId"], posted["kind"], posted["title"]), ("run-1", "table", "Above 200-DMA"))
         self.assertEqual(posted["data"]["columns"], ["symbol", "close"])
-        self.assertEqual(posted["data"]["rows"], [["zerodha:NSE:TCS", 4000.5]])
+        self.assertEqual(posted["data"]["rows"], [["india:NSE:TCS", 4000.5]])
         self.assertEqual(posted["data"]["symbolColumn"], 0)
         self.assertEqual(posted["data"]["totalRows"], 1)
 
@@ -139,28 +139,28 @@ class SetWatchlistTests(Case):
     def test_a_list_is_posted_and_what_the_app_did_is_returned_and_printed(self):
         out = io.StringIO()
         with redirect_stdout(out):
-            done = pt.set_watchlist("Momentum", ["zerodha:NSE:TCS", " zerodha:INFY ", "", None])
+            done = pt.set_watchlist("Momentum", ["india:NSE:TCS", " zerodha:INFY ", "", None])
         posted = self.stub.posted()[0]
         self.assertEqual((posted["runId"], posted["kind"]), ("run-1", "watchlist"))
-        self.assertEqual(posted["data"], {"name": "Momentum", "symbols": ["zerodha:NSE:TCS", "zerodha:INFY"], "mode": "replace"})
+        self.assertEqual(posted["data"], {"name": "Momentum", "symbols": ["india:NSE:TCS", "india:INFY"], "mode": "replace"})
         self.assertEqual(done["total"], 2)
         self.assertIn("Watchlist 'Momentum' made: 2 added, 0 removed, 2 on it.", out.getvalue())
 
     def test_a_screens_matches_can_be_passed_as_they_are(self):
-        frame = pd.DataFrame({"symbol": ["zerodha:NSE:A", "zerodha:NSE:B"], "close": [1.0, 2.0]})
+        frame = pd.DataFrame({"symbol": ["india:NSE:A", "india:NSE:B"], "close": [1.0, 2.0]})
         with redirect_stdout(io.StringIO()):
             pt.set_watchlist("L", frame, mode="append")
             pt.set_watchlist("L", frame.set_index("symbol"))
             pt.set_watchlist("L", frame["symbol"])
         posted = self.stub.posted()
-        self.assertEqual([p["data"]["symbols"] for p in posted], [["zerodha:NSE:A", "zerodha:NSE:B"]] * 3)
+        self.assertEqual([p["data"]["symbols"] for p in posted], [["india:NSE:A", "india:NSE:B"]] * 3)
         self.assertEqual(posted[0]["data"]["mode"], "append")
 
     def test_a_mistake_is_caught_before_anything_is_sent(self):
         with self.assertRaises(ValueError):
-            pt.set_watchlist("L", ["zerodha:NSE:A"], mode="merge")
+            pt.set_watchlist("L", ["india:NSE:A"], mode="merge")
         with self.assertRaises(TypeError):
-            pt.set_watchlist("L", "zerodha:NSE:A")
+            pt.set_watchlist("L", "india:NSE:A")
         with self.assertRaises(ValueError):
             pt.set_watchlist("L", pd.DataFrame({"close": [1.0]}))
         self.assertEqual(self.stub.requests, [])
@@ -187,7 +187,7 @@ class OutsideTheApp(Case):
     def test_set_watchlist_writes_nothing_and_says_so(self):
         out = io.StringIO()
         with redirect_stdout(out):
-            self.assertIsNone(pt.set_watchlist("L", ["zerodha:NSE:A"]))
+            self.assertIsNone(pt.set_watchlist("L", ["india:NSE:A"]))
         self.assertIn("would replace the watchlist 'L' with 1 symbols", out.getvalue())
         self.assertEqual(self.stub.requests, [])
 
@@ -419,7 +419,7 @@ class UniverseTests(Case):
 
     def setUp(self):
         self.lists = {}  # name -> symbols
-        self.usable = {"zerodha": True, "binance": True}
+        self.usable = {"india": True, "binance": True}
         self.routes = {
             "/v1/watchlists": lambda q: (200, [{"id": i, "name": n, "count": len(s)} for i, (n, s) in enumerate(self.lists.items())]),
             "/v1/watchlist": self.watchlist_route,
@@ -434,47 +434,47 @@ class UniverseTests(Case):
         return 200, {"id": 1, "name": name, "symbols": [{"symbol": s, "name": None} for s in self.lists[name]]}
 
     def test_a_named_watchlist_is_used_and_says_so(self):
-        self.lists["Nifty 50"] = ["zerodha:NSE:TCS", "binance:BTCUSDT", "csv:MY_DATA", "zerodha:NSE:INFY"]
+        self.lists["Nifty 50"] = ["india:NSE:TCS", "binance:BTCUSDT", "csv:MY_DATA", "india:NSE:INFY"]
         u = pt.universe("Nifty 50")
-        self.assertEqual(list(u), ["zerodha:NSE:TCS", "zerodha:NSE:INFY"], "only symbols a script can read")
+        self.assertEqual(list(u), ["india:NSE:TCS", "india:NSE:INFY"], "only symbols a script can read")
         self.assertEqual(u.source, "the watchlist 'Nifty 50'")
         self.assertIsInstance(u, list)
 
     def test_a_named_watchlist_that_does_not_exist_is_an_error_that_lists_the_real_ones(self):
-        self.lists["Mine"] = ["zerodha:NSE:TCS"]
+        self.lists["Mine"] = ["india:NSE:TCS"]
         with self.assertRaisesRegex(pt.NotFoundError, "Your watchlists: Mine"):
             pt.universe("Nifty 50")
 
     def test_a_named_watchlist_with_nothing_readable_on_it_is_an_error(self):
         self.lists["Crypto"] = ["binance:BTCUSDT"]
-        with self.assertRaisesRegex(pt.NotFoundError, "no zerodha symbols"):
+        with self.assertRaisesRegex(pt.NotFoundError, "no india symbols"):
             pt.universe("Crypto")
 
     def test_without_a_name_the_first_watchlist_with_readable_symbols_is_used(self):
         self.lists["Crypto"] = ["binance:BTCUSDT"]
-        self.lists["Banks"] = ["zerodha:NSE:HDFCBANK"]
-        self.lists["More"] = ["zerodha:NSE:TCS"]
+        self.lists["Banks"] = ["india:NSE:HDFCBANK"]
+        self.lists["More"] = ["india:NSE:TCS"]
         u = pt.universe()
-        self.assertEqual(list(u), ["zerodha:NSE:HDFCBANK"])
+        self.assertEqual(list(u), ["india:NSE:HDFCBANK"])
         self.assertEqual(u.source, "the watchlist 'Banks'")
 
     def test_with_no_watchlists_it_is_ten_large_stocks_through_the_broker_that_is_set_up(self):
         u = pt.universe()
         self.assertEqual(len(u), 10)
-        self.assertTrue(all(s.startswith("zerodha:NSE:") for s in u), list(u))
-        self.assertIn("zerodha:NSE:RELIANCE", u)
+        self.assertTrue(all(s.startswith("india:NSE:") for s in u), list(u))
+        self.assertIn("india:NSE:RELIANCE", u)
         self.assertEqual(u.source, "a sample of large NSE stocks")
 
     def test_the_brokers_are_tried_in_the_order_given(self):
-        self.usable = {"zerodha": True, "other": True}
-        self.assertTrue(pt.universe()[0].startswith("zerodha:"))
-        self.assertTrue(pt.universe(providers=("other", "zerodha"))[0].startswith("other:"))
-        self.usable = {"zerodha": False, "other": True}
+        self.usable = {"india": True, "other": True}
+        self.assertTrue(pt.universe()[0].startswith("india:"))
+        self.assertTrue(pt.universe(providers=("other", "india"))[0].startswith("other:"))
+        self.usable = {"india": False, "other": True}
         with self.assertRaises(pt.NotConfiguredError):
             pt.universe()
 
     def test_with_no_broker_set_up_it_says_what_to_do(self):
-        self.usable = {"zerodha": False}
+        self.usable = {"india": False}
         with self.assertRaisesRegex(pt.NotConfiguredError, "Data providers"):
             pt.universe()
 

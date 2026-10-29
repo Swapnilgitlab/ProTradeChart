@@ -4,6 +4,8 @@
  *  is checked and anything malformed is refused rather than drawn. Pure, so all of that is
  *  tested without a component. */
 
+import { normalizeSymbol } from '../lib/symbols';
+
 export interface TableResult {
   kind: 'table';
   id: number;
@@ -225,13 +227,14 @@ export function sortRows(rows: readonly Cell[][], column: number, direction: 'as
   });
 }
 
-/** The chart symbols in a table's symbol column, without repeats. */
+/** The chart symbols in a table's symbol column, in their canonical form (a script may still write
+ *  `zerodha:NSE:X`), without repeats. */
 export function symbolsOf(table: TableResult): string[] {
   if (table.symbolColumn === null) return [];
   const seen = new Set<string>();
   for (const row of table.rows) {
     const value = row[table.symbolColumn];
-    if (typeof value === 'string' && value.includes(':')) seen.add(value);
+    if (typeof value === 'string' && value.includes(':')) seen.add(normalizeSymbol(value));
   }
   return [...seen];
 }

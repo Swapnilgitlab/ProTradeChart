@@ -130,6 +130,18 @@ CREATE TABLE IF NOT EXISTS zerodha_instruments (
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_zerodha_instruments_token ON zerodha_instruments(token);
 
+-- FYERS's symbol master, trimmed the same way and under the same tickers (the app's own, Kite's spelling);
+-- `symbol` is FYERS's (NSE:SBIN-EQ, NSE:NIFTY50-INDEX), which every FYERS request names, and `token` its fyToken.
+CREATE TABLE IF NOT EXISTS fyers_instruments (
+  ticker       TEXT PRIMARY KEY,
+  exchange     TEXT NOT NULL,
+  token        INTEGER NOT NULL,
+  instrument   TEXT NOT NULL,
+  symbol       TEXT NOT NULL,
+  name         TEXT,
+  expiry       TEXT
+) WITHOUT ROWID;
+
 -- Price alerts. The frontend's alert engine decides when one fires; this is
 -- just the memory of what to watch and what already has.
 CREATE TABLE IF NOT EXISTS price_alerts (

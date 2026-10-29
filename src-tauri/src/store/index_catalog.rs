@@ -1,5 +1,6 @@
 //! The Indices watchlist: a curated set of Indian market indices, grouped as people follow them —
-//! the broad market, sectors, and themes — with Zerodha's ticker for each (`NSE:NIFTY_BANK`).
+//! the broad market, sectors, and themes — with the app's ticker for each (`NSE:NIFTY_BANK`, Kite's
+//! spelling; each broker's instrument list is read under it).
 //! Strategy, factor and bond indices are left out.
 //!
 //! Only index *levels* are listed: no source the app uses publishes which stocks make up an index,
@@ -12,10 +13,11 @@ use rusqlite::Connection;
 
 use crate::store::instrument_list::{self, Filter, Source};
 use crate::store::watchlists;
+use crate::symbols::INDIA;
 
 pub const SECTIONS: [&str; 3] = ["Broad market", "Sectors", "Themes"];
 
-/// `(section, Zerodha ticker)`.
+/// `(section, ticker)`.
 const CATALOG: &[(usize, &str)] = &[
     // Broad market
     (0, "NSE:NIFTY_50"),
@@ -80,12 +82,17 @@ const CATALOG: &[(usize, &str)] = &[
     (2, "NSE:NIFTY_TRANS_LOGIS"),
 ];
 
-/// The list for `source`: each section with its symbols (`provider:TICKER`), keeping only
-/// tickers in `available`, and how many catalogue entries that broker lacked.
-pub fn plan(source: Source, available: &HashSet<String>) -> (Vec<(&'static str, Vec<String>)>, usize) {
-    let provider = match source {
-        Source::Zerodha => "zerodha",
-    };
+/// Every catalogue ticker, for the brokers' live tests.
+#[cfg(test)]
+pub fn catalog_tickers() -> impl Iterator<Item = &'static str> {
+    CATALOG.iter().map(|(_, ticker)| *ticker)
+}
+
+/// The list from `available` (the tickers of the broker's instrument list): each section with its
+/// symbols (`india:TICKER`, whichever broker listed them), and how many catalogue entries that
+/// broker lacked.
+pub fn plan(available: &HashSet<String>) -> (Vec<(&'static str, Vec<String>)>, usize) {
+    let provider = INDIA;
     let mut sections: Vec<(&'static str, Vec<String>)> = SECTIONS.iter().map(|s| (*s, Vec::new())).collect();
     let mut missing = 0;
     for (section, ticker) in CATALOG {
@@ -123,7 +130,7 @@ pub fn create(conn: &mut Connection, source: Source) -> Result<Created, String> 
         .into_iter()
         .map(|l| l.ticker)
         .collect();
-    let (sections, skipped) = plan(source, &available);
+    let (sections, skipped) = plan(&available);
     if sections.is_empty() {
         return Err("The broker's instrument list has no indices yet. Open Data providers and update it first.".into());
     }
@@ -190,13 +197,13 @@ mod tests {
         .iter()
         .map(|s| s.to_string())
         .collect();
-        let (sections, missing) = plan(Source::Zerodha, &available);
+        let (sections, missing) = plan(&available);
         assert_eq!(
             sections,
             vec![
-                ("Broad market", vec!["zerodha:NSE:NIFTY_50".to_string()]),
-                ("Sectors", vec!["zerodha:NSE:NIFTY_BANK".to_string()]),
-                ("Themes", vec!["zerodha:NSE:NIFTY_EV".to_string()]),
+                ("Broad market", vec!["india:NSE:NIFTY_50".to_string()]),
+                ("Sectors", vec!["india:NSE:NIFTY_BANK".to_string()]),
+                ("Themes", vec!["india:NSE:NIFTY_EV".to_string()]),
             ]
         );
         assert_eq!(missing, CATALOG.len() - 3);
@@ -228,7 +235,7 @@ mod tests {
         );
         assert_eq!(
             detail.items.iter().map(|i| i.symbol.as_str()).collect::<Vec<_>>(),
-            ["zerodha:NSE:NIFTY_50", "zerodha:NSE:NIFTY_BANK", "zerodha:NSE:NIFTY_IT"]
+            ["india:NSE:NIFTY_50", "india:NSE:NIFTY_BANK", "india:NSE:NIFTY_IT"]
         );
         // Each section sits right above its own symbols.
         assert!(detail.sections[0].position < detail.items[0].position);

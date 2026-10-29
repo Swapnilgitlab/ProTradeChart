@@ -14,7 +14,7 @@ describe('parseScreenResult', () => {
     const result = parseScreenResult(posted());
     expect(result).not.toBeNull();
     expect(result!.columns).toEqual(['close', 'return_1', 'ema_50']);
-    expect(result!.rows.map((r) => r.symbol)).toEqual(['zerodha:NSE:FAST', 'zerodha:NSE:UP']);
+    expect(result!.rows.map((r) => r.symbol)).toEqual(['india:NSE:FAST', 'india:NSE:UP']);
     expect(result!.rows[0]).toMatchObject({ name: 'Fast', date: '2025-06-30' });
     expect(result!.meta).toMatchObject({ asOf: '2025-06-30', requested: 5, loaded: 4, failed: 1, stale: 1, matched: 2, prefiltered: 0, seconds: 1.5 });
     expect(result!.warnings.map((w) => w.code)).toEqual(['load_failed', 'stale']);
@@ -58,7 +58,7 @@ describe('parseScreenResult', () => {
 
 describe('sortScreenRows', () => {
   const row = (symbol: string, name: string | null, v: number | null): ScreenRow => ({ symbol, name, date: '2025-06-30', values: [v] });
-  const rows = [row('zerodha:NSE:B', 'Bee', 2), row('zerodha:NSE:A', null, null), row('zerodha:BSE:C', 'Cee', 5)];
+  const rows = [row('india:NSE:B', 'Bee', 2), row('india:NSE:A', null, null), row('india:BSE:C', 'Cee', 5)];
   const order = (sorted: ScreenRow[]) => sorted.map((r) => r.symbol.split(':').pop());
 
   it('sorts by a column either way, blanks last', () => {
@@ -84,6 +84,6 @@ describe('screenCsv', () => {
     const result = parseScreenResult(posted())!;
     const [head, first] = screenCsv(result).split('\r\n');
     expect(head).toBe('Symbol,Name,Date,Close,1D return,EMA 50');
-    expect(first.startsWith('zerodha:NSE:FAST,Fast,2025-06-30,260,')).toBe(true);
+    expect(first.startsWith('india:NSE:FAST,Fast,2025-06-30,260,')).toBe(true);
   });
 });

@@ -56,7 +56,7 @@ pub trait Snapshots: Send + Sync {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BarsRequest {
-    /// `zerodha:NSE:RELIANCE`.
+    /// `india:NSE:RELIANCE`.
     pub symbol: String,
     /// The store's spelling: `D`, `1`, `5`, …
     pub interval: String,
@@ -273,7 +273,7 @@ pub struct SyncReport {
     pub results: Vec<SyncResult>,
 }
 
-const TOPUP_PROVIDERS: [&str; 1] = ["zerodha"];
+const TOPUP_PROVIDERS: [&str; 1] = [crate::symbols::INDIA];
 
 /// Brings as many of `req.symbols`' daily coverage up to date as a batched broker quote safely
 /// can, instead of the historical endpoint's one-rate-limited-call-per-symbol. Only
@@ -464,7 +464,7 @@ mod tests {
 
     /// 2027-01-15 13:30 IST, a Friday afternoon.
     const NOW: i64 = 1_800_000_000_000;
-    const SYM: &str = "zerodha:NSE:RELIANCE";
+    const SYM: &str = "india:NSE:RELIANCE";
 
     /// A broker holding one bar per calendar day (stamped at midday IST, not midnight, to
     /// prove daily bars are normalised) for the 100 days before `NOW`.
@@ -838,14 +838,14 @@ mod tests {
         assert_eq!(f.calls().len(), 1);
 
         let snaps = FakeSnapshots::default();
-        snaps.set("zerodha", "NSE:RELIANCE", good_quote(evening() - 1_000));
+        snaps.set("india", "NSE:RELIANCE", good_quote(evening() - 1_000));
 
         let report = sync_daily(&db, &snaps, &sync_request(vec![SYM.to_string()]), evening()).await;
         assert_eq!(report.results.len(), 1);
         assert_eq!(report.results[0].status, SyncStatus::Updated);
         assert_eq!(
             snaps.calls(),
-            vec![("zerodha".to_string(), vec!["NSE:RELIANCE".to_string()])]
+            vec![("india".to_string(), vec!["NSE:RELIANCE".to_string()])]
         );
 
         // The quote already wrote today's bar: re-reading the same span touches no broker.
@@ -913,7 +913,7 @@ mod tests {
             previous_close: Some(50.0), // nowhere near day_bar(99)'s close of 199.0
             ..good_quote(evening() - 1_000)
         };
-        snaps.set("zerodha", "NSE:RELIANCE", bad);
+        snaps.set("india", "NSE:RELIANCE", bad);
 
         let report = sync_daily(&db, &snaps, &sync_request(vec![SYM.to_string()]), evening()).await;
         assert_eq!(report.results[0].status, SyncStatus::Fetch);
@@ -939,7 +939,7 @@ mod tests {
         load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
 
         let snaps = FakeSnapshots::default();
-        snaps.fail_provider("zerodha", ApiError::new(401, "auth", "token expired"));
+        snaps.fail_provider("india", ApiError::new(401, "auth", "token expired"));
 
         let req = sync_request(vec![SYM.to_string(), "csv:MY_DATA".to_string()]);
         let report = sync_daily(&db, &snaps, &req, evening()).await;
@@ -963,7 +963,7 @@ mod tests {
         let calls = f.calls().len();
 
         let req = PanelRequest {
-            symbols: vec![SYM.to_string(), "zerodha:NSE:UNHELD".to_string()],
+            symbols: vec![SYM.to_string(), "india:NSE:UNHELD".to_string()],
             interval: "D".to_string(),
             from_ms: None,
             to_ms: None,
@@ -996,9 +996,9 @@ mod tests {
     async fn a_snapshot_answers_every_symbol_in_order_from_one_batched_call() {
         let db = BarMemory::default();
         let snaps = FakeSnapshots::default();
-        snaps.set("zerodha", "NSE:RELIANCE", good_quote(evening() - 1_000));
+        snaps.set("india", "NSE:RELIANCE", good_quote(evening() - 1_000));
         let symbols = vec![
-            "zerodha:NSE:UNQUOTED".to_string(),
+            "india:NSE:UNQUOTED".to_string(),
             SYM.to_string(),
             "csv:MY_DATA".to_string(),
         ];
@@ -1019,7 +1019,7 @@ mod tests {
         let f = fake();
         load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
         let snaps = FakeSnapshots::default();
-        snaps.set("zerodha", "NSE:RELIANCE", good_quote(evening() - 1_000));
+        snaps.set("india", "NSE:RELIANCE", good_quote(evening() - 1_000));
 
         snapshot(&db, &snaps, &[SYM.to_string()], evening()).await.unwrap();
         let out = load(&db, &f, &request(Some(30), None), evening()).await.unwrap();
@@ -1035,7 +1035,7 @@ mod tests {
     async fn a_failed_quote_call_fails_the_snapshot() {
         let db = BarMemory::default();
         let snaps = FakeSnapshots::default();
-        snaps.fail_provider("zerodha", ApiError::new(401, "auth", "token expired"));
+        snaps.fail_provider("india", ApiError::new(401, "auth", "token expired"));
         let err = snapshot(&db, &snaps, &[SYM.to_string()], NOW).await.unwrap_err();
         assert_eq!(err.code, "auth");
     }

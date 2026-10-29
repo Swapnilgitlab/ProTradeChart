@@ -56,15 +56,15 @@ mod tests {
     fn a_symbols_drawings_are_kept_replaced_and_read_back() {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
-        assert_eq!(get(&conn, "zerodha:NSE:TCS").unwrap(), None);
-        save(&conn, "zerodha:NSE:TCS", r#"{"version":1,"drawings":[{"id":"a"}]}"#).unwrap();
-        save(&conn, "zerodha:NSE:TCS", r#"{"version":1,"drawings":[]}"#).unwrap();
+        assert_eq!(get(&conn, "india:NSE:TCS").unwrap(), None);
+        save(&conn, "india:NSE:TCS", r#"{"version":1,"drawings":[{"id":"a"}]}"#).unwrap();
+        save(&conn, "india:NSE:TCS", r#"{"version":1,"drawings":[]}"#).unwrap();
         // Cleared is not the same as never stored.
         assert_eq!(
-            get(&conn, "zerodha:NSE:TCS").unwrap().as_deref(),
+            get(&conn, "india:NSE:TCS").unwrap().as_deref(),
             Some(r#"{"version":1,"drawings":[]}"#)
         );
-        assert_eq!(get(&conn, "zerodha:NSE:INFY").unwrap(), None);
+        assert_eq!(get(&conn, "india:NSE:INFY").unwrap(), None);
     }
 
     #[test]
@@ -73,8 +73,8 @@ mod tests {
         let conn = db.conn.lock().unwrap();
         assert!(save(&conn, "TCS", "{}").is_err());
         assert!(save(&conn, "", "{}").is_err());
-        assert!(save(&conn, "zerodha:NSE:TCS", "[1]").is_err());
-        assert!(save(&conn, "zerodha:NSE:TCS", "nope").is_err());
+        assert!(save(&conn, "india:NSE:TCS", "[1]").is_err());
+        assert!(save(&conn, "india:NSE:TCS", "nope").is_err());
         assert!(get(&conn, "no colon").is_err());
     }
 }

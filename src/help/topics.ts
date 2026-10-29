@@ -93,7 +93,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             'ProTradeChart is a free, open-source desktop application for charting and researching financial markets. It draws fast candlestick charts with indicators and drawing tools, keeps live watchlists and price alerts, runs Pine Script®-compatible indicators and strategy backtests, and offers research tools — a Screener, Python scripting and historical Studies — for Indian equities through your own broker account.',
           ),
           p(
-            'The application itself needs no account or subscription of its own. Indian equities, indices, futures and commodities are available once you connect your own **Zerodha** account (which needs its own paid Kite Connect subscription), and you can chart any data of your own, free, by importing a CSV file.',
+            'The application itself needs no account or subscription of its own. Indian equities, indices, futures and commodities are available once you connect your own broker account — **Zerodha** (which needs its own paid Kite Connect subscription) or **FYERS** (free with a FYERS account) — and you can chart any data of your own, free, by importing a CSV file.',
           ),
           note('ProTradeChart is for information and research only. Nothing in it is financial advice, and it never places orders.'),
         ],
@@ -213,7 +213,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Connect Indian market data (optional)',
         blocks: [
           p(
-            'To chart NSE, BSE, NFO or MCX instruments, and to use the Screener, Python and Studies, connect a broker account you already have: open **Data providers** from the plug icon at the bottom of the right rail and follow **Connecting Zerodha**.',
+            'To chart NSE, BSE, NFO or MCX instruments, and to use the Screener, Python and Studies, connect a broker account you already have: open **Data providers** from the plug icon at the bottom of the right rail and follow **Connecting Zerodha** or **Connecting FYERS**.',
           ),
         ],
       },
@@ -240,12 +240,12 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'How a symbol is written',
         blocks: [
           p(
-            'Every symbol names its data source and its ticker, separated by a colon: `provider:TICKER`. Broker symbols also name their exchange. The application shows symbols in their short form — `RELIANCE` rather than `zerodha:NSE:RELIANCE` — and hides `NSE` because it is the default exchange; other exchanges stay visible, because `BSE:RELIANCE` is a different instrument.',
+            'Every symbol names its data source and its ticker, separated by a colon: `provider:TICKER`. Indian market symbols start with `india:` whichever broker you connect (Zerodha or FYERS), so your watchlists, alerts, drawings and layouts keep working if you change broker; they also name their exchange. The application shows symbols in their short form — `RELIANCE` rather than `india:NSE:RELIANCE` — and hides `NSE` because it is the default exchange; other exchanges stay visible, because `BSE:RELIANCE` is a different instrument. Symbols saved by older versions as `zerodha:…` read as `india:…`.',
           ),
           table(
             ['Source', 'Examples'],
             [
-              ['Zerodha', '`zerodha:NSE:RELIANCE`, `zerodha:NSE:NIFTY_50`, `zerodha:BSE:TCS`'],
+              ['Indian markets (your broker)', '`india:NSE:RELIANCE`, `india:NSE:NIFTY_50`, `india:BSE:TCS`'],
               ['Imported data', '`csv:MY_DATA`'],
             ],
           ),
@@ -257,7 +257,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           list(
             'Press `Ctrl+K` or click the search box, then type part of a ticker or a company name.',
             'Results come from every data source that is switched on, grouped by source.',
-            'A ticker typed without a source uses the **default provider**, Zerodha, so typing `RELIANCE` opens the NSE listing (another default can be chosen in **Data providers** → **Make default**, once more than one source is set up).',
+            'A ticker typed without a source uses the **default provider**, Indian markets, so typing `RELIANCE` opens the NSE listing (another default can be chosen in **Data providers** → **Make default**, once more than one source is set up).',
             'Options contracts are not listed (there are too many to search usefully); futures are.',
           ),
         ],
@@ -592,7 +592,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'The Indices watchlist',
         blocks: [
           p(
-            'With Zerodha connected, **Create Indices watchlist** in the browse dialog builds a watchlist of Indian market indices from your broker’s instrument list, in three sections: **Broad market** (Nifty 50, Sensex, Nifty Next 50, the midcap and smallcap indices, India VIX and others), **Sectors** (Nifty Bank, IT, Pharma, Auto, FMCG, Metal, Realty, Energy, Healthcare and the other sector indices) and **Themes** (Defence, Infrastructure, CPSE, Consumption, EV and others). Follow a sector’s performance through its index. Indices your broker does not list are skipped.',
+            'With a broker connected, **Create Indices watchlist** in the browse dialog builds a watchlist of Indian market indices from your broker’s instrument list, in three sections: **Broad market** (Nifty 50, Sensex, Nifty Next 50, the midcap and smallcap indices, India VIX and others), **Sectors** (Nifty Bank, IT, Pharma, Auto, FMCG, Metal, Realty, Energy, Healthcare and the other sector indices) and **Themes** (Defence, Infrastructure, CPSE, Consumption, EV and others). Follow a sector’s performance through its index. Indices your broker does not list are skipped.',
           ),
           note('The application has no data on which stocks belong to each sector, so it does not build sector-by-sector stock lists. You can make your own with sections, or from the Screener’s results.'),
         ],
@@ -707,7 +707,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           p(
             'The Screener lists the stocks that meet a set of conditions on their latest daily bar, with the columns you choose. Open it from the **Screener** icon on the right rail. It uses the same indicators as Studies, so its numbers match a Study’s.',
           ),
-          note('The Screener needs Python (set up once in the Python tab) and a connected Zerodha account.'),
+          note('The Screener needs Python (set up once in the Python tab) and a connected broker account (Zerodha or FYERS).'),
           p('The collapse icon above **My screens** tucks the saved-screens list away to a thin strip, for more room; click it again to bring the list back.'),
         ],
       },
@@ -746,7 +746,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           list(
             '**Save** keeps the screen under **My screens**. A saved screen keeps its last result, which reappears when you open it.',
             'Filters on today’s prices alone (close, open, high, low, volume, gap, and the day’s change or return) are judged first on one quick quote of the whole universe, so only the stocks that pass have their history read. A screen made only of such filters and columns finishes in seconds.',
-            'With **Keep the market loaded** on (Data providers → **Market data**), every NSE stock’s history is in memory and a screen reads it in one go, in a couple of seconds. Without it, the first screen that needs history over a whole exchange fetches it at the broker’s rate limit — about 15 minutes for NSE through Zerodha. What it fetched is held until the application closes, so later runs only top up each stock with a quick quote check.',
+            'With **Keep the market loaded** on (Data providers → **Market data**), every NSE stock’s history is in memory and a screen reads it in one go, in a couple of seconds. Without it, the first screen that needs history over a whole exchange fetches it at the broker’s rate limit — about 15 minutes for NSE through Zerodha, and longer through FYERS (on its Standard plan, most of a day’s requests). What it fetched is held until the application closes, so later runs only top up each stock with a quick quote check.',
             '**Before it runs** estimates how many broker requests, and quick quote checks, the run needs and how long they take. Use **Try it on the first 100 symbols first** for a quick trial.',
           ),
         ],
@@ -795,7 +795,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         blocks: [
           p('Scripts reach market data through the `protrade` package, which the application provides automatically:'),
           code(
-            'import protrade as pt\n\ndf = pt.bars("zerodha:NSE:RELIANCE", "D", start="2024-01-01")\npanel = pt.bars_many(pt.universe("Nifty 50"), "D", limit=250, errors="skip")\npt.show(table, title="Above the 200-day average")',
+            'import protrade as pt\n\ndf = pt.bars("india:NSE:RELIANCE", "D", start="2024-01-01")\npanel = pt.bars_many(pt.universe("Nifty 50"), "D", limit=250, errors="skip")\npt.show(table, title="Above the 200-day average")',
           ),
           table(
             ['Function', 'Purpose'],
@@ -819,9 +819,9 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Things to know',
         blocks: [
           list(
-            '**Data sources.** Scripts can read Zerodha and your imported CSV data, only for reading. Crypto data is not available to scripts.',
-            '**Timeframes.** Zerodha serves 1, 3, 5, 10, 15, 30 and 60 minutes and daily. Use `pt.resample` for others.',
-            '**Speed.** With **Keep the market loaded** on, `pt.panel` and `pt.bars_many` read daily bars for every NSE stock from memory in one request. Anything else is fetched from your broker at its pace (Zerodha allows about three a second) and held until the application closes, so later runs are fast. `pt.snapshot` quotes a whole market in a few seconds.',
+            '**Data sources.** Scripts can read Indian market data (`india:…`, through whichever broker serves it) and your imported CSV data, only for reading. `pt.providers()` says which broker that is (its `id` is `india`, so a script from an earlier version that looks for `zerodha` there needs updating; `zerodha:` symbols themselves still work). Crypto data is not available to scripts.',
+            '**Timeframes.** Zerodha serves 1, 3, 5, 10, 15, 30 and 60 minutes and daily; FYERS also 2, 20, 120 and 240 minutes. Use `pt.resample` for others.',
+            '**Speed.** With **Keep the market loaded** on, `pt.panel` and `pt.bars_many` read daily bars for every NSE stock from memory in one request. Anything else is fetched from your broker at its pace (Zerodha allows about three a second; FYERS fifty a minute on its Standard plan) and held until the application closes, so later runs are fast. `pt.snapshot` quotes a whole market in a few seconds.',
             '**Your credentials stay in the application.** A script never receives a broker key or token; it asks the application for data over a private local connection.',
           ),
           note('Python is not a sandbox. A script runs with your own permissions, exactly as if you ran it from a terminal. Run only code you trust. Nothing in the Python tab places orders.'),
@@ -880,7 +880,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             'The watchlist is created if it does not exist. Names are matched without regard to capital letters.',
             'With `mode="replace"` (the default) the list ends up holding exactly these symbols: symbols no longer listed are removed; those that remain keep their position and colour flag; new ones are added at the end. Section headings are left untouched.',
             'With `mode="append"` new symbols are only added.',
-            'You can pass a list, a pandas Series, or a DataFrame with a `symbol` column. `zerodha:TCS` is read as `zerodha:NSE:TCS`.',
+            'You can pass a list, a pandas Series, or a DataFrame with a `symbol` column. `india:TCS` is read as `india:NSE:TCS`, and the older spelling `zerodha:TCS` works too.',
             'The script prints what changed, and the watchlist panel updates at once.',
           ),
           p('Schedule such a script for after the market close — for example weekdays at 16:00 — and the list is fresh every evening.'),
@@ -901,7 +901,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           p(
             'A Study examines every occasion in history when a set of conditions first held for a stock — for example, *its 12-month return crossed +100%* — and measures what the stocks looked like before, on and after those events. It is research into historical association, not a screen of today’s market and not a trading backtest.',
           ),
-          p('Open **Studies** from the flask icon on the right rail. Studies need Python and a connected Zerodha account.'),
+          p('Open **Studies** from the flask icon on the right rail. Studies need Python and a connected broker account (Zerodha or FYERS).'),
         ],
       },
       {
@@ -937,7 +937,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             'The readiness panel shows what is available: prices and volume from your broker, index data for relative strength, and how many stocks will be loaded, how many are already loaded and roughly how long the rest will take.',
             '**Market cap, sectors and historical index membership are not available** from these data sources. A Study that needs market cap cannot run; the builder offers a floor on average traded value instead, applied only if you choose it.',
             'Results carry a survivorship-bias warning: today’s instrument list does not include companies delisted in the past.',
-            'With **Keep the market loaded** on (Data providers → **Market data**), a Study reads NSE stocks’ history from memory in batches instead of asking the broker. Anything it doesn’t hold (BSE listings, history older than five years) is fetched at the broker’s rate limit — about 15 minutes for all of NSE through Zerodha, several times longer with BSE — and held until the application closes, so reruns that day take seconds.',
+            'With **Keep the market loaded** on (Data providers → **Market data**), a Study reads NSE stocks’ history from memory in batches instead of asking the broker. Anything it doesn’t hold (BSE listings, history older than five years) is fetched at the broker’s rate limit — about 15 minutes for all of NSE through Zerodha (longer through FYERS), several times longer with BSE — and held until the application closes, so reruns that day take seconds.',
           ),
         ],
       },
@@ -1091,10 +1091,14 @@ export const HELP_TOPICS: HelpTopic[] = [
             ['Source', 'Coverage'],
             [
               ['**Zerodha** (your account)', 'NSE, BSE, NFO and MCX equities, indices, futures and commodities; history and a live tick feed. Needs a paid Kite Connect subscription.'],
+              ['**FYERS** (your account)', 'The same markets from your own FYERS API app; history, and charts kept live from its quotes. Free with a FYERS account (the Standard plan’s limits are tight; Prime allows far more).'],
               ['**Imported data**', 'Your own CSV files.'],
             ],
           ),
-          note('Zerodha is the only broker today. Binance, Coinbase and Hyperliquid were removed as data sources — see **Symbols that can no longer load**.'),
+          p(
+            'Indian market symbols are the same whichever broker you use (`india:NSE:RELIANCE`), so watchlists, alerts, drawings and layouts carry over if you change broker. With both set up, pick the one that serves them under **Indian market data from** at the top of **Data providers**; open charts reload through it, and the two brokers’ prices are never mixed. With only one set up, it is used.',
+          ),
+          note('Binance, Coinbase and Hyperliquid were removed as data sources — see **Symbols that can no longer load**.'),
         ],
       },
       {
@@ -1107,13 +1111,14 @@ export const HELP_TOPICS: HelpTopic[] = [
             'Press **Test connection** to confirm the credentials work.',
             'Press **Make default** to decide which source a ticker typed without a source uses.',
             'See the state of its **Instrument list** (used for symbol search), which is refreshed weekly.',
+            'With more than one broker set up, choose under **Indian market data from** which one serves Indian market symbols.',
           ),
           p('Below the sources, **Market data** keeps every NSE stock’s daily history loaded in memory while the application is open. See **Keep the market loaded**.'),
           note('Market data from your broker account is licensed for your own use. Do not rebroadcast it, for example on a public stream or website. See **Market data terms and storage**.'),
         ],
       },
     ],
-    related: ['market-data', 'zerodha', 'import-csv'],
+    related: ['market-data', 'zerodha', 'fyers', 'import-csv'],
   },
   {
     id: 'market-data',
@@ -1125,21 +1130,22 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'What it is',
         blocks: [
           p(
-            'The Screener, Studies and Python scripts look at hundreds or thousands of stocks at once. Asking your broker for each one is slow — Zerodha allows about three history requests a second. With **Keep the market loaded** on, the application reads five years of daily prices for every NSE stock (regular EQ series) and every NSE index into memory, so a whole-market screen reads them in a second or two.',
+            'The Screener, Studies and Python scripts look at hundreds or thousands of stocks at once. Asking your broker for each one is slow — Zerodha allows about three history requests a second, and FYERS’s free Standard plan fifty a minute. With **Keep the market loaded** on, the application reads five years of daily prices for every NSE stock (regular EQ series) and every NSE index into memory, so a whole-market screen reads them in a second or two.',
           ),
           p('Daily, weekly and monthly charts of those stocks draw from it too, fetching only the latest bar. Intraday charts (1 minute, 5 minutes…) still come from your broker as before.'),
-          note('Nothing is saved on this computer: Kite Connect’s terms restrict permanent copies of its data. What is loaded is cleared when you close the application and read again the next time. It needs about 200 MB of memory.'),
+          note('Nothing is saved on this computer: the brokers’ terms restrict copies of their data. What is loaded is cleared when you close the application and read again the next time. It needs about 200 MB of memory.'),
         ],
       },
       {
         heading: 'Turning it on',
         blocks: [
           steps(
-            'Connect Zerodha under **Data providers** — the prices come from your own account.',
-            'In the same dialog, under **Market data**, tick **Keep the market loaded** (or tick it in the Home tab’s **Market data** section). Loading starts at once and takes about 15 minutes at the broker’s pace.',
+            'Connect Zerodha or FYERS under **Data providers** — the prices come from your own account.',
+            'In the same dialog, under **Market data**, tick **Keep the market loaded** (or tick it in the Home tab’s **Market data** section). Loading starts at once and takes about 15 minutes through Zerodha, or about 25 through FYERS Prime, at the broker’s pace.',
             'Keep working: charts always go ahead of it at the broker. **Stop** pauses it; **Load now** carries on from where it stopped.',
           ),
           p('From then on, every time you open the application it loads the market again by itself, a couple of minutes after launch (never during startup).'),
+          note('Through FYERS it needs the **Prime** plan: loading five years of the whole market takes about 10,500 requests, and the free Standard plan allows 5,000 a day. Set your plan in **Data providers → FYERS**.'),
         ],
       },
       {
@@ -1149,7 +1155,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             'While the application is open, the market is brought up to date by itself once each session has settled (after 4 PM IST). **Update now** (or **Update market data** on the Home tab) does it straight away.',
             'Each update adds the latest prices from one quick quote, loads any newly listed stock (an IPO), and reads again any stock the quote couldn’t update (after a split or bonus, for example), so old and adjusted prices are never mixed.',
             'A holiday is noticed from the market itself and costs nothing.',
-            'A Zerodha login lasts until the next morning. If it has expired, the load says so and waits; log in again under **Data providers**.',
+            'A broker login lasts until the next morning (FYERS’s renews by itself if you saved your PIN). If it has expired, the load says so and waits; log in again under **Data providers**.',
           ),
           note('Prices are your broker’s, as it supplies them.'),
         ],
@@ -1218,6 +1224,77 @@ export const HELP_TOPICS: HelpTopic[] = [
       },
     ],
     related: ['data-providers'],
+  },
+  {
+    id: 'fyers',
+    title: 'Connecting FYERS',
+    group: 'Data and settings',
+    summary: 'Set up a FYERS API app for history, live-updating charts and the research tools.',
+    sections: [
+      {
+        heading: 'Before you start',
+        blocks: [
+          p(
+            'You need a FYERS trading account and an API app, created at myapi.fyers.in. Note its **App ID** (like `XXXXXXXXXX-100`) and **Secret ID**, and set the app’s **redirect URL** to `http://127.0.0.1:47822/` exactly. The application shows this address with a copy button beside the login button.',
+          ),
+          note('FYERS’s API terms govern how its data may be used, and they restrict using it for charting tools and making copies of it. The application keeps FYERS’s prices in memory only, but whether your use is allowed is between you and FYERS.'),
+        ],
+      },
+      {
+        heading: 'Setting up',
+        blocks: [
+          steps(
+            'Open **Data providers → FYERS**, enter the App ID and Secret ID, and press **Save**.',
+            'Press **Log in with FYERS** and sign in on the page that opens. The application receives FYERS’s reply itself and stores the access token; there is nothing to copy.',
+            'FYERS switches on and downloads its symbol master. **Test connection** confirms that everything works.',
+            'Set **FYERS API plan** to the plan your account is on: **Standard** (free) or **Prime**.',
+            'If Zerodha is set up too, choose which broker serves Indian market data under **Indian market data from**.',
+          ),
+        ],
+      },
+      {
+        heading: 'Daily login, and renewing with your PIN',
+        blocks: [
+          p(
+            'FYERS’s access tokens expire every morning at 06:30 IST, so each day starts with a fresh login — one button and a few seconds, from **Data providers → FYERS**, the **FYERS** row on the **Home** tab, or the **Log in to FYERS** window that appears when you open the application after your login has expired.',
+          ),
+          p(
+            'Each login also gives a refresh token that lasts about 15 days. Under **Renew automatically with your PIN**, save your four-digit FYERS PIN and the application renews the day’s token by itself, so you log in about once a fortnight. The PIN is kept in your operating system’s credential store and sent only to FYERS. FYERS doesn’t document this renewal, so it may stop working; when it fails, the application says why and asks you to log in. **Forget PIN** removes it.',
+          ),
+          p(
+            'If your FYERS app must redirect elsewhere, use **Paste the address instead**: sign in, then paste the complete address your browser was sent to (it contains `auth_code=`). An auth code works once, for a few minutes.',
+          ),
+        ],
+      },
+      {
+        heading: 'Limits',
+        blocks: [
+          table(
+            ['Plan', 'Data requests'],
+            [
+              ['Standard (free)', '5 a second, 50 a minute, 5,000 a day'],
+              ['Prime', '10 a second, 500 a minute, 500,000 a day'],
+            ],
+          ),
+          list(
+            'FYERS blocks an account for the rest of the day after it goes over the per-minute limit more than three times, so the application paces itself for your plan and stops before the day’s limit (background loading at 80%, charts and scripts at 97%). The **FYERS API plan** row shows today’s count.',
+            'Watchlist prices, tab prices, alerts and live charts share one set of FYERS quotes, read again every 30 seconds on Standard and every 3 seconds on Prime while the market is open.',
+            '**Keep the market loaded** needs Prime. On Standard, a first whole-market screen or Study that needs history can take most of a day’s requests; the estimate before a run says so.',
+            'Charts stay live from FYERS’s quotes, not a tick feed: a daily bar keeps the day’s true high and low, but an intraday bar shows only the prices sampled until the chart reloads.',
+          ),
+        ],
+      },
+      {
+        heading: 'Security',
+        blocks: [
+          list(
+            'While you log in, the application listens only on `127.0.0.1:47822`, which only programs on your computer can reach, and stops as soon as the code arrives or after five minutes. A reply from a login started elsewhere is refused.',
+            'The Secret ID is never sent anywhere: the login sends FYERS a hash of it, as FYERS asks. The Secret ID, access token, refresh token and PIN are kept in your operating system’s credential store and used only by the application’s backend.',
+          ),
+        ],
+      },
+    ],
+    related: ['data-providers', 'data-terms'],
   },
   {
     id: 'import-csv',
@@ -1427,7 +1504,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Whose data it is',
         blocks: [
           p(
-            'Prices come from the exchanges (NSE, BSE, MCX and others) through your own Zerodha Kite Connect account and API key, or from files you import. Broker data is licensed to you, for your own use, under Zerodha’s Kite Connect terms and the exchanges’ rules. ProTradeChart supplies no data, holds no data licence, and has no server that market data passes through: the application fetches it directly from Zerodha on your computer.',
+            'Prices come from the exchanges (NSE, BSE, MCX and others) through your own broker account and API app — Zerodha Kite Connect or FYERS — or from files you import. Broker data is licensed to you, for your own use, under your broker’s API terms (Kite Connect’s, or FYERS’s) and the exchanges’ rules. ProTradeChart supplies no data, holds no data licence, and has no server that market data passes through: the application fetches it directly from your broker on your computer.',
           ),
         ],
       },
@@ -1438,6 +1515,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             'Publish, share, sell or show it to the public: on a live stream, a website or a public dashboard, or by passing on the application’s data folder or prices exported from it. Kite’s terms say live market data may not be displayed to the public at large, and the exchanges license redistribution separately.',
             'Use it for mock or virtual trading apps or trading games, which Kite’s terms forbid.',
             'Share your API key, secret or login: Kite’s terms say they are for your use only.',
+            'Through FYERS: FYERS’s API terms say exchange data may not be used to develop charting or technical tools, paper trading, gaming or virtual trading, and need FYERS’s written consent to build databases or keep permanent or temporary copies. Read them before you connect FYERS.',
           ),
         ],
       },
@@ -1445,17 +1523,18 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'What the application keeps',
         blocks: [
           p(
-            'Kite Connect’s terms restrict building databases or permanent copies of the content its APIs return, unless Zerodha permits it, and ask you to delete stored content when you stop using the APIs. So broker prices are never saved on this computer: the application holds them in memory while it is open (the bars charts show, what scripts, the Screener and Studies read, and the whole market if you keep it loaded) and they are gone when it closes.',
+            'Kite Connect’s and FYERS’s terms restrict building databases or copies of the content their APIs return, unless the broker permits it, and ask you to delete stored content when you stop using the APIs. So broker prices are never saved on this computer: the application holds them in memory while it is open (the bars charts show, what scripts, the Screener and Studies read, and the whole market if you keep it loaded) and they are gone when it closes.',
           ),
           p('What the data folder keeps (its location is shown in **About**) is your own:'),
           list(
             'Layouts, watchlists, alerts, drawings, scripts and your settings.',
             'Files you import, which are yours.',
             'The last result of each screen and Study you ran. These are your analysis; a result can include a few figures from that day, such as a matched stock’s closing price.',
-            'Zerodha’s instrument list (names and codes, public and needing no login), and the list of symbols the market covers (names, not prices).',
+            'Each broker’s instrument list (names and codes, public and needing no login), and the list of symbols the market covers (names, not prices).',
           ),
           p('None of it is sent to this project or to anyone else. AI features send the AI provider your question, symbols, watchlist names and a Study’s summary statistics (counts, medians and test results), never price history.'),
           note('Earlier versions kept broker prices on disk. The first launch of this version deletes them and shrinks the data file.'),
+          note('Symbols saved as `zerodha:…` by earlier versions are renamed `india:…` the first time this version opens, after it saves a copy of the old data file beside it (`charting.before-india.db`). Keep that copy if you might go back to an earlier version.'),
         ],
       },
       {
@@ -1467,7 +1546,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         ],
       },
     ],
-    related: ['privacy', 'market-data', 'zerodha', 'updates'],
+    related: ['privacy', 'market-data', 'zerodha', 'fyers', 'updates'],
   },
   {
     id: 'troubleshooting',
@@ -1480,7 +1559,8 @@ export const HELP_TOPICS: HelpTopic[] = [
         blocks: [
           list(
             'Check that the symbol’s data source is switched on in **Data providers**.',
-            'For Zerodha, log in again: tokens expire every morning.',
+            'Log in to your broker again: Zerodha’s and FYERS’s tokens expire every morning.',
+            'Through FYERS, a message about the day’s requests means the plan’s daily limit is nearly used; it carries on the next day (or with Prime).',
             'Messages about a plan or subscription mean your broker account does not include market data.',
             'Symbols from a data source the app no longer has (`binance:…`, `coinbase:…`, `hyperliquid:…`) can no longer be loaded; see **Symbols and searching**.',
           ),
@@ -1491,7 +1571,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         blocks: [
           list(
             'Open the Python tab and follow the banner: install Python 3.10 or newer, then press **Set up Python**.',
-            'Make sure Zerodha is connected and its token is current.',
+            'Make sure your broker is connected and its token is current.',
             'Read **Before it runs**, under **More options** for the Screener, or the readiness panel for Studies, which names anything blocking the run.',
             'If a result cannot be read after an update, restart the application so that it uses the current engine.',
           ),

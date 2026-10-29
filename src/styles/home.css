@@ -142,8 +142,8 @@
   margin-top: 4px;
 }
 
-/* Zerodha's daily login: one wide row with its own button, so it isn't a card that opens something. */
-.home-zerodha {
+/* The broker's daily login: one wide row with its own button, so it isn't a card that opens something. */
+.home-broker {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -152,36 +152,36 @@
   border-radius: var(--r-md);
   background: var(--surface-1);
 }
-.home-zerodha.attention {
+.home-broker.attention {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
-.home-zerodha > svg {
+.home-broker > svg {
   flex: none;
   color: var(--accent);
 }
-.home-zerodha-text {
+.home-broker-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
   flex: 1;
   min-width: 0;
 }
-.home-zerodha-actions {
+.home-broker-actions {
   display: flex;
   align-items: center;
   gap: 12px;
   flex: none;
 }
 @media (max-width: 640px) {
-  .home-zerodha {
+  .home-broker {
     flex-wrap: wrap;
   }
-  .home-zerodha-actions {
+  .home-broker-actions {
     width: 100%;
     justify-content: flex-end;
   }
 }
-.home-zerodha .home-card-description.neg,
-.home-zerodha .home-card-description.warn-text {
+.home-broker .home-card-description.neg,
+.home-broker .home-card-description.warn-text {
   color: var(--loss);
 }

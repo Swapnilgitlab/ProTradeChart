@@ -9,8 +9,8 @@
  *  rename or removal is caught here. There's no automatic generation because the point is a short,
  *  human-readable prompt, not a dump of docstrings. */
 export function pythonApiReference(): string {
-  return `You are helping write a Python script for ProTradeChart, a desktop charting app for Indian (NSE/BSE, \
-via the user's Zerodha account) and crypto markets. The script runs from the app's own Python tab, on \
+  return `You are helping write a Python script for ProTradeChart, a desktop charting app for Indian markets (NSE/BSE, \
+through the user's own Zerodha or FYERS account). The script runs from the app's own Python tab, on \
 the user's own Python installation — nothing is sandboxed, but it only runs when the user presses Run.
 
 Market data and reporting results both go through one local package:
@@ -25,9 +25,9 @@ scikit-learn, …) needs installing into the user's Python first, or asking them
 ## Getting data
 
 - \`pt.bars(symbol, interval="D", start=None, end=None, limit=None, tz=None, naive=False) -> DataFrame\` — OHLCV \
-bars for one symbol. \`symbol\` is \`provider:EXCHANGE:TICKER\` (e.g. \`"zerodha:NSE:RELIANCE"\`) or \`"csv:NAME"\` \
+bars for one symbol. \`symbol\` is \`provider:EXCHANGE:TICKER\` (e.g. \`"india:NSE:RELIANCE"\`) or \`"csv:NAME"\` \
 for a file the user imported. \`interval\` is \`"D"\` or minutes (\`"1"\`, \`"3"\`, \`"5"\`, \`"10"\`, \`"15"\`, \
-\`"30"\`, \`"60"\` on Zerodha) — anything else, fetch a finer interval \
+\`"30"\`, \`"60"\` on Zerodha; FYERS also \`"2"\`, \`"20"\`, \`"120"\`, \`"240"\`) — anything else, fetch a finer interval \
 and use \`pt.resample\`. \`start\`/\`end\` take a date string, read in IST; without \`start\` you get the newest \
 \`limit\` bars (500 by default). The index is timezone-aware (\`naive=True\` drops it, handy for daily data); a \
 daily bar sits at midnight of its date.
@@ -37,7 +37,7 @@ records failures in \`result.errors\` instead of raising. The app paces every re
 limit, so a large universe's *first* run can take minutes — later runs only fetch what's new.
 - \`pt.resample(frame, rule, session_open="09:15") -> DataFrame\` — coarser bars from finer ones (\`"60min"\`, \
 \`"4h"\`, \`"W-FRI"\`); an intraday rule starts each bucket at the trading session's open, not a fixed clock split.
-- \`pt.universe(name=None, providers=("zerodha",)) -> Universe\` (a list of symbols with \`.source\` saying \
+- \`pt.universe(name=None, providers=("india",)) -> Universe\` (a list of symbols with \`.source\` saying \
 where they came from) — the symbols to work on so a script runs the first time with nothing configured: a \
 named watchlist, else the user's first non-empty one, else ten large NSE stocks. Prefer this over hardcoding \
 tickers when the user hasn't named any.

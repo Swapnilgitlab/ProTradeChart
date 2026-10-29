@@ -42,18 +42,18 @@ describe('what a proposed action is refused for', () => {
 
 describe('a symbol argument', () => {
   it('is resolved the same way the symbol search box would', () => {
-    expect(prepareAction(action('open_symbol', { symbol: 'RELIANCE' }), ctx)?.summary).toBe('Open zerodha:NSE:RELIANCE on the chart');
-    expect(prepareAction(action('open_symbol', { symbol: 'zerodha:hfcl' }), ctx)?.summary).toBe('Open zerodha:NSE:HFCL on the chart');
+    expect(prepareAction(action('open_symbol', { symbol: 'RELIANCE' }), ctx)?.summary).toBe('Open india:NSE:RELIANCE on the chart');
+    expect(prepareAction(action('open_symbol', { symbol: 'india:hfcl' }), ctx)?.summary).toBe('Open india:NSE:HFCL on the chart');
   });
 });
 
 describe('watchlist actions', () => {
   it('add a symbol once approved, and fail plainly for an unknown watchlist', async () => {
     const prepared = prepareAction(action('add_watchlist_item', { watchlist: 'Getting started', symbol: 'INFY' }), ctx);
-    expect(prepared?.summary).toBe('Add zerodha:NSE:INFY to “Getting started”');
+    expect(prepared?.summary).toBe('Add india:NSE:INFY to “Getting started”');
     const result = await prepared!.run();
-    expect(result).toEqual({ ok: true, message: 'Added zerodha:NSE:INFY to Getting started.' });
-    expect(addWatchlistItems).toHaveBeenCalledWith(1, [{ symbol: 'zerodha:NSE:INFY' }]);
+    expect(result).toEqual({ ok: true, message: 'Added india:NSE:INFY to Getting started.' });
+    expect(addWatchlistItems).toHaveBeenCalledWith(1, [{ symbol: 'india:NSE:INFY' }]);
 
     const missing = prepareAction(action('remove_watchlist_item', { watchlist: 'No such list', symbol: 'INFY' }), ctx);
     expect(await missing!.run()).toEqual({ ok: false, message: 'No watchlist named "No such list".' });
@@ -69,9 +69,9 @@ describe('watchlist actions', () => {
 
 describe('chart actions', () => {
   it('open a symbol and change the timeframe through the given callbacks', async () => {
-    const openSymbol = prepareAction(action('open_symbol', { symbol: 'zerodha:NSE:TCS' }), ctx)!;
-    expect(await openSymbol.run()).toEqual({ ok: true, message: 'Opened zerodha:NSE:TCS.' });
-    expect(ctx.onOpenSymbol).toHaveBeenCalledWith('zerodha:NSE:TCS');
+    const openSymbol = prepareAction(action('open_symbol', { symbol: 'india:NSE:TCS' }), ctx)!;
+    expect(await openSymbol.run()).toEqual({ ok: true, message: 'Opened india:NSE:TCS.' });
+    expect(ctx.onOpenSymbol).toHaveBeenCalledWith('india:NSE:TCS');
 
     const setTf = prepareAction(action('set_timeframe', { timeframe: '60' }), ctx)!;
     expect(await setTf.run()).toEqual({ ok: true, message: 'Timeframe set to 60.' });
@@ -92,15 +92,15 @@ describe('chart actions', () => {
 describe('a price alert', () => {
   it('is created with no base price, so it judges only crossings from here on', async () => {
     const prepared = prepareAction(action('create_price_alert', { symbol: 'RELIANCE', condition: 'crossing_up', price: 3000, message: 'Breakout' }), ctx)!;
-    expect(prepared.summary).toBe('Alert when zerodha:NSE:RELIANCE crosses above 3000');
-    expect(await prepared.run()).toEqual({ ok: true, message: 'Alert created on zerodha:NSE:RELIANCE.' });
+    expect(prepared.summary).toBe('Alert when india:NSE:RELIANCE crosses above 3000');
+    expect(await prepared.run()).toEqual({ ok: true, message: 'Alert created on india:NSE:RELIANCE.' });
     expect(savePriceAlert).toHaveBeenCalledWith(
-      expect.objectContaining({ symbol: 'zerodha:NSE:RELIANCE', condition: 'crossing_up', price: 3000, basePrice: null, message: 'Breakout', status: 'active' }),
+      expect.objectContaining({ symbol: 'india:NSE:RELIANCE', condition: 'crossing_up', price: 3000, basePrice: null, message: 'Breakout', status: 'active' }),
     );
   });
 
   it('reads "crosses below" for crossing_down', () => {
     const prepared = prepareAction(action('create_price_alert', { symbol: 'RELIANCE', condition: 'crossing_down', price: 2500, message: '' }), ctx)!;
-    expect(prepared.summary).toBe('Alert when zerodha:NSE:RELIANCE crosses below 2500');
+    expect(prepared.summary).toBe('Alert when india:NSE:RELIANCE crosses below 2500');
   });
 });

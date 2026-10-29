@@ -24,7 +24,7 @@ export const STARTER_SCRIPT = `"""Describe what this script does."""
 
 import protrade as pt
 
-# A symbol is provider:EXCHANGE:TICKER. Try pt.instruments("zerodha", exchange="NSE") to browse.
-bars = pt.bars("zerodha:NSE:RELIANCE", "D", limit=250)
+# A symbol is provider:EXCHANGE:TICKER. Try pt.instruments("india", exchange="NSE") to browse.
+bars = pt.bars("india:NSE:RELIANCE", "D", limit=250)
 print(bars.tail())
 `;

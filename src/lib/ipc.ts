@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { BrokerId } from './symbols';
 
 /** Typed wrappers over every Tauri command. Keeping all `invoke` calls in one
  *  file means the Rust ↔ TypeScript contract (see `src-tauri/src/models.rs`)
@@ -48,7 +49,7 @@ export type WatchlistFlag = (typeof WATCHLIST_FLAGS)[number];
 
 export interface WatchlistItem {
   id: number;
-  /** Fully-qualified chart symbol, e.g. `zerodha:NSE:RELIANCE`. */
+  /** Fully-qualified chart symbol, e.g. `india:NSE:RELIANCE`. */
   symbol: string;
   name: string | null;
   /** Where the row sits among the list's symbols and sections: they share one sequence. */
@@ -170,12 +171,12 @@ export const listWatchlists = () => invoke<WatchlistSummary[]>('list_watchlists'
 
 export const getWatchlist = (id: number) => invoke<WatchlistDetail>('get_watchlist', { id });
 
-/** Makes the Indices watchlist (broad market, sectors, themes) from a broker's instrument list. */
-export const createIndicesWatchlist = (provider: 'zerodha') => invoke<WatchlistDetail>('create_indices_watchlist', { provider });
+/** Makes the Indices watchlist (broad market, sectors, themes) from the active broker's instrument list. */
+export const createIndicesWatchlist = (provider: 'india') => invoke<WatchlistDetail>('create_indices_watchlist', { provider });
 
-/** Every NSE equity a broker's instrument list has (~2,000 symbols) — feeds Vela's own symbol
- *  index (`data/providers/zerodha.ts`'s `listSymbols`), not the app's own search box. */
-export const listNseEquities = (provider: 'zerodha') => invoke<SymbolMatch[]>('list_nse_equities', { provider });
+/** Every NSE equity the active broker's instrument list has (~2,000 symbols) — feeds Vela's own symbol
+ *  index (`data/providers/india.ts`'s `listSymbols`), not the app's own search box. */
+export const listNseEquities = (provider: 'india') => invoke<SymbolMatch[]>('list_nse_equities', { provider });
 
 /** A symbol's drawings (Vela's document, as JSON), or null when none were ever stored for it. */
 export const getSymbolDrawings = (symbol: string) => invoke<string | null>('get_symbol_drawings', { symbol });
@@ -366,18 +367,98 @@ export const zerodhaCompleteLogin = (pasted: string) =>
 export const zerodhaUpdateInstruments = () =>
   invoke<{ count: number; updatedAt: number }>('zerodha_update_instruments');
 
-export const zerodhaSearchInstruments = (query: string, limit = 8) =>
-  invoke<SymbolMatch[]>('zerodha_search_instruments', { query, limit });
-
-export const zerodhaFetchBars = (ticker: string, interval: string, fromMs?: number, toMs?: number) =>
-  invoke<BarsResponse>('zerodha_fetch_bars', { ticker, interval, fromMs, toMs });
-
-export const zerodhaQuotes = (tickers: string[]) => invoke<Quote[]>('zerodha_quotes', { tickers });
-
 export const zerodhaSubscribe = (ticker: string) =>
   invoke<{ token: number; exchange: string }>('zerodha_subscribe', { ticker });
 
 export const zerodhaUnsubscribe = (ticker: string) => invoke<void>('zerodha_unsubscribe', { ticker });
+
+// ---- FYERS -------------------------------------------------------------------------
+
+export interface FyersStatus {
+  instrumentCount: number;
+  instrumentsUpdatedAt: number | null;
+  /** When the current access token was saved (epoch ms). */
+  tokenSavedAt: number | null;
+  /** When it most likely stops working, an estimate: the next 06:30 IST (epoch seconds). */
+  tokenExpiresAt: number | null;
+  plan: 'standard' | 'prime';
+  requestsToday: number;
+  dailyLimit: number;
+  /** A PIN is saved for renewing the login (the PIN itself is never sent here). */
+  pinSaved: boolean;
+  /** When the refresh token was saved, if one is (epoch ms). */
+  refreshSavedAt: number | null;
+  /** Why the last renewal with the PIN failed, if it did. */
+  renewalError: string | null;
+  /** What to register as the FYERS app's redirect URL. */
+  redirectUrl: string;
+  /** The live-chart poller. */
+  feed: FeedStatus;
+}
+
+/** One polled quote, for a live chart: the shape `LiveBarBuilder` takes, plus the day's own range. */
+export interface FyersTick {
+  /** The app's ticker (`NSE:RELIANCE`). */
+  ticker: string;
+  ltp: number;
+  ltt: number | null;
+  volume: number | null;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+}
+
+export const fyersStatus = () => invoke<FyersStatus>('fyers_status');
+
+/** FYERS's login page for the saved app ID (for opening by hand); the app remembers its `state`. */
+export const fyersLoginUrl = () => invoke<string>('fyers_login_url');
+
+/** The redirect URL to register on the FYERS app so the app can catch the login itself. */
+export const fyersRedirectUrl = () => invoke<string>('fyers_redirect_url');
+
+/** Opens FYERS's login page and waits for the browser to come back with an auth code, then saves
+ *  the day's token and the refresh token. */
+export const fyersLoginInBrowser = () => invoke<{ tokenExpiresAt: number }>('fyers_login_in_browser');
+
+/** `pasted` is the address FYERS redirected to after login, or just its auth code. */
+export const fyersCompleteLogin = (pasted: string) =>
+  invoke<{ tokenExpiresAt: number }>('fyers_complete_login', { pasted });
+
+/** Saves the PIN used to renew the login; `''` forgets it. Write-only. */
+export const fyersSetPin = (pin: string) => invoke<void>('fyers_set_pin', { pin });
+
+export const fyersSetPlan = (plan: 'standard' | 'prime') => invoke<void>('fyers_set_plan', { plan });
+
+export const fyersUpdateInstruments = () =>
+  invoke<{ count: number; updatedAt: number }>('fyers_update_instruments');
+
+export const fyersSubscribe = (ticker: string) =>
+  invoke<{ ticker: string; exchange: string }>('fyers_subscribe', { ticker });
+
+export const fyersUnsubscribe = (ticker: string) => invoke<void>('fyers_unsubscribe', { ticker });
+
+// ---- Indian market data (whichever broker serves `india:` symbols) -----------------
+
+export interface MarketSource {
+  /** The broker serving `india:` symbols now. */
+  broker: BrokerId;
+  /** The one the user picked, or null when the app chose (the connected broker, Zerodha if both are). */
+  chosen: BrokerId | null;
+}
+
+export const getMarketSource = () => invoke<MarketSource>('market_source');
+
+/** Picks the broker that serves `india:` symbols. Every window hears `market-source-changed`. */
+export const setMarketSource = (broker: BrokerId) => invoke<MarketSource>('set_market_source', { broker });
+
+/** `ticker` is the part after `india:` (`NSE:RELIANCE`, or the chart's short `RELIANCE`). */
+export const marketFetchBars = (ticker: string, interval: string, fromMs?: number, toMs?: number) =>
+  invoke<BarsResponse>('market_fetch_bars', { ticker, interval, fromMs, toMs });
+
+export const marketQuotes = (tickers: string[]) => invoke<Quote[]>('market_quotes', { tickers });
+
+export const marketSearchInstruments = (query: string, limit = 8) =>
+  invoke<SymbolMatch[]>('market_search_instruments', { query, limit });
 
 /** Tauri rejects with a plain string; normalise to something `instanceof Error`-safe. */
 export function errorMessage(err: unknown): string {

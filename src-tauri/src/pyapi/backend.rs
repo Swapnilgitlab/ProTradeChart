@@ -21,6 +21,9 @@ use super::wire::{
 };
 use super::{split_symbol, ApiError};
 use crate::db::{now_ms, Database};
+use crate::fyers::instruments as fyers_instruments;
+use crate::fyers::protocol::{FyersError, FyersErrorKind, Interval as FyersInterval};
+use crate::fyers_commands;
 use crate::models::DaySnapshot;
 use crate::providers;
 use crate::secrets::Secrets;
@@ -28,6 +31,7 @@ use crate::store::bar_memory::BarMemory;
 use crate::store::instrument_list::{self, Source};
 use crate::store::research_bars::canonical_interval;
 use crate::store::{datasets, watchlists};
+use crate::symbols::{india_broker, Broker, INDIA};
 use crate::zerodha::client::ZerodhaClient;
 use crate::zerodha::instruments as zerodha_instruments;
 use crate::zerodha::protocol::{
@@ -81,9 +85,22 @@ pub fn zerodha_error(e: ZerodhaError) -> ApiError {
     ApiError::new(status, code, e.message())
 }
 
+/// Maps a FYERS failure onto the API's codes, as [`zerodha_error`] does Kite's.
+pub fn fyers_error(e: FyersError) -> ApiError {
+    let (status, code) = match e.kind {
+        FyersErrorKind::NotConfigured => (409, "not_configured"),
+        FyersErrorKind::Token => (401, "auth"),
+        FyersErrorKind::RateLimited => (429, "rate_limited"),
+        FyersErrorKind::BadRequest => (400, "bad_request"),
+        FyersErrorKind::Network | FyersErrorKind::Server | FyersErrorKind::Other => (502, "upstream"),
+    };
+    ApiError::new(status, code, e.message())
+}
+
 fn unsupported_provider(provider: &str) -> ApiError {
     ApiError::bad_request(format!(
-        "Python can't read '{provider}' data. Supported: zerodha and csv (your imported files)."
+        "Python can't read '{provider}' data. Supported: india (Indian markets, through your broker) and csv (your \
+         imported files)."
     ))
 }
 
@@ -127,13 +144,17 @@ fn kind_of(instrument: &str) -> String {
     }
 }
 
-pub fn list_instruments(conn: &Connection, q: &InstrumentQuery) -> Result<Vec<InstrumentRow>, ApiError> {
-    let source = Source::parse(&q.provider)
-        .ok_or_else(|| ApiError::bad_request(format!("'{}' has no instrument list. Ask for zerodha.", q.provider)))?;
+pub fn list_instruments(
+    conn: &Connection,
+    secrets: &Secrets,
+    q: &InstrumentQuery,
+) -> Result<Vec<InstrumentRow>, ApiError> {
+    let source = Source::for_provider(conn, secrets, &q.provider)?
+        .ok_or_else(|| ApiError::bad_request(format!("'{}' has no instrument list. Ask for india.", q.provider)))?;
     Ok(instrument_list::list(conn, source, &q.filter, q.limit)?
         .into_iter()
         .map(|i| InstrumentRow {
-            symbol: format!("{}:{}", q.provider, i.ticker),
+            symbol: format!("{INDIA}:{}", i.ticker),
             name: i.name,
             exchange: i.exchange,
             kind: kind_of(&i.instrument),
@@ -203,23 +224,26 @@ impl Backend for AppBackend {
         let db = self.app.state::<Database>();
         let secrets = self.app.state::<Secrets>();
         let conn = db.conn.lock().map_err(|e| ApiError::internal(e.to_string()))?;
-        let usable = |id: &str| providers::is_usable(&conn, &secrets, id).unwrap_or(false);
+        let broker = india_broker(&conn, &secrets)?;
         Ok(vec![
             ProviderStatus {
-                id: "zerodha",
-                label: "Zerodha",
-                usable: usable("zerodha"),
+                id: INDIA,
+                label: broker.label(),
+                usable: providers::is_usable(&conn, &secrets, broker.id()).unwrap_or(false),
+                broker: Some(broker.id()),
             },
             ProviderStatus {
                 id: "csv",
                 label: "Imported files",
                 usable: true,
+                broker: None,
             },
         ])
     }
 
     fn instruments(&self, query: &InstrumentQuery) -> Result<Vec<InstrumentRow>, ApiError> {
-        self.with_conn(|conn| list_instruments(conn, query))
+        let secrets = self.app.state::<Secrets>();
+        self.with_conn(|conn| list_instruments(conn, &secrets, query))
     }
 
     fn watchlists(&self) -> Result<Vec<WatchlistInfo>, ApiError> {
@@ -265,10 +289,10 @@ impl Backend for AppBackend {
     fn bars<'a>(&'a self, request: BarsRequest) -> BoxFuture<'a, Result<BarsData, ApiError>> {
         Box::pin(async move {
             let (provider, ticker) = split_symbol(&request.symbol)
-                .ok_or_else(|| ApiError::bad_request("a symbol looks like zerodha:NSE:RELIANCE"))?;
+                .ok_or_else(|| ApiError::bad_request("a symbol looks like india:NSE:RELIANCE"))?;
             match provider {
                 "csv" => self.with_conn(|conn| csv_bars(conn, ticker, &request)),
-                "zerodha" => {
+                INDIA => {
                     let memory = self.app.state::<BarMemory>();
                     data::load_bars(&memory, self, &request, now_ms()).await
                 }
@@ -312,9 +336,12 @@ impl data::Snapshots for AppBackend {
         tickers: &'a [String],
     ) -> BoxFuture<'a, Result<Vec<Option<DaySnapshot>>, ApiError>> {
         Box::pin(async move {
-            match provider {
-                "zerodha" => self.zerodha_day_snapshots(tickers).await,
-                other => Err(unsupported_provider(other)),
+            match (provider, self.broker()?) {
+                (INDIA, Broker::Zerodha) => self.zerodha_day_snapshots(tickers).await,
+                (INDIA, Broker::Fyers) => fyers_commands::day_snapshots(&self.app, tickers)
+                    .await
+                    .map_err(fyers_error),
+                (other, _) => Err(unsupported_provider(other)),
             }
         })
     }
@@ -329,17 +356,24 @@ impl Fetcher for AppBackend {
         to_ms: i64,
     ) -> BoxFuture<'a, Result<Fetched, ApiError>> {
         Box::pin(async move {
-            let (provider, ticker) = split_symbol(symbol)
-                .ok_or_else(|| ApiError::bad_request("a symbol looks like zerodha:NSE:RELIANCE"))?;
-            match provider {
-                "zerodha" => self.fetch_zerodha(ticker, interval, from_ms, to_ms).await,
-                other => Err(unsupported_provider(other)),
+            let (provider, ticker) =
+                split_symbol(symbol).ok_or_else(|| ApiError::bad_request("a symbol looks like india:NSE:RELIANCE"))?;
+            match (provider, self.broker()?) {
+                (INDIA, Broker::Zerodha) => self.fetch_zerodha(ticker, interval, from_ms, to_ms).await,
+                (INDIA, Broker::Fyers) => self.fetch_fyers(ticker, interval, from_ms, to_ms).await,
+                (other, _) => Err(unsupported_provider(other)),
             }
         })
     }
 }
 
 impl AppBackend {
+    /// The broker serving `india:` symbols now.
+    fn broker(&self) -> Result<Broker, ApiError> {
+        let secrets = self.app.state::<Secrets>();
+        self.with_conn(|conn| Ok(india_broker(conn, &secrets)?))
+    }
+
     async fn fetch_zerodha(&self, ticker: &str, interval: &str, from_ms: i64, to_ms: i64) -> Result<Fetched, ApiError> {
         let kind = KiteInterval::parse(interval).ok_or_else(|| {
             ApiError::bad_request(format!(
@@ -370,6 +404,30 @@ impl AppBackend {
             .fetch_history(&creds, &inst, kind, Some(from_ms), Some(to_ms), now)
             .await
             .map_err(zerodha_error)?;
+        Ok(Fetched { bars, from_ms: began })
+    }
+
+    async fn fetch_fyers(&self, ticker: &str, interval: &str, from_ms: i64, to_ms: i64) -> Result<Fetched, ApiError> {
+        let kind = FyersInterval::parse(interval).ok_or_else(|| {
+            ApiError::bad_request(format!(
+                "FYERS doesn't serve a '{interval}' interval. It serves D and 1, 2, 3, 5, 10, 15, 20, 30, 60, 120 or 240 \
+                 minutes; resample the rest in pandas."
+            ))
+        })?;
+        let inst = {
+            let db = self.app.state::<Database>();
+            let conn = db.conn.lock().map_err(|e| ApiError::internal(e.to_string()))?;
+            fyers_instruments::resolve(&conn, ticker)?.ok_or_else(|| {
+                ApiError::not_found(format!(
+                    "FYERS has no instrument called '{ticker}'. Search with pt.instruments(), or update the \
+                     instrument list in Data providers."
+                ))
+            })?
+        };
+        // The client answers a span longer than one call may cover with only its newest part.
+        let (bars, began) = fyers_commands::fetch_history(&self.app, &inst, kind, Some(from_ms), Some(to_ms))
+            .await
+            .map_err(fyers_error)?;
         Ok(Fetched { bars, from_ms: began })
     }
 
@@ -455,7 +513,7 @@ mod tests {
         let e = unsupported_provider("binance");
         assert_eq!(e.status, 400);
         assert!(
-            e.message.contains("binance") && e.message.contains("zerodha"),
+            e.message.contains("binance") && e.message.contains("india"),
             "{}",
             e.message
         );
@@ -569,12 +627,13 @@ mod tests {
             limit: 100,
         };
 
-        let all = list_instruments(&conn, &q("zerodha", None)).unwrap();
+        let secrets = Secrets::new(Box::new(crate::secrets::testing::MemoryKeychain::default()));
+        let all = list_instruments(&conn, &secrets, &q("india", None)).unwrap();
         assert_eq!(all.len(), 2);
-        let infy = all.iter().find(|r| r.symbol == "zerodha:NSE:INFY").unwrap();
+        let infy = all.iter().find(|r| r.symbol == "india:NSE:INFY").unwrap();
         assert_eq!((infy.kind.as_str(), infy.name.as_deref()), ("EQUITY", Some("Infosys")));
 
-        let futures = list_instruments(&conn, &q("zerodha", Some("FUT"))).unwrap();
+        let futures = list_instruments(&conn, &secrets, &q("zerodha", Some("FUT"))).unwrap();
         assert_eq!(futures.len(), 1);
         assert_eq!(futures[0].kind, "FUT");
         assert_eq!(futures[0].expiry.as_deref(), Some("2026-09-29"));
@@ -583,7 +642,7 @@ mod tests {
             err(
                 400,
                 "bad_request",
-                list_instruments(&conn, &q(retired_or_unknown, None)).unwrap_err(),
+                list_instruments(&conn, &secrets, &q(retired_or_unknown, None)).unwrap_err(),
             );
         }
     }
@@ -626,11 +685,11 @@ mod tests {
             id,
             &[
                 NewWatchlistItem {
-                    symbol: "zerodha:NSE:RELIANCE".into(),
+                    symbol: "india:NSE:RELIANCE".into(),
                     name: Some("Reliance".into()),
                 },
                 NewWatchlistItem {
-                    symbol: "zerodha:NSE:TCS".into(),
+                    symbol: "india:NSE:TCS".into(),
                     name: None,
                 },
             ],
@@ -641,7 +700,7 @@ mod tests {
         assert_eq!(by_name.id, id);
         assert_eq!(
             by_name.symbols.iter().map(|s| s.symbol.as_str()).collect::<Vec<_>>(),
-            ["zerodha:NSE:RELIANCE", "zerodha:NSE:TCS"]
+            ["india:NSE:RELIANCE", "india:NSE:TCS"]
         );
         assert_eq!(
             watchlist_content(&conn, &WatchlistSel::Id(id)).unwrap().name,

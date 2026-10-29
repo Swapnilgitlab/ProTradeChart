@@ -133,7 +133,7 @@ function AlertForm({ seed, onCancel, onSaved }: { seed: AlertFormSeed; onCancel:
           id="alert-symbol"
           type="text"
           value={symbolText}
-          placeholder="RELIANCE, zerodha:BSE:TCS…"
+          placeholder="RELIANCE, BSE:TCS…"
           autoComplete="off"
           spellCheck={false}
           autoFocus={!symbolText}

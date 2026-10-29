@@ -5,7 +5,7 @@ import { fromTemplate } from './templates';
 
 const facts = (over: Partial<ReadinessFacts> = {}): ReadinessFacts => ({
   providers: [
-    { id: 'zerodha', usable: true },
+    { id: 'india', usable: true },
     { id: 'binance', usable: false },
   ],
   pythonReady: true,
@@ -43,7 +43,7 @@ describe('checkReadiness', () => {
 
   it('blocks when the broker or Python isn’t set up, or the watchlist doesn’t exist', () => {
     const spec = fromTemplate('winners_100');
-    expect(checkReadiness(spec, facts({ providers: [{ id: 'zerodha', usable: false }] })).ready).toBe(false);
+    expect(checkReadiness(spec, facts({ providers: [{ id: 'india', usable: false }] })).ready).toBe(false);
     expect(checkReadiness(spec, facts({ pythonReady: false, pythonMessage: 'No Python' })).items[0].detail).toBe('No Python');
     const listed = normalizeSpec({ ...spec, universe: { ...spec.universe, source: 'watchlist', watchlist: 'Gone' } });
     expect(item(checkReadiness(listed, facts()), 'Universe').blocking).toBe(true);

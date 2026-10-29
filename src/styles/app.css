@@ -1501,6 +1501,17 @@ code {
   font-size: 11px;
   color: var(--text-muted);
 }
+/* A row's control (FYERS's plan) keeps its width however long the row's text runs. */
+.prov-status-row > select,
+.prov-status-row > .btn {
+  flex: none;
+  width: auto;
+}
+.prov-status-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
 /* The market-data store, below the provider list in the Data providers dialog. */
 .market-data {
   margin-top: 18px;
@@ -1547,6 +1558,27 @@ code {
   margin-top: 14px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
+}
+
+/* Which broker serves Indian market data, shown only when more than one is set up. */
+.prov-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.prov-source .field-hint {
+  flex-basis: 100%;
+}
+.prov-source-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
 }
 
 /* ---- Price alerts ---------------------------------------------------------- */

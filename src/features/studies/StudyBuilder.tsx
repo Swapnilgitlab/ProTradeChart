@@ -145,8 +145,8 @@ export function StudyBuilder({ draft, onChange, problem, readiness, onApplyFix, 
               <>
                 <label className="study-field">
                   <span>Broker</span>
-                  <select className="python-input" value={u.provider} onChange={(e) => setUniverse({ provider: e.currentTarget.value as 'zerodha' })}>
-                    <option value="zerodha">Zerodha</option>
+                  <select className="python-input" value={u.provider} onChange={(e) => setUniverse({ provider: e.currentTarget.value as 'india' })}>
+                    <option value="india">Indian markets</option>
                                       </select>
                 </label>
                 <fieldset className="study-field study-checks">
@@ -195,7 +195,7 @@ export function StudyBuilder({ draft, onChange, problem, readiness, onApplyFix, 
           </div>
           {u.source === 'symbols' && (
             <label className="study-field">
-              <span>Symbols, one per line (zerodha:NSE:RELIANCE)</span>
+              <span>Symbols, one per line (india:NSE:RELIANCE)</span>
               <textarea
                 className="python-input study-textarea"
                 rows={4}
@@ -342,7 +342,7 @@ export function StudyBuilder({ draft, onChange, problem, readiness, onApplyFix, 
             <input
               className="python-input"
               value={draft.benchmark ?? ''}
-              placeholder="zerodha:NSE:NIFTY_500"
+              placeholder="india:NSE:NIFTY_500"
               spellCheck={false}
               onChange={(e) => set({ benchmark: e.currentTarget.value.trim() || null })}
             />

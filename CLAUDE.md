@@ -25,8 +25,9 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
 
 ## Conventions
 
-- A chart symbol is always `provider:TICKER` (`zerodha:NSE:RELIANCE`). Use the helpers in `src/lib/symbols.ts`; never split on
-  `:` by hand.
+- A chart symbol is always `provider:TICKER` (`india:NSE:RELIANCE`). Use the helpers in `src/lib/symbols.ts`; never split on
+  `:` by hand. Indian market symbols are `india:` whichever broker serves them; `zerodha`/`fyers` are *brokers* (settings,
+  credentials, clients), never symbol prefixes, except as the old spellings every input reads as `india:`.
 - Pure logic lives in `src/lib/` (TypeScript) or `src-tauri/src/store/` (Rust) and has unit tests. Components
   and Tauri commands stay thin.
 - All `invoke` calls go through `src/lib/ipc.ts`; its types mirror `src-tauri/src/models.rs` (camelCase over the wire).
@@ -113,7 +114,7 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   from when the token was saved (`accessTokenSavedAt`). Kite's instrument lists are public (no login) and its bad-token
   errors are `{"status":"error","error_type":"TokenException"}`. `cargo test --lib zerodha::live -- --ignored` runs opt-in
   tests against the real service (no credentials needed) — run them when touching `zerodha/`.
-- Zerodha gives Vela's OWN symbol index (`listSymbols`, `capabilities.enumerate`) only its NSE equities
+- The active broker gives Vela's OWN symbol index (`listSymbols`, `capabilities.enumerate`) only its NSE equities
   (`list_nse_equities` → `store::instrument_list`, ~2,000 symbols) — its full instrument list (BSE, F&O, indices) are
   50x that and were deliberately left out of an eager in-memory index. That index is what powers clicking a chart's
   symbol name or bare-typing to search; it's read once, when Vela registers the provider, so connecting a broker
@@ -202,7 +203,7 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   places that must agree — a `ToolSpec` in `ai/prompts.rs::ask_ai_tools` and a matching case in `prepareAction` — and a tool
   without a case there is dropped silently, never run. Keep the allowlist to what's already reversible and non-financial; don't
   add anything that deletes a watchlist or layout, touches a secret, or reaches Python or Studies.
-- **Broker price history never touches disk** (Kite Connect's terms restrict permanent copies of its data). Every broker bar
+- **Broker price history never touches disk** (Kite Connect's and FYERS's terms restrict copies of their data). Every broker bar
   lives in `store::bar_memory::BarMemory` (Tauri state) for the session: the Python API's, the Screener's and Studies', "Keep the
   market loaded"'s, and the charts' recent bars (put without coverage, as the offline fallback). Only the user's imported
   datasets are persisted. Don't add a table, file or cache that holds a broker's prices; derived results (a screen's or Study's
@@ -223,11 +224,11 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   only (`hello.py` — extend that list for another pure-side-effect script), a `pt.show` table
   (`screen_*.py`), or a `pt.report` (everything else) — a new example needs a matching branch there, not just a spot in
   `EXAMPLES`.
-- A broker symbol is stored and compared in its long form (`zerodha:NSE:HFCL`) but *shown* short (`HFCL`) — never render
+- A broker symbol is stored and compared in its long form (`india:NSE:HFCL`) but *shown* short (`HFCL`) — never render
   `symbol` or `splitSymbol(...).ticker` to the user; use `displayTicker`. A chart is given the short form (`chartSymbol`), so
   anything read back from Vela must go through `normalizeSymbol` before it is compared or stored, or a watchlist row, an
-  alert and a chart will disagree about what they are looking at. `NSE:` is the one exchange hidden (Zerodha reads a bare
-  ticker as NSE); don't hide another without giving the backends a way to find it from a bare ticker. See "How a symbol is
+  alert and a chart will disagree about what they are looking at. `NSE:` is the one exchange hidden (both brokers' backends
+  read a bare ticker as NSE); don't hide another without giving the backends a way to find it from a bare ticker. See "How a symbol is
   shown" in `docs/ARCHITECTURE.md`.
 - A colour flag belongs to the **symbol** (`symbol_flags`), not a list's row: `watchlists::get` joins it in, and
   `watchlist_items.flag` is legacy (migrated once, then cleared — don't write it). Each colour's list has a reserved
@@ -336,9 +337,32 @@ Run all of the above before finishing a change. `npm run build` type-checks and 
   don't add an `iloc` by position or a `where(..., value)` that turns a row above a symbol's first bar into a value. Keep
   `tests/test_wide.py`, which checks every family, and the Screener fixture, which must not change.
 - **Binance, Coinbase and Hyperliquid are not data sources** — Vela's own bundled crypto providers, free and
-  needing no account, removed at the owner's request so Zerodha is the only live data source. They're hard-deleted:
+  needing no account, removed at the owner's request (the live sources are now the user's own Zerodha or FYERS). They're hard-deleted:
   just gone from `ProviderId`/`PROVIDER_LABELS` (`lib/symbols.ts`) and `providers.rs`, with no purge job —
   `isSupportedSymbol`'s normal handling of an unknown provider covers `binance:`/`coinbase:`/`hyperliquid:` symbols
-  saved before the removal, as it would any provider the app doesn't have. `DEFAULT_PROVIDER` is now `zerodha` (naming
-  NSE), so a bare ticker and the starter watchlist need the user's own Zerodha account connected to actually load — they no longer work with zero setup. Don't bring back a free crypto
+  saved before the removal, as it would any provider the app doesn't have. `DEFAULT_PROVIDER` is `india` (naming
+  NSE), so a bare ticker and the starter watchlist need the user's own broker account connected to actually load — they no longer work with zero setup. Don't bring back a free crypto
   source without the owner's say-so, and don't add a source that scrapes an unofficial endpoint.
+- **Indian symbols are `india:`, and a broker is a setting** (`src-tauri/src/symbols.rs`, `lib/symbols.ts`, "Broker-neutral
+  Indian symbols" in `docs/ARCHITECTURE.md`). `symbols::india_broker` decides which broker serves them (the user's pick,
+  `ui_preferences['india.source']`, else the one set up, Zerodha first); the webview reads it (`activeBroker()`), never
+  decides it. Never mix two brokers' bars in one series: anything that can change the broker in use goes through
+  `market_commands::after_broker_settings_changed` (or `set_market_source`), which drops `BarMemory`'s `india:` series, stops a
+  market load and tells every window (`market-source-changed`, which rebuilds the chart tabs). `zerodha:` / `fyers:` stay
+  accepted as aliases at every input (`splitSymbol`, `canonical_provider`, Python's `client.canonical_provider`, the spec
+  validators, the `zerodha` Vela alias) — keep them. `store/india_symbols.rs` migrated stored symbols once (backup
+  `charting.before-india.db`) with a token rewriter that rewrites whole JSON strings only; don't replace it with SQL `REPLACE`
+  or a serde round-trip. A run's `data_source` names the broker that served it. An Indian broker serves `india:`; it never
+  gets a namespace of its own.
+- **FYERS** (`fyers/`, `fyers_commands.rs`): the Standard (free) plan allows 50 data requests a minute and 5,000 a day, and
+  FYERS blocks an account for the day after it goes over the per-minute limit more than three times. So every data call goes
+  through the one paced, counted client (`FyersClient::get_data`, `budget.rs`), a rate limit is retried once after the next
+  minute (never a quick backoff), and every quote goes through the shared cache (`fyers/quotes.rs`) — don't add a FYERS call
+  that bypasses either. "Keep the market loaded" refuses Standard. Tokens expire at 06:30 IST; the PIN renewal uses
+  `validate-refresh-token`, which FYERS doesn't document (the user's choice): any refusal forgets the refresh token and asks
+  for a login, and the PIN is a secret like the others (write-only, keychain, never logged). The login redirect is
+  `http://127.0.0.1:47822/` — part of the user's FYERS app configuration, so don't change it. FYERS's live data socket isn't
+  used (undocumented binary protocol; its terms forbid reverse-engineering): live charts come from the quote poller
+  (`fyers/poller.rs`). `cargo test --lib fyers::live -- --ignored` checks the real service with fake credentials — run it when
+  touching `fyers/`. FYERS's API terms restrict charting tools and copies of its data: the owner's decision is not to merge it
+  to `main` or release it until FYERS has agreed in writing.

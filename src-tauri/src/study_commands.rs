@@ -159,19 +159,27 @@ pub struct StudyEstimate {
 pub fn study_estimate(
     request: EstimateRequest,
     db: State<Database>,
+    secrets: State<crate::secrets::Secrets>,
     memory: State<crate::store::bar_memory::BarMemory>,
+    fyers: State<crate::fyers::client::FyersClient>,
 ) -> Result<StudyEstimate, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let broker = crate::symbols::india_broker(&conn, &secrets).map_err(|e| e.to_string())?;
     let (mut symbols, skipped) = match request.symbols {
         Some(list) => {
             let mut seen = std::collections::HashSet::new();
             (
-                list.into_iter().filter(|s| seen.insert(s.clone())).collect::<Vec<_>>(),
+                list.into_iter()
+                    .map(|s| crate::symbols::with_canonical_prefix(&s).into_owned())
+                    .filter(|s| seen.insert(s.clone()))
+                    .collect::<Vec<_>>(),
                 0,
             )
         }
         None => {
-            let source = Source::parse(&request.provider).ok_or("Studies read Zerodha data only.")?;
+            let source = Source::for_provider(&conn, &secrets, &request.provider)
+                .map_err(|e| e.to_string())?
+                .ok_or("Studies read Indian market data only.")?;
             let mut rows = Vec::new();
             for exchange in &request.exchanges {
                 let filter = Filter {
@@ -180,7 +188,7 @@ pub fn study_estimate(
                     query: None,
                 };
                 for listed in instrument_list::list(&conn, source, &filter, 50_000).map_err(|e| e.to_string())? {
-                    rows.push((format!("{}:{}", request.provider, listed.ticker), listed.name));
+                    rows.push((format!("{}:{}", crate::symbols::INDIA, listed.ticker), listed.name));
                 }
             }
             let picked = study_universe::pick_listings(&rows, &request.series);
@@ -191,13 +199,20 @@ pub fn study_estimate(
     if let Some(max) = request.max_symbols {
         symbols.truncate(max);
     }
-    // Kite serves up to 2000 days of daily bars a call.
-    let (window_days, gap, quote_batch, quote_gap) = (
-        2_000,
-        crate::zerodha::client::Pacing::default().data_gap,
-        crate::zerodha::client::QUOTE_BATCH,
-        crate::zerodha::client::Pacing::default().quote_gap,
-    );
+    let (window_days, gap, quote_batch, quote_gap) = match broker {
+        // Kite serves up to 2000 days of daily bars a call.
+        crate::symbols::Broker::Zerodha => (
+            2_000,
+            crate::zerodha::client::Pacing::default().data_gap,
+            crate::zerodha::client::QUOTE_BATCH,
+            crate::zerodha::client::Pacing::default().quote_gap,
+        ),
+        // FYERS serves up to 366 days of daily bars a call, and quotes and history share one pace.
+        crate::symbols::Broker::Fyers => {
+            let gap = std::time::Duration::from_millis(fyers.plan().data_gap_ms());
+            (366, gap, crate::fyers::protocol::QUOTE_BATCH, gap)
+        }
+    };
     let e = study_universe::estimate(
         &memory,
         &symbols,

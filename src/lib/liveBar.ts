@@ -2,7 +2,8 @@ import type { OHLCV } from '@luxalgo/vela';
 import { localMidnight, type Timeframe } from './timeframes';
 
 /** Turns a stream of trade ticks into the forming candle Vela draws, for
- *  a broker that streams ticks rather than candles (Zerodha).
+ *  a broker that streams ticks rather than candles (Zerodha), or whose quotes
+ *  are polled (FYERS).
  *
  *  Indian markets: bars are anchored to the session open (09:15 IST for equities
  *  and derivatives, 09:00 for currency and commodities), so a 5-minute chart has
@@ -17,7 +18,7 @@ const IST_OFFSET_S = 19_800;
 /** A tick's own timestamp is trusted only if it lands this close to the local clock. */
 const CLOCK_TOLERANCE_MS = 10 * MINUTE_MS;
 
-/** Minutes after midnight IST at which a Zerodha exchange opens: currency (CDS,
+/** Minutes after midnight IST at which an exchange opens: currency (CDS,
  *  BCD) and commodity (MCX) sessions start at 09:00, everything else at 09:15. */
 export function sessionOpenForExchange(exchange: string): number {
   return exchange === 'CDS' || exchange === 'BCD' || exchange === 'MCX' ? 9 * 60 : 9 * 60 + 15;
@@ -42,7 +43,14 @@ export interface Tick {
   ltt: number | null;
   /** Total volume traded so far today, when the feed sends it. */
   volume: number | null;
+  /** The day's own open, high and low, when the tick is a polled quote that carries them. A daily
+   *  (or weekly, monthly) bar takes them, because polling misses the trades between samples. */
+  dayOpen?: number | null;
+  dayHigh?: number | null;
+  dayLow?: number | null;
 }
+
+const positive = (n: number | null | undefined): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0;
 
 /** `YYYY-MM-DD` of an instant in IST. */
 function istDate(ms: number): string {
@@ -133,9 +141,11 @@ export class LiveBarBuilder {
     const bucket = bucketFor(this.opts.tf, timeMs, this.opts.sessionOpenMin);
     if (!bucket) return null;
 
+    const daily = this.opts.tf.kind !== 'minutes';
     if (!this.bar || this.barKey !== bucket.key) {
       // A new bucket. (A seed that lies in it keeps its own time and prices.)
-      this.bar = { time: bucket.time, open: tick.ltp, high: tick.ltp, low: tick.ltp, close: tick.ltp, volume: undefined };
+      const open = daily && positive(tick.dayOpen) ? tick.dayOpen : tick.ltp;
+      this.bar = { time: bucket.time, open, high: Math.max(open, tick.ltp), low: Math.min(open, tick.ltp), close: tick.ltp, volume: undefined };
       this.barKey = bucket.key;
       this.baseVolume = 0;
       this.cumulativeAtBase = tick.volume;
@@ -143,6 +153,10 @@ export class LiveBarBuilder {
       this.bar.high = Math.max(this.bar.high, tick.ltp);
       this.bar.low = Math.min(this.bar.low, tick.ltp);
       this.bar.close = tick.ltp;
+    }
+    if (daily) {
+      if (positive(tick.dayHigh)) this.bar.high = Math.max(this.bar.high, tick.dayHigh);
+      if (positive(tick.dayLow)) this.bar.low = Math.min(this.bar.low, tick.dayLow);
     }
 
     if (tick.volume !== null) {

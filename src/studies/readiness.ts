@@ -6,7 +6,7 @@
  *  silently. What can only be known per symbol — how far back each one's history goes — is
  *  checked by the engine as it runs and reported with the result. Pure. */
 
-import { splitSymbol } from '../lib/symbols';
+import { INDIA, splitSymbol } from '../lib/symbols';
 import { measureFeatures, measureReach, requiredFeatures, type Condition, type StudySpec } from './spec';
 import { DEFAULT_MIN_TRADED_VALUE } from './templates';
 
@@ -25,7 +25,8 @@ export interface ReadinessItem {
 
 export interface ReadinessFacts {
   /** The data sources a Study can read and whether each is set up and switched on. */
-  providers: readonly { id: string; usable: boolean }[];
+  /** Each symbol namespace (`india`, `csv`), whether it can be read now, and what to call its source. */
+  providers: readonly { id: string; usable: boolean; label?: string }[];
   pythonReady: boolean;
   pythonMessage?: string | null;
   watchlists: readonly string[];
@@ -128,7 +129,7 @@ export function checkReadiness(spec: StudySpec, facts: ReadinessFacts): Readines
   const items: ReadinessItem[] = [];
   const notes: string[] = [];
   const usable = new Set(facts.providers.filter((p) => p.usable).map((p) => p.id));
-  const label = (id: string) => (id === 'zerodha' ? 'Zerodha' : id);
+  const label = (id: string) => facts.providers.find((p) => p.id === id)?.label ?? id;
 
   items.push(
     facts.pythonReady
@@ -137,8 +138,8 @@ export function checkReadiness(spec: StudySpec, facts: ReadinessFacts): Readines
   );
 
   const sources = providersOf(spec);
-  const unsupported = sources.filter((p) => p !== 'zerodha');
-  const missing = sources.filter((p) => p === 'zerodha' && !usable.has(p));
+  const unsupported = sources.filter((p) => p !== INDIA);
+  const missing = sources.filter((p) => p === INDIA && !usable.has(p));
   if (spec.universe.source === 'watchlist') {
     const known = facts.watchlists.some((w) => w.toLowerCase() === (spec.universe.watchlist ?? '').toLowerCase());
     items.push({
@@ -150,7 +151,7 @@ export function checkReadiness(spec: StudySpec, facts: ReadinessFacts): Readines
   }
   const priceStatus: ReadinessItem =
     unsupported.length > 0
-      ? { field: 'OHLC', status: 'unavailable', detail: `Studies read Zerodha data only, not ${unsupported.join(', ')}.`, blocking: true }
+      ? { field: 'OHLC', status: 'unavailable', detail: `Studies read Indian market data only, not ${unsupported.join(', ')}.`, blocking: true }
       : missing.length > 0
         ? { field: 'OHLC', status: 'unavailable', detail: `${missing.map(label).join(' and ')} isn't set up and switched on (Data providers).`, blocking: true }
         : { field: 'OHLC', status: 'available', detail: 'Daily bars, as the broker supplies them (adjusted for corporate actions at source)', blocking: false };

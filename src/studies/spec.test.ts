@@ -41,6 +41,9 @@ describe('the cases shared with the engine (fixtures/spec-cases.json)', () => {
     for (const c of cases.accepted) {
       const spec = normalizeSpec(patched(c.patch));
       if ('measures' in c) expect(spec.measures, c.name).toEqual(c.measures);
+      if ('provider' in c) expect(spec.universe.provider, c.name).toBe(c.provider);
+      if ('symbols' in c) expect(spec.universe.symbols, c.name).toEqual(c.symbols);
+      if ('benchmark' in c) expect(spec.benchmark, c.name).toBe(c.benchmark);
       expect(normalizeSpec(spec), c.name).toEqual(spec);
     }
   });
@@ -94,7 +97,7 @@ describe('normalizeSpec', () => {
     expect(spec.event.cooldown_days).toBe(252);
     expect(spec.lookback_windows).toEqual([21, 63, 126, 252]);
     expect(spec.forward_windows).toEqual([63, 126, 252]);
-    expect(spec.universe).toMatchObject({ source: 'instruments', provider: 'zerodha', exchanges: ['NSE'], series: ['EQ'], market_cap_min: null });
+    expect(spec.universe).toMatchObject({ source: 'instruments', provider: 'india', exchanges: ['NSE'], series: ['EQ'], market_cap_min: null });
     expect(spec.control_group).toEqual({ enabled: true, samples_per_event: 2, seed: 42 });
     expect(spec.output.max_events).toBe(5000);
     expect(spec.outcome).toBeNull();

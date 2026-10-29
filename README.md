@@ -9,7 +9,7 @@
 
 **Free, open-source desktop charting.** Fast candlestick charts with indicators and drawing tools, live-updating
 watchlists, saved layouts, and the ability to chart your own data — all running locally. Charting your own imported
-data needs no account; Indian market data needs your own Zerodha account.
+data needs no account; Indian market data needs your own Zerodha or FYERS account.
 
 <p align="center">
   <img src="docs/images/screenshot-dark.png" alt="ProTradeChart showing a daily chart of synthetic sample data, with the watchlist docked on the right" width="900">
@@ -20,9 +20,10 @@ data needs no account; Indian market data needs your own Zerodha account.
 - **Serious charts.** Candles, bars, line, area, baseline and Heikin Ashi; a full drawing toolbar (lines, shapes, text
   annotations and more); 70+ built-in indicators; multiple panes; a WebGL2 renderer with a canvas fallback.
   Drawn by [Vela](https://luxalgo.com/vela).
-- **Bring your own broker.** Connect a [Zerodha](#connecting-zerodha) account for
-  exchange-grade Indian market data — intraday history and a live tick feed. Credentials go in your operating system's
-  keychain. More brokers plug into the same system.
+- **Bring your own broker.** Connect a [Zerodha](#connecting-zerodha) or [FYERS](#connecting-fyers) account for
+  exchange-grade Indian market data — intraday history and live-updating charts. Credentials go in your operating
+  system's keychain. Symbols don't name the broker (`india:NSE:RELIANCE`), so watchlists, alerts and layouts carry over
+  if you switch.
 - **Price alerts.** Set an alert from a chart (right-click → *Add alert here…*, the **Alert** button, or `Alt+A`) and get a
   notification, a chime and a toast when the price crosses your level — even with the app in the background.
 - **You choose the data.** A *Data providers* screen turns each source on or off, holds broker credentials, tests them,
@@ -42,7 +43,7 @@ data needs no account; Indian market data needs your own Zerodha account.
   [PineTS](https://github.com/LuxAlgo/PineTS). Backtests are approximate and can differ from TradingView's. Pine Script is a
   trademark of TradingView, Inc.; ProTradeChart is not affiliated with TradingView.
 - **Python for screening and research.** A Python tab (`Ctrl+Shift+Y`) beside your charts runs your own scripts against your
-  Zerodha data: screen a watchlist, backtest with pandas or any library you install, keep the scripts as plain `.py`
+  broker's data: screen a watchlist, backtest with pandas or any library you install, keep the scripts as plain `.py`
   files. It uses your own Python, and your broker credentials stay in the app. See [Python](#python).
 - **Studies: historical market research.** Ask what stocks looked like around past events — *which NSE stocks doubled in
   twelve months, and what were their returns, trend, 52-week range and volume 12, 6, 3 and 1 months before?* Build the Study
@@ -119,13 +120,16 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib    # backend unit tests
 
 ### Symbols
 
-Every symbol is `provider:TICKER`. Typing a bare ticker means the default source, Zerodha (NSE), unless you make
-another one the default under *Data providers*.
+Every symbol is `provider:TICKER`. Typing a bare ticker means the default source, Indian markets (NSE), unless you
+make another one the default under *Data providers*.
 
 | Prefix | Examples |
 | --- | --- |
-| `zerodha:` | `zerodha:NSE:RELIANCE`, `zerodha:BSE:TCS`, `zerodha:NSE:NIFTY_50`, `zerodha:NFO:BANKNIFTY26OCTFUT` — `EXCHANGE:SYMBOL`, so a bare `RELIANCE` means NSE |
+| `india:` | `india:NSE:RELIANCE`, `india:BSE:TCS`, `india:NSE:NIFTY_50`, `india:NFO:BANKNIFTY26OCTFUT` — `EXCHANGE:SYMBOL`, so a bare `RELIANCE` means NSE. Served by whichever broker you connected (Zerodha or FYERS); with both, you pick one under *Indian market data from*. |
 | `csv:` | `csv:MY_DATA` (your imported files) |
+
+Symbols saved by earlier versions as `zerodha:…` are renamed `india:…` the first time this version opens, after a copy of
+the old data file is saved beside it (`charting.before-india.db`); scripts that still write `zerodha:` keep working.
 
 ### CSV format
 
@@ -152,6 +156,7 @@ time,open,high,low,close,volume
 | Source | Covers | Timeframes | Live? |
 | --- | --- | --- | --- |
 | **Zerodha** *(your account)* | Indian equities, indices, futures, commodities | 1, 3, 5, 10, 15, 30, 60 minutes and daily natively; 2h/4h, weekly, monthly and others built from those | Live tick feed |
+| **FYERS** *(your account)* | The same | 1, 2, 3, 5, 10, 15, 20, 30, 60, 120, 240 minutes and daily natively; weekly, monthly and others built from those | Polled quotes (30 s on the Standard plan, 3 s on Prime) |
 | **Imported CSV** | Anything you bring | Your file's bar size and coarser | No |
 
 A few things worth knowing:
@@ -160,7 +165,10 @@ A few things worth knowing:
   [Kite Connect's terms](https://kite.trade/terms) and the exchanges' rules: don't publish, share or sell it, show it to
   the public (on a stream or website, say) or use it for mock trading or games. The app only reads market data from your
   account; it never places orders.
-- **Never saved on your computer.** Kite Connect's terms restrict building databases or permanent copies of its data,
+- **FYERS's terms are stricter.** [FYERS's API terms](https://fyers.in/terms-and-conditions-api) say exchange data may
+  not be used to develop charting or technical tools, and need FYERS's written consent to build databases or keep
+  permanent or temporary copies of its data. Read them, and make sure your use is allowed, before connecting FYERS.
+- **Never saved on your computer.** The brokers' terms restrict building databases or copies of their data,
   so broker prices are held only in memory while the app is open: the bars charts show, what scripts, the Screener and
   Studies read, and, with *Keep the market loaded* (*Data providers → Market data*), five years of every NSE stock. All of
   it is gone when the app closes. The data folder keeps only what is yours (layouts, watchlists, alerts, scripts,
@@ -213,10 +221,44 @@ Things worth knowing:
 > that has market data, so treat history and the live feed as new: if a chart's dates look shifted or a live candle
 > misbehaves, please [open an issue](../../issues) with the symbol and timeframe.
 
+## Connecting FYERS
+
+[FYERS](https://fyers.in) is an Indian broker whose [API](https://fyers.in/api-docs/) is free with a trading account. It
+serves NSE, BSE, NFO, BFO and MCX history and quotes; ProTradeChart reads both, and keeps charts live from the quotes.
+
+1. **Create a FYERS API app** at [myapi.fyers.in](https://myapi.fyers.in) and note its **App ID** (`XXXXXXXXXX-100`) and
+   **Secret ID**. Set its **redirect URL** to `http://127.0.0.1:47822/` — that is how the app collects the login for you
+   (shown with a Copy button beside the login button; it must match exactly, and is not Zerodha's port).
+2. In the app, open **Data providers → FYERS**, enter the App ID and Secret ID, and press **Save**.
+3. **Log in.** Press *Log in with FYERS* and sign in on the page that opens. FYERS switches on, downloads its symbol master,
+   and **Test connection** confirms everything works.
+4. Set **FYERS API plan** to your account's plan, **Standard** (free) or **Prime**.
+5. With Zerodha set up too, pick which broker serves Indian market data under *Indian market data from*.
+
+Things worth knowing:
+
+- **Limits that block.** Standard allows 5 data requests a second, 50 a minute and 5,000 a day; Prime 10, 500 and
+  500,000. FYERS blocks an account for the rest of the day after it goes over the per-minute limit more than three times,
+  so the app paces itself for your plan, shares one set of quotes between watchlists, tabs, alerts and live charts, and
+  stops before the day's limit. *Keep the market loaded* needs Prime (five years of NSE is about 10,500 requests).
+- **FYERS tokens expire every morning at 6:30 AM.** Each login also gives a refresh token (about 15 days). Save your
+  four-digit PIN under *Renew automatically with your PIN* and the app renews the day's token by itself; the PIN goes in
+  your keychain and only to FYERS. FYERS doesn't document this renewal, so it may stop working, in which case the app asks
+  you to log in.
+- **Live charts come from quotes, not a tick feed.** FYERS's data socket uses a binary protocol its documentation doesn't
+  describe, and its terms forbid reverse-engineering, so the app polls quotes instead: a daily bar keeps the day's true
+  range, an intraday bar shows the prices sampled until the chart reloads.
+- **Symbols.** FYERS's own symbols (`NSE:SBIN-EQ`, `NSE:NIFTY50-INDEX`) are read as the app's (`NSE:SBIN`,
+  `NSE:NIFTY_50`), so a watchlist made with Zerodha works the same with FYERS.
+
+> **Status.** FYERS support was built from FYERS's API v3 documentation and checked against the live service without
+> credentials: the real symbol master, and the real refusals of a fake token, a fake login and a fake renewal
+> (`cargo test --lib fyers::live -- --ignored --nocapture`). It hasn't yet been used with a real FYERS account.
+
 ## Python
 
 Press `Ctrl+Shift+Y` (or the terminal button on the right-hand rail) to open **Python** as a tab beside your charts: a list of
-scripts, an editor, a console and the results. Scripts read your Zerodha data through the `protrade` package, and
+scripts, an editor, a console and the results. Scripts read your broker's data (Zerodha or FYERS) through the `protrade` package, and
 can use anything you install beside it — pandas, numpy, scipy, vectorbt, `backtesting.py`.
 
 ```python
@@ -241,9 +283,11 @@ screens (200-day average, RSI, 52-week highs) and a moving-average crossover bac
   environment of your own instead (conda, uv), give its interpreter in the panel's settings (the gear).
 - **Your credentials stay in the app.** The app never hands a script a broker key or token. A script asks the app for bars over a
   local connection (`127.0.0.1`, protected by a one-off token that only scripts the app starts receive); the app fetches, paces
-  and holds them in memory. Only Zerodha and your imported CSV files are available to scripts, and only for reading.
+  and holds them in memory. Only Indian market data (`india:…`, from your broker) and your imported CSV files are available to scripts, and only for
+  reading.
 - **Quick the second time.** The app holds what it fetched in memory while it is open (never on disk), so the first screen
-  over a few hundred symbols takes minutes at the brokers' rate limits (Kite allows three history requests a second), and
+  over a few hundred symbols takes minutes at the brokers' rate limits (Kite allows three history requests a second, FYERS's Standard plan fifty a
+  minute), and
   later runs fetch only what is new: outside market hours, nothing at all, because a finished day's bar never changes.
   *Keep the market loaded* (*Data providers → Market data*) loads every NSE stock's history after launch, so even the first
   screen is quick, and `pt.snapshot` quotes a whole market in a few seconds. The settings show how much is held and can
@@ -278,13 +322,14 @@ A Study measures what stocks looked like around historical events. Open **Studie
    ADX, Bollinger, stochastics, 52-week high/low distances, relative volume, traded value, volatility, drawdowns, relative
    strength against an index) and yes/no **characteristics** to count.
 3. **Check the data.** The builder reads the Study back in plain words and lists what it needs: price and volume (from
-   Zerodha), index data, and what isn't available. **Market cap, sectors and point-in-time universes are not available
+   your broker), index data, and what isn't available. **Market cap, sectors and point-in-time universes are not available
    from these sources**: a market-cap filter can't run, and the builder offers a traded-value floor instead (only if you pick
    it); results warn about survivorship bias.
 4. **Run Study.** Python does the work (the same setup as the Python tab), with a progress bar and the time left. The data
    check says beforehand how many stocks will be loaded, how many are already loaded and roughly how long the rest take:
    the first run over a whole exchange after the app opens fetches every stock's history at your broker's rate limit
-   (Zerodha: about three stocks a second, so NSE's ~2,000 shares take ~12 minutes; adding BSE takes several times longer),
+   (Zerodha: about three stocks a second, so NSE's ~2,000 shares take ~12 minutes; FYERS's Standard plan, about 45 a minute
+   and 5,000 requests a day; adding BSE takes several times longer),
    unless the market is already loaded. After that, a quick batched quote check brings each stock's latest bar up to date
    instead of fetching it again, so reruns while the app stays open take seconds. Bonds, gold bonds, T-bills and funds on an exchange's list are left out; tick
    *Trade-for-trade* or *SME* to include those series. *Try it on the first 100 symbols* makes a quick trial.
@@ -348,7 +393,7 @@ When one fires you get a system notification (so it reaches you with the app min
 ```
 src/                     React + TypeScript frontend
   chart/                 The Vela wrapper (a grid of one to sixteen charts per tab)
-  data/                  Data providers (Zerodha, CSV), symbol search, watchlist quotes
+  data/                  Data providers (Indian markets, CSV), symbol search, watchlist quotes
   features/              Workspace (chart, Python and Studies tabs), layouts, watchlist, search, providers, import, about, Pine dock
   features/python/       The Python tab: script list, editor, console, results
   features/studies/      The Studies tab: builder, data readiness, results page, Ask Claude
@@ -361,6 +406,8 @@ src-tauri/               Rust backend
   src/providers.rs       The catalogue of data providers and their settings
   src/secrets.rs         Credentials: OS keychain, with an explicit fallback
   src/zerodha/           Zerodha (Kite Connect): protocol, instrument list, HTTP client, live feed, login
+  src/fyers/             FYERS (API v3): protocol, symbol master, HTTP client, quote cache and poller, login and PIN renewal
+  src/symbols.rs         The broker-neutral `india:` namespace, and which broker serves it
   src/commands.rs        Tauri commands exposed to the frontend
   src/pyapi/             The local data API Python scripts use (read-only, loopback, token-protected)
   src/python/            Finding Python, running and stopping scripts, the scripts folder

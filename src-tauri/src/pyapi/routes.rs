@@ -31,6 +31,7 @@ use super::wire::{
 use super::ApiError;
 use crate::store::instrument_list::Filter;
 use crate::store::research_bars::canonical_interval;
+use crate::symbols::{canonical_provider, canonical_symbol, with_canonical_prefix, MAX_SYMBOL_CHARS};
 
 /// The most instruments one listing returns.
 const MAX_INSTRUMENTS: usize = 50_000;
@@ -64,9 +65,6 @@ pub trait Backend: Send + Sync {
 /// The most symbols a script may put on one watchlist.
 pub const MAX_WATCHLIST_SYMBOLS: usize = 2_000;
 const MAX_WATCHLIST_NAME: usize = 100;
-const MAX_SYMBOL_CHARS: usize = 64;
-/// Where a symbol's data comes from; a script can't put one on a list from anywhere else.
-const WATCHLIST_PROVIDERS: [&str; 2] = ["zerodha", "csv"];
 
 /// A `watchlist` result's data checked and made canonical: `{name, symbols, mode}`, mode `replace`
 /// (the default) or `append`. A broker symbol without an exchange is on NSE, as everywhere else in
@@ -90,7 +88,7 @@ pub fn watchlist_update(data: &serde_json::Value) -> Result<WatchlistUpdate, Api
     let list = data
         .get("symbols")
         .and_then(|v| v.as_array())
-        .ok_or_else(|| ApiError::bad_request("symbols must be a list of symbols like zerodha:NSE:RELIANCE."))?;
+        .ok_or_else(|| ApiError::bad_request("symbols must be a list of symbols like india:NSE:RELIANCE."))?;
     if list.len() > MAX_WATCHLIST_SYMBOLS {
         return Err(ApiError::bad_request(format!(
             "A watchlist can take at most {MAX_WATCHLIST_SYMBOLS} symbols at once."
@@ -101,7 +99,7 @@ pub fn watchlist_update(data: &serde_json::Value) -> Result<WatchlistUpdate, Api
         let raw = item.as_str().map(str::trim).unwrap_or("");
         let symbol = canonical_symbol(raw).ok_or_else(|| {
             ApiError::bad_request(format!(
-                "'{}' isn't a symbol the app can show: write it like zerodha:NSE:RELIANCE or csv:MY_DATA.",
+                "'{}' isn't a symbol the app can show: write it like india:NSE:RELIANCE or csv:MY_DATA.",
                 raw.chars().take(MAX_SYMBOL_CHARS).collect::<String>()
             ))
         })?;
@@ -114,28 +112,6 @@ pub fn watchlist_update(data: &serde_json::Value) -> Result<WatchlistUpdate, Api
         symbols,
         replace,
     })
-}
-
-fn canonical_symbol(raw: &str) -> Option<String> {
-    if raw.is_empty() || raw.len() > MAX_SYMBOL_CHARS || raw.chars().any(char::is_control) {
-        return None;
-    }
-    let (provider, ticker) = raw.split_once(':')?;
-    let provider = provider.to_ascii_lowercase();
-    let ticker = ticker.trim();
-    if !WATCHLIST_PROVIDERS.contains(&provider.as_str()) || ticker.is_empty() {
-        return None;
-    }
-    if provider == "zerodha" {
-        let ticker = ticker.to_ascii_uppercase();
-        let ticker = if ticker.contains(':') {
-            ticker
-        } else {
-            format!("NSE:{ticker}")
-        };
-        return Some(format!("{provider}:{ticker}"));
-    }
-    Some(format!("{provider}:{ticker}"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -497,10 +473,11 @@ fn checked_symbols(raw: &[String]) -> Result<Vec<String>, ApiError> {
             let symbol = raw.trim();
             if symbol.is_empty() || symbol.len() > MAX_SYMBOL_CHARS || super::split_symbol(symbol).is_none() {
                 return Err(ApiError::bad_request(format!(
-                    "'{symbol}' is not a symbol: write it as provider:TICKER, like zerodha:NSE:RELIANCE"
+                    "'{symbol}' is not a symbol: write it as provider:TICKER, like india:NSE:RELIANCE"
                 )));
             }
-            Ok(symbol.to_string())
+            // A script written before the Indian namespace had its name says `zerodha:`.
+            Ok(with_canonical_prefix(symbol).into_owned())
         })
         .collect()
 }
@@ -567,12 +544,13 @@ fn bars_request(query: &HashMap<String, String>) -> Result<BarsRequest, ApiError
         .get("symbol")
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| ApiError::bad_request("symbol is required, like zerodha:NSE:RELIANCE"))?;
+        .ok_or_else(|| ApiError::bad_request("symbol is required, like india:NSE:RELIANCE"))?;
     if super::split_symbol(symbol).is_none() {
         return Err(ApiError::bad_request(format!(
-            "'{symbol}' is not a symbol: write it as provider:TICKER, like zerodha:NSE:RELIANCE"
+            "'{symbol}' is not a symbol: write it as provider:TICKER, like india:NSE:RELIANCE"
         )));
     }
+    let symbol = with_canonical_prefix(symbol);
     let interval = parse_interval(query.get("interval").map(String::as_str).unwrap_or("D"))?;
     let from_ms = millis(query, "from")?;
     let to_ms = millis(query, "to")?;
@@ -592,7 +570,7 @@ fn bars_request(query: &HashMap<String, String>) -> Result<BarsRequest, ApiError
         ),
     };
     Ok(BarsRequest {
-        symbol: symbol.to_string(),
+        symbol: symbol.into_owned(),
         interval,
         from_ms,
         to_ms,
@@ -627,9 +605,9 @@ fn millis(query: &HashMap<String, String>, key: &str) -> Result<Option<i64>, Api
 fn instrument_query(query: &HashMap<String, String>) -> Result<InstrumentQuery, ApiError> {
     let provider = query
         .get("provider")
-        .map(|p| p.trim().to_lowercase())
+        .map(|p| canonical_provider(p.trim()).to_lowercase())
         .filter(|p| !p.is_empty())
-        .ok_or_else(|| ApiError::bad_request("provider is required: zerodha"))?;
+        .ok_or_else(|| ApiError::bad_request("provider is required: india"))?;
     let limit = match query.get("limit") {
         None => DEFAULT_INSTRUMENTS,
         Some(text) => text
@@ -781,16 +759,17 @@ pub mod testing {
     impl Backend for FakeBackend {
         fn providers(&self) -> Result<Vec<ProviderStatus>, ApiError> {
             Ok(vec![ProviderStatus {
-                id: "zerodha",
+                id: "india",
                 label: "Zerodha",
                 usable: true,
+                broker: Some("zerodha"),
             }])
         }
 
         fn instruments(&self, query: &InstrumentQuery) -> Result<Vec<InstrumentRow>, ApiError> {
             *self.last_instruments.lock().unwrap() = Some(query.clone());
             Ok(vec![InstrumentRow {
-                symbol: "zerodha:NSE:RELIANCE".into(),
+                symbol: "india:NSE:RELIANCE".into(),
                 name: Some("Reliance Industries".into()),
                 exchange: "NSE".into(),
                 kind: "EQUITY".into(),
@@ -1018,7 +997,7 @@ mod tests {
     fn table(run: &str) -> Value {
         serde_json::json!({
             "runId": run, "kind": "table", "title": "Above 200-DMA",
-            "data": { "columns": ["symbol", "close"], "rows": [["zerodha:NSE:TCS", 4000.5]] }
+            "data": { "columns": ["symbol", "close"], "rows": [["india:NSE:TCS", 4000.5]] }
         })
     }
 
@@ -1133,7 +1112,7 @@ mod tests {
         assert_eq!(posted.len(), 1);
         assert_eq!((posted[0].run_id.as_str(), posted[0].kind.as_str()), ("run-1", "table"));
         assert_eq!(posted[0].title.as_deref(), Some("Above 200-DMA"));
-        assert_eq!(posted[0].data["rows"][0][0], "zerodha:NSE:TCS");
+        assert_eq!(posted[0].data["rows"][0][0], "india:NSE:TCS");
     }
 
     #[tokio::test]
@@ -1244,7 +1223,7 @@ mod tests {
             &ctx,
             &post(&watchlist(serde_json::json!({
                 "name": "  Momentum ",
-                "symbols": ["zerodha:NSE:TCS", "zerodha:infy", "ZERODHA:BSE:RELIANCE", "csv:MY_DATA", "zerodha:NSE:TCS"],
+                "symbols": ["india:NSE:TCS", "india:infy", "ZERODHA:BSE:RELIANCE", "csv:MY_DATA", "india:NSE:TCS"],
             }))),
         )
         .await;
@@ -1258,9 +1237,9 @@ mod tests {
                 name: "Momentum".into(),
                 // A bare broker ticker is on NSE; repeats go; the script's order stays.
                 symbols: vec![
-                    "zerodha:NSE:TCS".into(),
-                    "zerodha:NSE:INFY".into(),
-                    "zerodha:BSE:RELIANCE".into(),
+                    "india:NSE:TCS".into(),
+                    "india:NSE:INFY".into(),
+                    "india:BSE:RELIANCE".into(),
                     "csv:MY_DATA".into()
                 ],
                 replace: true,
@@ -1273,18 +1252,18 @@ mod tests {
     #[tokio::test]
     async fn a_watchlist_from_a_script_is_checked_before_anything_is_written() {
         let (ctx, backend) = ctx();
-        let many: Vec<String> = (0..2001).map(|i| format!("zerodha:NSE:S{i}")).collect();
+        let many: Vec<String> = (0..2001).map(|i| format!("india:NSE:S{i}")).collect();
         for data in [
             serde_json::json!({ "symbols": [] }),
             serde_json::json!({ "name": "", "symbols": [] }),
             serde_json::json!({ "name": "x".repeat(101), "symbols": [] }),
             serde_json::json!({ "name": "A\nB", "symbols": [] }),
-            serde_json::json!({ "name": "L", "symbols": "zerodha:NSE:TCS" }),
+            serde_json::json!({ "name": "L", "symbols": "india:NSE:TCS" }),
             serde_json::json!({ "name": "L", "symbols": ["TCS"] }),
             serde_json::json!({ "name": "L", "symbols": ["nosuch:NSE:TCS"] }),
-            serde_json::json!({ "name": "L", "symbols": ["zerodha:"] }),
+            serde_json::json!({ "name": "L", "symbols": ["india:"] }),
             serde_json::json!({ "name": "L", "symbols": [7] }),
-            serde_json::json!({ "name": "L", "symbols": [format!("zerodha:NSE:{}", "A".repeat(80))] }),
+            serde_json::json!({ "name": "L", "symbols": [format!("india:NSE:{}", "A".repeat(80))] }),
             serde_json::json!({ "name": "L", "symbols": many }),
             serde_json::json!({ "name": "L", "symbols": [], "mode": "merge" }),
         ] {
@@ -1355,14 +1334,14 @@ mod tests {
         .await;
         assert_eq!(status, 200);
         assert_eq!(body["t"], serde_json::json!([1000]));
-        assert_eq!(body["symbol"], "zerodha:NSE:RELIANCE");
+        assert_eq!(body["symbol"], "india:NSE:RELIANCE");
         assert_eq!(body["interval"], "D");
 
         let seen = backend.last_bars.lock().unwrap().clone().unwrap();
         assert_eq!(
             seen,
             BarsRequest {
-                symbol: "zerodha:NSE:RELIANCE".into(),
+                symbol: "india:NSE:RELIANCE".into(),
                 interval: "D".into(),
                 from_ms: Some(1000),
                 to_ms: Some(2000),
@@ -1427,9 +1406,9 @@ mod tests {
         )
         .await;
         assert_eq!(status, 200);
-        assert_eq!(body[0]["symbol"], "zerodha:NSE:RELIANCE");
+        assert_eq!(body[0]["symbol"], "india:NSE:RELIANCE");
         let seen = backend.last_instruments.lock().unwrap().clone().unwrap();
-        assert_eq!(seen.provider, "zerodha");
+        assert_eq!(seen.provider, "india");
         assert_eq!(seen.limit, 25);
         assert_eq!(seen.filter.exchange.as_deref(), Some("NSE"));
         assert_eq!(seen.filter.kind.as_deref(), Some("EQUITY"));
@@ -1478,7 +1457,7 @@ mod tests {
         let (ctx, _) = ctx();
         let (status, body) = ask(&ctx, &get("/v1/providers")).await;
         assert_eq!(status, 200);
-        assert_eq!(body[0]["id"], "zerodha");
+        assert_eq!(body[0]["id"], "india");
         assert_eq!(body[0]["usable"], true);
     }
 
@@ -1486,9 +1465,9 @@ mod tests {
 
     #[test]
     fn a_target_splits_into_a_path_and_decoded_parameters() {
-        let (path, q) = split_target("/v1/bars?symbol=zerodha%3ANSE%3AM%26M&name=a+b%20c&flag&empty=");
+        let (path, q) = split_target("/v1/bars?symbol=india%3ANSE%3AM%26M&name=a+b%20c&flag&empty=");
         assert_eq!(path, "/v1/bars");
-        assert_eq!(q["symbol"], "zerodha:NSE:M&M");
+        assert_eq!(q["symbol"], "india:NSE:M&M");
         assert_eq!(q["name"], "a b c");
         assert_eq!(q["flag"], "");
         assert_eq!(q["empty"], "");
@@ -1525,18 +1504,18 @@ mod tests {
         *backend.bar_count.lock().unwrap() = 10;
         let resp = dispatch(
             &ctx,
-            &panel(&serde_json::json!({ "symbols": ["zerodha:NSE:A", " zerodha:NSE:B "], "bars": 4 })),
+            &panel(&serde_json::json!({ "symbols": ["india:NSE:A", " zerodha:NSE:B "], "bars": 4 })),
         )
         .await;
         assert_eq!((resp.status, resp.content_type), (200, "application/octet-stream"));
         let request = backend.last_panel.lock().unwrap().clone().unwrap();
-        assert_eq!(request.symbols, ["zerodha:NSE:A", "zerodha:NSE:B"]);
+        assert_eq!(request.symbols, ["india:NSE:A", "india:NSE:B"]);
         assert_eq!((request.interval.as_str(), request.limit), ("D", Some(4)));
 
         let head_len = u32::from_le_bytes(resp.body[..4].try_into().unwrap()) as usize;
         let head: Value = serde_json::from_slice(&resp.body[4..4 + head_len]).unwrap();
         assert_eq!(head["count"], 8);
-        assert_eq!(head["series"][1]["symbol"], "zerodha:NSE:B");
+        assert_eq!(head["series"][1]["symbol"], "india:NSE:B");
         assert_eq!(resp.body.len(), (4 + head_len).div_ceil(8) * 8 + 8 * 48);
     }
 
@@ -1547,10 +1526,10 @@ mod tests {
         assert_eq!((status, code(&body)), (405, "method_not_allowed"));
         for bad in [
             serde_json::json!({ "symbols": ["RELIANCE"] }),
-            serde_json::json!({ "symbols": ["zerodha:NSE:A"], "interval": "5" }),
-            serde_json::json!({ "symbols": ["zerodha:NSE:A"], "bars": 0 }),
-            serde_json::json!({ "symbols": ["zerodha:NSE:A"], "from": 10, "to": 5 }),
-            serde_json::json!({ "symbols": vec!["zerodha:NSE:A"; MAX_PANEL_SYMBOLS + 1] }),
+            serde_json::json!({ "symbols": ["india:NSE:A"], "interval": "5" }),
+            serde_json::json!({ "symbols": ["india:NSE:A"], "bars": 0 }),
+            serde_json::json!({ "symbols": ["india:NSE:A"], "from": 10, "to": 5 }),
+            serde_json::json!({ "symbols": vec!["india:NSE:A"; MAX_PANEL_SYMBOLS + 1] }),
         ] {
             let (status, body) = ask(&ctx, &panel(&bad)).await;
             assert_eq!((status, code(&body)), (400, "bad_request"), "{bad}");
@@ -1573,18 +1552,18 @@ mod tests {
         *backend.bar_count.lock().unwrap() = 10;
         let (status, body) = ask(
             &ctx,
-            &snapshot(&serde_json::json!({ "symbols": ["zerodha:NSE:B", " zerodha:NSE:A "] })),
+            &snapshot(&serde_json::json!({ "symbols": ["india:NSE:B", " zerodha:NSE:A "] })),
         )
         .await;
         assert_eq!(status, 200);
         assert_eq!(
             backend.last_snapshot.lock().unwrap().clone().unwrap(),
-            ["zerodha:NSE:B", "zerodha:NSE:A"]
+            ["india:NSE:B", "india:NSE:A"]
         );
         let rows = body["snapshots"].as_array().unwrap();
-        assert_eq!(rows[0]["symbol"], "zerodha:NSE:B");
-        assert_eq!(rows[1]["symbol"], "zerodha:NSE:A");
-        let last = history(10, "zerodha:NSE:A");
+        assert_eq!(rows[0]["symbol"], "india:NSE:B");
+        assert_eq!(rows[1]["symbol"], "india:NSE:A");
+        let last = history(10, "india:NSE:A");
         // serde_json's parser may be an ulp off the exact float, so compare closely, not exactly.
         assert!((rows[1]["last"].as_f64().unwrap() - last[9].close).abs() < 1e-9);
         assert!((rows[1]["previousClose"].as_f64().unwrap() - last[8].close).abs() < 1e-9);
@@ -1592,7 +1571,7 @@ mod tests {
         assert_eq!(body["sessionDay"], last[9].time);
 
         *backend.bar_count.lock().unwrap() = 0;
-        let (_, body) = ask(&ctx, &snapshot(&serde_json::json!({ "symbols": ["zerodha:NSE:A"] }))).await;
+        let (_, body) = ask(&ctx, &snapshot(&serde_json::json!({ "symbols": ["india:NSE:A"] }))).await;
         assert!(body["snapshots"][0]["last"].is_null(), "no quote is null, not an error");
     }
 
@@ -1604,16 +1583,16 @@ mod tests {
         for bad in [
             serde_json::json!({ "symbols": [] }),
             serde_json::json!({ "symbols": ["RELIANCE"] }),
-            serde_json::json!({ "symbols": vec!["zerodha:NSE:A"; MAX_SNAPSHOT_SYMBOLS + 1] }),
-            serde_json::json!({ "tickers": ["zerodha:NSE:A"] }),
+            serde_json::json!({ "symbols": vec!["india:NSE:A"; MAX_SNAPSHOT_SYMBOLS + 1] }),
+            serde_json::json!({ "tickers": ["india:NSE:A"] }),
         ] {
             let (status, body) = ask(&ctx, &snapshot(&bad)).await;
             assert_eq!((status, code(&body)), (400, "bad_request"), "{bad}");
         }
-        let mut no_token = snapshot(&serde_json::json!({ "symbols": ["zerodha:NSE:A"] }));
+        let mut no_token = snapshot(&serde_json::json!({ "symbols": ["india:NSE:A"] }));
         no_token.authorization = None;
         assert_eq!(ask(&ctx, &no_token).await.0, 401);
-        let mut browser = snapshot(&serde_json::json!({ "symbols": ["zerodha:NSE:A"] }));
+        let mut browser = snapshot(&serde_json::json!({ "symbols": ["india:NSE:A"] }));
         browser.origin = Some("https://evil.example".into());
         assert_eq!(ask(&ctx, &browser).await.0, 403);
         assert!(
@@ -1626,7 +1605,7 @@ mod tests {
     async fn a_failed_quote_is_the_snapshots_error() {
         let (ctx, backend) = ctx();
         *backend.fail_snapshot_with.lock().unwrap() = Some(ApiError::new(401, "auth", "token expired"));
-        let (status, body) = ask(&ctx, &snapshot(&serde_json::json!({ "symbols": ["zerodha:NSE:A"] }))).await;
+        let (status, body) = ask(&ctx, &snapshot(&serde_json::json!({ "symbols": ["india:NSE:A"] }))).await;
         assert_eq!((status, code(&body)), (401, "auth"));
     }
 }

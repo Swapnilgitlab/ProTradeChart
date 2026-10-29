@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde_json::Value;
 use tokio::time::sleep;
 
-use super::instruments::{Instrument, EXCHANGES};
+use super::instruments::{Instrument, QuoteKey, EXCHANGES};
 use super::protocol::{
     checksum, classify_error, history_path, history_query, is_failure_body, parse_candles, parse_day_snapshots,
     parse_quotes, parse_session, plan_windows, Interval, ZerodhaError, ZerodhaErrorKind, BASE_URL,

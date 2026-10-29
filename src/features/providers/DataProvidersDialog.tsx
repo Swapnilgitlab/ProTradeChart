@@ -4,13 +4,14 @@ import { Check, Copy, ExternalLink, Eye, EyeOff, KeyRound, RefreshCw, ShieldAler
 import { Dialog } from '../../components/Dialog';
 import { useToast } from '../../components/Toasts';
 import { onZerodhaStatus } from '../../data/zerodhaLive';
-import { getProviderState, refreshProviders, setDefaultProvider } from '../../data/providerStatus';
+import { activeBroker, getProviderState, namespaceOf, refreshProviders, setDefaultProvider } from '../../data/providerStatus';
 import { confirmDelete } from '../../lib/dialogs';
 import { describeKiteTokenExpiry, formatDate } from '../../lib/format';
 import {
   clearProviderConfig,
   errorMessage,
   saveProviderConfig,
+  setMarketSource,
   setProviderEnabled,
   testProvider,
   type FeedStatus,
@@ -24,10 +25,11 @@ import {
   zerodhaStatus,
   zerodhaUpdateInstruments,
 } from '../../lib/ipc';
-import type { ProviderId } from '../../lib/symbols';
+import { BROKER_LABELS, INDIA, type BrokerId, type ProviderId } from '../../lib/symbols';
 import { MarketDataSection } from '../marketdata/MarketDataSection';
+import { FyersPanel } from './FyersPanel';
 import { useProviderState } from './useProviderState';
-import { afterBrokerLogin } from './useZerodhaSession';
+import { afterBrokerLogin, refreshInstruments } from './useBrokerSession';
 
 interface Props {
   onClose: () => void;
@@ -58,12 +60,6 @@ const FEED_LABELS: Record<FeedStatus['state'], string> = {
   error: 'Not connected',
 };
 
-/** Downloads a broker's instrument list in the background, so symbol search
- *  works as soon as it is switched on. Providers without one do nothing. */
-function refreshInstruments(providerId: string): void {
-  if (providerId === 'zerodha') zerodhaUpdateInstruments().catch(() => {});
-}
-
 /** Where a user configures data sources: turn each on or off, enter broker
  *  credentials, test them, and pick the default. Everything is driven by the
  *  backend's provider list, so a new provider appears here with no UI work. */
@@ -83,6 +79,10 @@ export function DataProvidersDialog({ onClose, initialProvider }: Props) {
   }, [providers]);
 
   const selected = providers.find((p) => p.id === selectedId) ?? providers[0];
+  // The default is a namespace: a broker's row is the default when its symbols' namespace is and it is the one
+  // serving that namespace now.
+  const isDefault = (p: ProviderInfo) =>
+    namespaceOf(p.id) === defaultProvider && (namespaceOf(p.id) !== INDIA || p.id === activeBroker());
 
   return (
     <Dialog
@@ -99,6 +99,7 @@ export function DataProvidersDialog({ onClose, initialProvider }: Props) {
         Choose where charts get their prices. Turn sources on or off, connect your own broker account, and pick the default
         for symbols you type without a provider.
       </p>
+      <MarketSourcePicker />
       <div className="prov-layout">
         <nav className="prov-list" aria-label="Data providers">
           {groups.map((g) => (
@@ -114,7 +115,7 @@ export function DataProvidersDialog({ onClose, initialProvider }: Props) {
                     onClick={() => setSelectedId(p.id)}
                   >
                     <span className="prov-item-name">{p.label}</span>
-                    {p.id === defaultProvider && <Star size={12} className="default-star" aria-label="Default provider" />}
+                    {isDefault(p) && <Star size={12} className="default-star" aria-label="Default provider" />}
                     <span className={`pill ${status.tone}`}>{status.label}</span>
                   </button>
                 );
@@ -123,10 +124,57 @@ export function DataProvidersDialog({ onClose, initialProvider }: Props) {
           ))}
         </nav>
 
-        {selected && <ProviderDetail key={selected.id} provider={selected} isDefault={selected.id === defaultProvider} />}
+        {selected && <ProviderDetail key={selected.id} provider={selected} isDefault={isDefault(selected)} />}
       </div>
       <MarketDataSection />
     </Dialog>
+  );
+}
+
+/** Which broker serves Indian market data, when more than one is set up. Symbols never name a broker
+ *  (`india:NSE:RELIANCE`), so watchlists, alerts, drawings and layouts are the same whichever is picked;
+ *  open charts reload through the new one, and the two brokers' prices are never mixed. */
+function MarketSourcePicker() {
+  const toast = useToast();
+  const { providers, indiaBroker } = useProviderState();
+  const [busy, setBusy] = useState(false);
+  const brokers = providers.filter((p) => p.category === 'broker' && p.configured);
+  if (brokers.length < 2) return null;
+
+  const pick = async (broker: BrokerId) => {
+    setBusy(true);
+    try {
+      await setMarketSource(broker);
+      await refreshProviders();
+      toast(`${BROKER_LABELS[broker]} now serves Indian market data.`, 'success');
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="prov-source" role="radiogroup" aria-label="Indian market data from">
+      <span className="label">Indian market data from</span>
+      {brokers.map((p) => (
+        <label key={p.id} className="prov-source-choice">
+          <input
+            type="radio"
+            name="india-source"
+            checked={indiaBroker === p.id}
+            disabled={busy}
+            onChange={() => void pick(p.id as BrokerId)}
+          />{' '}
+          {p.label}
+          {!p.enabled && <span className="muted small"> (off)</span>}
+        </label>
+      ))}
+      <span className="field-hint">
+        Your watchlists, alerts, drawings and layouts stay as they are; open charts reload through the broker you pick, and
+        the two brokers' prices are never mixed.
+      </span>
+    </div>
   );
 }
 
@@ -342,6 +390,7 @@ function ProviderDetail({ provider, isDefault }: { provider: ProviderInfo; isDef
       )}
 
       {provider.id === 'zerodha' && <ZerodhaPanel provider={provider} onLoggedIn={afterLogin} />}
+      {provider.id === 'fyers' && <FyersPanel provider={provider} onLoggedIn={afterLogin} />}
 
       {provider.capabilities.search && (
         <div className="prov-default">
@@ -355,7 +404,7 @@ function ProviderDetail({ provider, isDefault }: { provider: ProviderInfo; isDef
               className="btn"
               disabled={!canBeDefault}
               title={canBeDefault ? undefined : `Turn ${provider.label} on first`}
-              onClick={() => void setDefaultProvider(provider.id as ProviderId)}
+              onClick={() => void setDefaultProvider(namespaceOf(provider.id) as ProviderId)}
             >
               <Star size={13} /> Make default
             </button>

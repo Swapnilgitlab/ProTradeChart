@@ -9,6 +9,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::db::Database;
 use crate::models::*;
+use crate::secrets::Secrets;
 use crate::store::{datasets, layouts, preferences, scripts, symbol_names, watchlists};
 
 fn lock(db: &Database) -> Result<MutexGuard<'_, Connection>, String> {
@@ -148,33 +149,47 @@ pub fn get_watchlist(id: i64, db: State<Database>) -> Result<WatchlistDetail, St
     watchlist_detail(&*lock(&db)?, id)
 }
 
-/// Makes the Indices watchlist (the broad market, sectors and themes) from a broker's instrument list.
+/// Makes the Indices watchlist (the broad market, sectors and themes) from the active broker's
+/// instrument list.
 #[tauri::command(async)]
-pub fn create_indices_watchlist(provider: String, db: State<Database>) -> Result<WatchlistDetail, String> {
-    let source = crate::store::instrument_list::Source::parse(&provider)
-        .ok_or("Indices come from Zerodha's instrument list.")?;
+pub fn create_indices_watchlist(
+    provider: String,
+    db: State<Database>,
+    secrets: State<Secrets>,
+) -> Result<WatchlistDetail, String> {
     let mut conn = lock(&db)?;
+    let source = sql(crate::store::instrument_list::Source::for_provider(
+        &conn, &secrets, &provider,
+    ))?
+    .ok_or("Indices come from a broker's instrument list.")?;
     let made = crate::store::index_catalog::create(&mut conn, source)?;
     watchlist_detail(&conn, made.id)
 }
 
 /// Every NSE equity a broker's instrument list has — a bounded set (~2,000), unlike its whole
 /// instrument list (which also has BSE, F&O, and other exchanges, easily 50x the size). Feeds
-/// Vela's OWN symbol index (`data/providers/zerodha.ts`'s `listSymbols`), which is
+/// Vela's OWN symbol index (`data/providers/india.ts`'s `listSymbols`), which is
 /// what powers clicking a chart's symbol name or bare-typing to search — the app's own search
 /// box (`SymbolSearchBox`) already searches everything live and doesn't use this.
 const MAX_NSE_EQUITIES: usize = 5_000;
 #[tauri::command(async)]
-pub fn list_nse_equities(provider: String, db: State<Database>) -> Result<Vec<SymbolMatch>, String> {
-    let source = crate::store::instrument_list::Source::parse(&provider)
-        .ok_or("NSE equities come from Zerodha's instrument list.")?;
+pub fn list_nse_equities(
+    provider: String,
+    db: State<Database>,
+    secrets: State<Secrets>,
+) -> Result<Vec<SymbolMatch>, String> {
+    let conn = lock(&db)?;
+    let source = sql(crate::store::instrument_list::Source::for_provider(
+        &conn, &secrets, &provider,
+    ))?
+    .ok_or("NSE equities come from a broker's instrument list.")?;
     let filter = crate::store::instrument_list::Filter {
         exchange: Some("NSE".into()),
         kind: Some("EQUITY".into()),
         query: None,
     };
     let rows = sql(crate::store::instrument_list::list(
-        &*lock(&db)?,
+        &conn,
         source,
         &filter,
         MAX_NSE_EQUITIES,

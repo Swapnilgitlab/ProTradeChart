@@ -13,9 +13,9 @@ import test_study as t  # also puts the package on the path
 
 from protrade import study
 
-data = {"zerodha:NSE:WIN": t.features_of(t.doubler()), "zerodha:NSE:FLAT": t.features_of(t.wobble(3))}
+data = {"india:NSE:WIN": t.features_of(t.doubler()), "india:NSE:FLAT": t.features_of(t.wobble(3))}
 s = study.ResearchStudy(t.spec(), progress=False)
-s.names = {"zerodha:NSE:WIN": "Winner Ltd"}
+s.names = {"india:NSE:WIN": "Winner Ltd"}
 events = s.detect_events(data)
 measured = s.measure(events, data)
 control = s.measure(s.control_group(data, events), data)

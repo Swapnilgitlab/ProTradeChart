@@ -126,24 +126,24 @@ class BarsTests(Case):
         self.stub.routes["/v1/bars"] = lambda q: (200, bars_body(self.times))
 
     def test_the_request_carries_ist_bounds_and_the_interval(self):
-        pt.bars("zerodha:NSE:X", "D", start="2024-01-01", end="2024-01-31", limit=50)
+        pt.bars("india:NSE:X", "D", start="2024-01-01", end="2024-01-31", limit=50)
         query = self.stub.requests[0]["query"]
-        self.assertEqual(query["symbol"], "zerodha:NSE:X")
+        self.assertEqual(query["symbol"], "india:NSE:X")
         self.assertEqual(query["interval"], "D")
         self.assertEqual(query["from"], str(ms("2024-01-01")))
         self.assertEqual(query["to"], str(ms("2024-01-31") + 24 * 3600 * 1000 - 1))
         self.assertEqual(query["limit"], "50")
 
     def test_an_interval_may_be_given_as_a_number(self):
-        pt.bars("zerodha:NSE:X", 15)
+        pt.bars("india:NSE:X", 15)
         self.assertEqual(self.stub.requests[0]["query"]["interval"], "15")
 
     def test_what_is_not_given_is_not_sent(self):
-        pt.bars("zerodha:NSE:X")
+        pt.bars("india:NSE:X")
         self.assertEqual(set(self.stub.requests[0]["query"]), {"symbol", "interval"})
 
     def test_the_answer_is_a_dataframe_in_the_exchanges_zone(self):
-        df = pt.bars("zerodha:NSE:X", start="2024-01-01")
+        df = pt.bars("india:NSE:X", start="2024-01-01")
         self.assertEqual(list(df.columns), ["open", "high", "low", "close", "volume"])
         self.assertEqual(str(df.index.tz), IST)
         self.assertEqual(df.index.name, "time")
@@ -152,33 +152,33 @@ class BarsTests(Case):
         self.assertTrue((df.dtypes == "float64").all())
 
     def test_daily_bars_are_at_midnight_and_can_be_made_naive(self):
-        df = pt.bars("zerodha:NSE:X", naive=True)
+        df = pt.bars("india:NSE:X", naive=True)
         self.assertIsNone(df.index.tz)
         self.assertEqual(df.index[0], pd.Timestamp("2024-01-01"))
         self.assertTrue((df.index == df.index.normalize()).all())
 
     def test_another_zone_can_be_asked_for(self):
-        df = pt.bars("zerodha:NSE:X", tz="UTC")
+        df = pt.bars("india:NSE:X", tz="UTC")
         self.assertEqual(str(df.index.tz), "UTC")
         self.assertEqual(df.index[0], pd.Timestamp("2023-12-31 18:30", tz="UTC"))
 
     def test_a_missing_volume_is_nan_even_when_every_volume_is_missing(self):
         self.stub.routes["/v1/bars"] = lambda q: (200, bars_body(self.times, v=[None, None, None]))
-        df = pt.bars("zerodha:NSE:X")
+        df = pt.bars("india:NSE:X")
         self.assertTrue(df["volume"].isna().all())
         self.assertEqual(df["volume"].dtype, "float64")
         self.stub.routes["/v1/bars"] = lambda q: (200, bars_body(self.times, v=[5.0, None, 7.0]))
-        self.assertEqual(int(pt.bars("zerodha:NSE:X")["volume"].isna().sum()), 1)
+        self.assertEqual(int(pt.bars("india:NSE:X")["volume"].isna().sum()), 1)
 
     def test_no_bars_is_an_empty_frame_with_the_right_columns(self):
         self.stub.routes["/v1/bars"] = lambda q: (200, bars_body([]))
-        df = pt.bars("zerodha:NSE:X")
+        df = pt.bars("india:NSE:X")
         self.assertEqual(len(df), 0)
         self.assertEqual(list(df.columns), ["open", "high", "low", "close", "volume"])
 
     def test_the_frame_remembers_what_it_is(self):
-        df = pt.bars("zerodha:NSE:X", "D")
-        self.assertEqual(df.attrs["symbol"], "zerodha:NSE:X")
+        df = pt.bars("india:NSE:X", "D")
+        self.assertEqual(df.attrs["symbol"], "india:NSE:X")
         self.assertEqual(df.attrs["interval"], "D")
         self.assertEqual(df.attrs["covered_from"], pd.Timestamp("2024-01-01", tz=IST))
         self.assertIsNone(df.attrs["limited_from"])
@@ -188,7 +188,7 @@ class BarsTests(Case):
         self.stub.routes["/v1/bars"] = lambda q: (200, bars_body(self.times, limitedFrom=later))
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            df = pt.bars("zerodha:NSE:X", start="2020-01-01")
+            df = pt.bars("india:NSE:X", start="2020-01-01")
         self.assertEqual([w.category for w in caught], [pt.DataLimitWarning])
         self.assertIn("2024-01-02", str(caught[0].message))
         self.assertEqual(df.attrs["limited_from"], pd.Timestamp("2024-01-02", tz=IST))
@@ -197,13 +197,13 @@ class BarsTests(Case):
         self.stub.routes["/v1/bars"] = lambda q: (200, bars_body(self.times, limitedFrom=ms("2024-01-02")))
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            pt.bars("zerodha:NSE:X")
+            pt.bars("india:NSE:X")
         self.assertEqual(caught, [])
 
     def test_a_broker_error_surfaces_as_the_matching_exception(self):
         self.stub.routes["/v1/bars"] = lambda q: error(401, "auth", "Zerodha rejected your access token.")
         with self.assertRaisesRegex(pt.AuthError, "rejected your access token"):
-            pt.bars("zerodha:NSE:X")
+            pt.bars("india:NSE:X")
 
 
 class PaceTests(unittest.TestCase):
@@ -241,7 +241,7 @@ class ManyTests(Case):
         self.stub.routes["/v1/bars"] = route
 
     def test_every_symbol_comes_back_in_the_order_given_without_repeats(self):
-        symbols = [f"zerodha:NSE:S{i}" for i in range(12)]
+        symbols = [f"india:NSE:S{i}" for i in range(12)]
         result = pt.bars_many(symbols + symbols[:3], progress=False)
         self.assertEqual(list(result), symbols)
         self.assertTrue(all(len(df) == 2 for df in result.values()))
@@ -250,33 +250,33 @@ class ManyTests(Case):
 
     def test_the_first_failure_stops_the_run_by_default(self):
         with self.assertRaises(pt.NotFoundError):
-            pt.bars_many(["zerodha:NSE:A", "zerodha:NSE:MISSING"], progress=False, workers=1)
+            pt.bars_many(["india:NSE:A", "india:NSE:MISSING"], progress=False, workers=1)
 
     def test_skip_keeps_the_rest_and_records_what_failed(self):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             result = pt.bars_many(
-                ["zerodha:NSE:A", "zerodha:NSE:MISSING", "zerodha:NSE:B"], errors="skip", progress=False
+                ["india:NSE:A", "india:NSE:MISSING", "india:NSE:B"], errors="skip", progress=False
             )
-        self.assertEqual(list(result), ["zerodha:NSE:A", "zerodha:NSE:B"])
-        self.assertEqual(list(result.errors), ["zerodha:NSE:MISSING"])
-        self.assertIsInstance(result.errors["zerodha:NSE:MISSING"], pt.NotFoundError)
+        self.assertEqual(list(result), ["india:NSE:A", "india:NSE:B"])
+        self.assertEqual(list(result.errors), ["india:NSE:MISSING"])
+        self.assertIsInstance(result.errors["india:NSE:MISSING"], pt.NotFoundError)
         self.assertEqual(len(caught), 1)
 
     def test_an_expired_token_stops_even_a_skipping_run(self):
         with self.assertRaises(pt.AuthError):
-            pt.bars_many(["zerodha:NSE:A", "zerodha:NSE:EXPIRED", "zerodha:NSE:B"], errors="skip", progress=False, workers=1)
+            pt.bars_many(["india:NSE:A", "india:NSE:EXPIRED", "india:NSE:B"], errors="skip", progress=False, workers=1)
 
     def test_progress_is_reported_on_one_redrawn_line(self):
         out = io.StringIO()
         with redirect_stdout(out):
-            pt.bars_many(["zerodha:NSE:A", "zerodha:NSE:B"], progress=True)
+            pt.bars_many(["india:NSE:A", "india:NSE:B"], progress=True)
         text = out.getvalue()
         self.assertIn("\rfetched 2/2", text)
         self.assertTrue(text.endswith("\n"))
 
     def test_the_progress_line_shows_a_rate_and_says_once_when_the_run_will_take_minutes(self):
-        symbols = [f"zerodha:NSE:S{i}" for i in range(12)]
+        symbols = [f"india:NSE:S{i}" for i in range(12)]
         # A clock that moves ten seconds each time it is read: slow enough that twelve
         # symbols would take minutes.
         clock = itertools.count(0, 10)
@@ -291,20 +291,20 @@ class ManyTests(Case):
     def test_a_quick_run_gets_no_estimate_and_no_warning(self):
         out = io.StringIO()
         with redirect_stdout(out):
-            pt.bars_many([f"zerodha:NSE:S{i}" for i in range(12)], workers=1)
+            pt.bars_many([f"india:NSE:S{i}" for i in range(12)], workers=1)
         self.assertNotIn("left", out.getvalue())
         self.assertNotIn("a few minutes", out.getvalue())
 
     def test_progress_can_be_switched_off_and_a_single_symbol_needs_none(self):
         out = io.StringIO()
         with redirect_stdout(out):
-            pt.bars_many(["zerodha:NSE:A", "zerodha:NSE:B"], progress=False)
-            pt.bars_many(["zerodha:NSE:A"], progress=True)
+            pt.bars_many(["india:NSE:A", "india:NSE:B"], progress=False)
+            pt.bars_many(["india:NSE:A"], progress=True)
         self.assertEqual(out.getvalue(), "")
 
     def test_a_bad_errors_option_is_refused_before_any_request(self):
         with self.assertRaises(ValueError):
-            pt.bars_many(["zerodha:NSE:A"], errors="ignore")
+            pt.bars_many(["india:NSE:A"], errors="ignore")
         self.assertEqual(self.stub.requests, [])
 
 
@@ -319,23 +319,23 @@ class TopUpTests(Case):
         )
 
     def test_fewer_than_two_symbols_makes_no_call(self):
-        self.assertIsNone(api._top_up(["zerodha:NSE:X"]))
+        self.assertIsNone(api._top_up(["india:NSE:X"]))
         self.assertEqual(self.stub.posted("/v1/bars/sync"), [])
 
     def test_a_non_daily_interval_makes_no_call(self):
-        self.assertIsNone(api._top_up(["zerodha:NSE:X", "zerodha:NSE:Y"], interval="5"))
+        self.assertIsNone(api._top_up(["india:NSE:X", "india:NSE:Y"], interval="5"))
         self.assertEqual(self.stub.posted("/v1/bars/sync"), [])
 
     def test_disabled_by_its_environment_variable(self):
         os.environ[client.NO_TOPUP_ENV] = "1"
-        self.assertIsNone(api._top_up(["zerodha:NSE:X", "zerodha:NSE:Y"]))
+        self.assertIsNone(api._top_up(["india:NSE:X", "india:NSE:Y"]))
         self.assertEqual(self.stub.posted("/v1/bars/sync"), [])
 
     def test_the_request_carries_the_span_symbols_and_interval(self):
-        api._top_up(["zerodha:NSE:X", "zerodha:NSE:Y", "zerodha:NSE:X"], start="2024-01-01", end="2024-01-31", limit=50)
+        api._top_up(["india:NSE:X", "india:NSE:Y", "india:NSE:X"], start="2024-01-01", end="2024-01-31", limit=50)
         posted = self.stub.posted("/v1/bars/sync")
         self.assertEqual(len(posted), 1)
-        self.assertEqual(posted[0]["symbols"], ["zerodha:NSE:X", "zerodha:NSE:Y"], "no repeats, order kept")
+        self.assertEqual(posted[0]["symbols"], ["india:NSE:X", "india:NSE:Y"], "no repeats, order kept")
         self.assertEqual(posted[0]["interval"], "D")
         self.assertEqual(posted[0]["from"], ms("2024-01-01"))
         self.assertEqual(posted[0]["to"], ms("2024-01-31") + 24 * 3600 * 1000 - 1)
@@ -346,28 +346,28 @@ class TopUpTests(Case):
             200,
             {
                 "results": [
-                    {"symbol": "zerodha:NSE:A", "status": "current", "reason": None},
-                    {"symbol": "zerodha:NSE:B", "status": "updated", "reason": None},
-                    {"symbol": "zerodha:NSE:C", "status": "fetch", "reason": "no quote for it"},
-                    {"symbol": "zerodha:NSE:D", "status": "skipped", "reason": "not a symbol a quote top-up covers"},
+                    {"symbol": "india:NSE:A", "status": "current", "reason": None},
+                    {"symbol": "india:NSE:B", "status": "updated", "reason": None},
+                    {"symbol": "india:NSE:C", "status": "fetch", "reason": "no quote for it"},
+                    {"symbol": "india:NSE:D", "status": "skipped", "reason": "not a symbol a quote top-up covers"},
                 ]
             },
         )
-        counts = api._top_up(["zerodha:NSE:A", "zerodha:NSE:B", "zerodha:NSE:C", "zerodha:NSE:D"])
+        counts = api._top_up(["india:NSE:A", "india:NSE:B", "india:NSE:C", "india:NSE:D"])
         self.assertEqual(counts, {"current": 1, "updated": 1, "fetch": 1, "skipped": 1})
 
     def test_a_missing_or_broken_route_is_swallowed_not_raised(self):
         del self.stub.posts["/v1/bars/sync"]  # as an older app build with no such route would 404
-        self.assertIsNone(api._top_up(["zerodha:NSE:X", "zerodha:NSE:Y"]))
+        self.assertIsNone(api._top_up(["india:NSE:X", "india:NSE:Y"]))
 
         self.stub.posts["/v1/bars/sync"] = lambda payload: error(401, "auth", "token expired")
-        self.assertIsNone(api._top_up(["zerodha:NSE:X", "zerodha:NSE:Y"]))
+        self.assertIsNone(api._top_up(["india:NSE:X", "india:NSE:Y"]))
 
     def test_more_symbols_than_one_batch_are_sent_as_several_calls(self):
         with mock.patch.object(api, "_SYNC_BATCH", 2):
-            counts = api._top_up(["zerodha:NSE:A", "zerodha:NSE:B", "zerodha:NSE:C"])
+            counts = api._top_up(["india:NSE:A", "india:NSE:B", "india:NSE:C"])
         posted = self.stub.posted("/v1/bars/sync")
-        self.assertEqual([p["symbols"] for p in posted], [["zerodha:NSE:A", "zerodha:NSE:B"], ["zerodha:NSE:C"]])
+        self.assertEqual([p["symbols"] for p in posted], [["india:NSE:A", "india:NSE:B"], ["india:NSE:C"]])
         self.assertEqual(counts, {"current": 3, "updated": 0, "fetch": 0, "skipped": 0})
 
 
@@ -375,31 +375,31 @@ class ListingTests(Case):
     def test_instruments_are_a_frame_whose_symbol_column_feeds_bars(self):
         self.stub.routes["/v1/instruments"] = lambda q: (
             200,
-            [{"symbol": "zerodha:NSE:RELIANCE", "name": "Reliance", "exchange": "NSE", "kind": "EQUITY", "expiry": None}],
+            [{"symbol": "india:NSE:RELIANCE", "name": "Reliance", "exchange": "NSE", "kind": "EQUITY", "expiry": None}],
         )
-        df = pt.instruments("zerodha", exchange="NSE", kind="EQUITY", q="reli", limit=10)
-        self.assertEqual(list(df["symbol"]), ["zerodha:NSE:RELIANCE"])
-        self.assertEqual(self.stub.requests[0]["query"], {"provider": "zerodha", "exchange": "NSE", "kind": "EQUITY", "q": "reli", "limit": "10"})
+        df = pt.instruments("india", exchange="NSE", kind="EQUITY", q="reli", limit=10)
+        self.assertEqual(list(df["symbol"]), ["india:NSE:RELIANCE"])
+        self.assertEqual(self.stub.requests[0]["query"], {"provider": "india", "exchange": "NSE", "kind": "EQUITY", "q": "reli", "limit": "10"})
 
     def test_an_empty_listing_still_has_its_columns(self):
         self.stub.routes["/v1/instruments"] = lambda q: (200, [])
-        self.assertEqual(list(pt.instruments("zerodha").columns), ["symbol", "name", "exchange", "kind", "expiry"])
+        self.assertEqual(list(pt.instruments("india").columns), ["symbol", "name", "exchange", "kind", "expiry"])
 
     def test_a_watchlist_is_found_by_name_or_by_id_and_can_be_filtered_to_readable_sources(self):
         content = {"id": 3, "name": "Mixed", "symbols": [
-            {"symbol": "zerodha:NSE:RELIANCE", "name": None},
+            {"symbol": "india:NSE:RELIANCE", "name": None},
             {"symbol": "binance:BTCUSDT", "name": None},
             {"symbol": "csv:MY_DATA", "name": None},
         ]}
         self.stub.routes["/v1/watchlist"] = lambda q: (200, content)
         self.assertEqual(len(pt.watchlist("Mixed")), 3)
         self.assertEqual(self.stub.requests[-1]["query"], {"name": "Mixed"})
-        self.assertEqual(pt.watchlist(3, providers=("zerodha", "CSV")), ["zerodha:NSE:RELIANCE", "csv:MY_DATA"])
+        self.assertEqual(pt.watchlist(3, providers=("india", "CSV")), ["india:NSE:RELIANCE", "csv:MY_DATA"])
         self.assertEqual(self.stub.requests[-1]["query"], {"id": "3"})
 
     def test_watchlists_and_providers_are_frames(self):
         self.stub.routes["/v1/watchlists"] = lambda q: (200, [{"id": 1, "name": "A", "count": 4}])
-        self.stub.routes["/v1/providers"] = lambda q: (200, [{"id": "zerodha", "label": "Zerodha", "usable": True}])
+        self.stub.routes["/v1/providers"] = lambda q: (200, [{"id": "india", "label": "Zerodha", "usable": True}])
         self.assertEqual(list(pt.watchlists()["count"]), [4])
         self.assertTrue(pt.providers().loc[0, "usable"])
 

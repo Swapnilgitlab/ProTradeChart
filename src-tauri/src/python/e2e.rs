@@ -112,7 +112,7 @@ async fn a_script_reads_bars_and_lists_through_the_real_api() {
     let seen = h.backend.last_bars.lock().unwrap().clone().unwrap();
     assert_eq!(
         (seen.symbol.as_str(), seen.interval.as_str(), seen.limit),
-        ("zerodha:NSE:RELIANCE", "D", Some(10))
+        ("india:NSE:RELIANCE", "D", Some(10))
     );
     assert!(seen.from_ms.is_some() && seen.to_ms.is_some());
     h.cleanup();
@@ -141,14 +141,20 @@ async fn the_example_scripts_that_ship_with_the_app_run_against_the_real_api() {
         let result = &shown[0];
         assert_eq!(result.run_id, "e2e-run");
         assert!(result.title.is_some(), "{name} showed an untitled result");
-        if name.starts_with("screen_") {
+        if *name == "check_history.py" {
+            // A table of checks, about one symbol rather than a list of them.
+            assert_eq!(result.kind, "table", "{name}");
+            let rows = result.data["rows"].as_array().expect("rows");
+            assert!(rows.len() >= 10, "{name} checked too little: {rows:?}");
+            assert!(result.data["symbolColumn"].is_null(), "{name}");
+        } else if name.starts_with("screen_") {
             assert_eq!(result.kind, "table", "{name}");
             let rows = result.data["rows"].as_array().expect("rows");
             assert!(!rows.is_empty(), "{name} showed an empty table");
             // The symbol column is what makes a row clickable.
             assert_eq!(result.data["symbolColumn"], 0, "{name}");
             assert!(
-                rows[0][0].as_str().is_some_and(|s| s.starts_with("zerodha:NSE:")),
+                rows[0][0].as_str().is_some_and(|s| s.starts_with("india:NSE:")),
                 "{name}: {rows:?}"
             );
         } else {
@@ -178,7 +184,7 @@ async fn a_script_shows_a_table_and_a_report_in_the_app() {
     let ran = h
         .run(
             "import pandas as pd, protrade as pt\n\
-             pt.show(pd.DataFrame({'symbol': ['zerodha:NSE:TCS'], 'close': [4000.5]}), title='Screen')\n\
+             pt.show(pd.DataFrame({'symbol': ['india:NSE:TCS'], 'close': [4000.5]}), title='Screen')\n\
              equity = pd.Series([100.0, 110.0, 121.0], index=pd.date_range('2024-01-01', periods=3, freq='D'))\n\
              pt.report(trades=pd.DataFrame({'pnl': [10.0, -5.0]}), equity=equity, title='Test')\n\
              print('shown')",
@@ -193,7 +199,7 @@ async fn a_script_shows_a_table_and_a_report_in_the_app() {
         (shown[0].kind.as_str(), shown[0].title.as_deref()),
         ("table", Some("Screen"))
     );
-    assert_eq!(shown[0].data["rows"][0][0], "zerodha:NSE:TCS");
+    assert_eq!(shown[0].data["rows"][0][0], "india:NSE:TCS");
     assert_eq!(
         (shown[1].kind.as_str(), shown[1].title.as_deref()),
         ("report", Some("Test"))
@@ -253,7 +259,7 @@ async fn a_script_refreshes_a_watchlist_through_the_real_api_and_is_told_what_ha
     );
     let updates = h.backend.watchlist_updates.lock().unwrap().clone();
     assert_eq!(updates.len(), 1);
-    assert_eq!(updates[0].symbols, ["zerodha:NSE:TCS", "zerodha:NSE:INFY"]);
+    assert_eq!(updates[0].symbols, ["india:NSE:TCS", "india:NSE:INFY"]);
     // Refused by the app: the script gets an exception it can read, and nothing is written.
     let bad = h
         .run("import protrade as pt\npt.set_watchlist('X', ['TCS'])", None)
@@ -356,7 +362,7 @@ async fn the_example_scripts_work_for_someone_with_no_watchlists() {
         screen.stdout
     );
     let asked = h.backend.last_bars.lock().unwrap().clone().unwrap();
-    assert!(asked.symbol.starts_with("zerodha:NSE:"), "{}", asked.symbol);
+    assert!(asked.symbol.starts_with("india:NSE:"), "{}", asked.symbol);
     h.cleanup();
 }
 

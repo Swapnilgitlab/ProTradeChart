@@ -82,8 +82,8 @@ def _post(kind: str, title: str | None, data: dict) -> None:
 def set_watchlist(name: str, symbols, mode: str = "replace") -> dict | None:
     """Creates the app's watchlist called ``name``, or refreshes it, from ``symbols``.
 
-    ``symbols`` is a list of symbols like ``zerodha:NSE:TCS`` (a bare broker ticker such as
-    ``zerodha:TCS`` means NSE), a pandas Series or Index of them, or a DataFrame with a ``symbol``
+    ``symbols`` is a list of symbols like ``india:NSE:TCS`` (a bare broker ticker such as
+    ``india:TCS`` means NSE), a pandas Series or Index of them, or a DataFrame with a ``symbol``
     column (or a symbol index) — a screen's matches, say. With ``mode="replace"`` (the default) the
     list ends up holding exactly these: symbols no longer on it are removed, those it keeps stay
     where they are, and new ones go at the end in this order. ``mode="append"`` only adds. A list
@@ -101,7 +101,9 @@ def set_watchlist(name: str, symbols, mode: str = "replace") -> dict | None:
             raise ValueError("Pass a DataFrame with a 'symbol' column (or index), or a list of symbols.")
     if isinstance(symbols, str):
         raise TypeError("Pass a list of symbols, not one string.")
-    listed = [str(s).strip() for s in symbols if s is not None and str(s).strip()]
+    # The app makes each one canonical (an exchange for a bare ticker); the prefix is settled here too, so
+    # a script still writing `zerodha:` posts what the app keeps.
+    listed = [client.canonical_symbol_prefix(str(s).strip()) for s in symbols if s is not None and str(s).strip()]
     if not in_app():
         print(f"(outside the app) would {mode} the watchlist {name!r} with {len(listed)} symbols")
         return None
@@ -128,7 +130,7 @@ def show(data, title: str | None = None, symbol_column: str | None = "symbol",
     """Show a DataFrame as a table in the app's Results tab.
 
     A column called ``symbol`` (or the one named by ``symbol_column``) holding symbols like
-    ``zerodha:NSE:TCS`` becomes clickable, to open that chart, and the whole list can be added to a
+    ``india:NSE:TCS`` becomes clickable, to open that chart, and the whole list can be added to a
     watchlist. Columns can be sorted. At most ``max_rows`` rows are sent; ``digits`` is how many
     decimals numbers are drawn with. Outside the app the table is printed.
     """

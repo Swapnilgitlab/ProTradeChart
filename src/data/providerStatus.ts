@@ -1,5 +1,13 @@
-import { getPreference, listProviders, setPreference, type ProviderInfo } from '../lib/ipc';
-import { DEFAULT_PROVIDER, isSupportedProvider, type ProviderId } from '../lib/symbols';
+import { getMarketSource, getPreference, listProviders, setPreference, type ProviderInfo } from '../lib/ipc';
+import {
+  BROKER_LABELS,
+  canonicalProvider,
+  DEFAULT_PROVIDER,
+  INDIA,
+  isSupportedProvider,
+  type BrokerId,
+  type ProviderId,
+} from '../lib/symbols';
 
 /** A live snapshot of which data providers are switched on and set up, and
  *  which one is the default. Data code — search, quotes, the providers
@@ -7,16 +15,19 @@ import { DEFAULT_PROVIDER, isSupportedProvider, type ProviderId } from '../lib/s
  *  they read; the settings screen and `useProviderState` subscribe to it. */
 
 export interface ProviderState {
+  /** The data sources' settings: `csv` and each broker (`zerodha`, `fyers`) — not symbol namespaces. */
   providers: ProviderInfo[];
-  /** The provider a bare ticker (or a typed-and-entered symbol) goes to. */
+  /** The namespace a bare ticker (or a typed-and-entered symbol) goes to. */
   defaultProvider: ProviderId;
+  /** The broker serving `india:` symbols, as the backend decided it (`market_source`). */
+  indiaBroker: BrokerId;
   /** False until the first load from the backend. */
   loaded: boolean;
 }
 
 const PREF_KEY = 'default_provider';
 
-let state: ProviderState = { providers: [], defaultProvider: DEFAULT_PROVIDER, loaded: false };
+let state: ProviderState = { providers: [], defaultProvider: DEFAULT_PROVIDER, indiaBroker: 'zerodha', loaded: false };
 const listeners = new Set<() => void>();
 
 function set(next: ProviderState) {
@@ -35,22 +46,48 @@ export function subscribeProviderState(listener: () => void): () => void {
 
 export const providerInfo = (id: string): ProviderInfo | undefined => state.providers.find((p) => p.id === id);
 
-/** Providers that need the user's own account: never assumed ready. */
-const OPT_IN = new Set<string>(['zerodha']);
+/** The broker that serves `india:` symbols right now. Only one ever does: the two brokers' bars are never mixed. */
+export const activeBroker = (): BrokerId => state.indiaBroker;
 
-/** Enabled and fully set up. Before the first load, only what needs no setup
- *  counts, so an account-backed source is never assumed to be ready, and one the app
- *  no longer has (a symbol saved from it) never is. */
+export const brokerLabel = (broker: BrokerId = activeBroker()): string => BROKER_LABELS[broker];
+
+/** Which settings a namespace's data depends on: the active broker's for `india`, its own otherwise. A broker's
+ *  own id passes through, so `isProviderUsable('zerodha')` still asks about Zerodha's account. */
+export function settingsFor(id: string): string {
+  return id === INDIA ? activeBroker() : id;
+}
+
+/** Providers that need the user's own account: never assumed ready. */
+const OPT_IN = new Set<string>(['zerodha', 'fyers']);
+
+/** Enabled and fully set up. Takes a namespace (`india`, `csv`) or a broker (`zerodha`). Before the first load, only
+ *  what needs no setup counts, so an account-backed source is never assumed to be ready, and one the app no longer has
+ *  (a symbol saved from it) never is. */
 export function isProviderUsable(id: string): boolean {
-  const info = providerInfo(id);
-  if (!info) return !state.loaded && !OPT_IN.has(id) && isSupportedProvider(id);
+  const target = settingsFor(id);
+  const info = providerInfo(target);
+  if (!info) return !state.loaded && !OPT_IN.has(target) && isSupportedProvider(target);
   return info.enabled && info.configured;
 }
 
+/** The namespace a data source's symbols live in: every broker's are `india:`. */
+export function namespaceOf(providerId: string): string {
+  return OPT_IN.has(providerId) ? INDIA : providerId;
+}
+
+/** Each symbol namespace, whether its data can be read now, and what to call its source — what the Screener's and
+ *  Studies' readiness checks are given (`india` is usable when its active broker is). */
+export function namespaceStatus(): { id: string; usable: boolean; label: string }[] {
+  return [
+    { id: INDIA, usable: isProviderUsable(INDIA), label: brokerLabel() },
+    { id: 'csv', usable: isProviderUsable('csv'), label: 'Imported data' },
+  ];
+}
+
 /** What a brand-new chart shows until the user picks something else: a well-known
- *  NSE name through Zerodha. It still needs the user's own account connected to load. */
+ *  NSE name. It still needs the user's own broker account connected to load. */
 export function starterSymbol(): string {
-  return 'zerodha:NSE:RELIANCE';
+  return 'india:NSE:RELIANCE';
 }
 
 /** Providers that can be searched right now. */
@@ -58,9 +95,15 @@ export const searchableProviders = (): ProviderInfo[] =>
   state.providers.filter((p) => p.capabilities.search && p.enabled && p.configured);
 
 export async function refreshProviders(): Promise<void> {
-  const [providers, stored] = await Promise.all([listProviders(), getPreference(PREF_KEY).catch(() => null)]);
-  const defaultId = providers.some((p) => p.id === stored) ? (stored as ProviderId) : DEFAULT_PROVIDER;
-  set({ providers, defaultProvider: defaultId, loaded: true });
+  const [providers, stored, source] = await Promise.all([
+    listProviders(),
+    getPreference(PREF_KEY).catch(() => null),
+    getMarketSource().catch(() => null),
+  ]);
+  // A default saved under a broker's name (`zerodha`, before the Indian namespace) means the Indian namespace.
+  const storedId = stored === null ? null : canonicalProvider(stored);
+  const defaultId = storedId !== null && isSupportedProvider(storedId) ? storedId : DEFAULT_PROVIDER;
+  set({ providers, defaultProvider: defaultId, indiaBroker: source?.broker ?? 'zerodha', loaded: true });
 }
 
 let loading: Promise<void> | null = null;

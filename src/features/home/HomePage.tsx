@@ -29,7 +29,7 @@ import { listDatasets, pythonEnvStatus, type AiProviders } from '../../lib/ipc';
 import { describeHoldings, describeProgress, isLoaded } from '../../lib/marketData';
 import { useMarketData } from '../marketdata/useMarketData';
 import { useProviderState } from '../providers/useProviderState';
-import { ZerodhaHomeCard } from '../providers/ZerodhaLogin';
+import { BrokerHomeCard } from '../providers/BrokerLogin';
 import type { LayoutSummary } from '../layouts/LayoutMenu';
 
 /** A card worth marking done/pending is a first-time setup step with a real finished state;
@@ -132,7 +132,8 @@ export function HomePage({
   onOpenHelp,
 }: Props) {
   const providerState = useProviderState();
-  const brokerConnected = providerState.providers.some((p) => p.id === 'zerodha' && p.enabled && p.configured);
+  const connected = providerState.providers.filter((p) => p.category === 'broker' && p.enabled && p.configured);
+  const brokerConnected = connected.length > 0;
   const aiConnected = aiProviders?.active != null;
 
   const [datasetCount, setDatasetCount] = useState<number | null>(null);
@@ -160,7 +161,7 @@ export function HomePage({
         </div>
       </div>
 
-      <ZerodhaHomeCard onOpenDataProviders={onOpenDataProviders} />
+      <BrokerHomeCard onOpenDataProviders={onOpenDataProviders} />
 
       <Section
         title="Charts"
@@ -215,8 +216,8 @@ export function HomePage({
             icon: Plug,
             title: 'Data providers',
             description: brokerConnected
-              ? 'Zerodha and your imported data: switch sources on or off.'
-              : 'Connect Zerodha for NSE, BSE, F&O and commodities.',
+              ? `${connected.map((p) => p.label).join(' and ')} and your imported data: switch sources on or off.`
+              : 'Connect Zerodha or FYERS for NSE, BSE, F&O and commodities.',
             onClick: onOpenDataProviders,
             status: statusOf(brokerConnected),
           },
@@ -295,7 +296,7 @@ export function HomePage({
               description={
                 market && market.holdings.series > 0
                   ? 'Fetch the latest session and any new listings from your broker now.'
-                  : 'Read every NSE stock’s history from your broker into memory now (about 15 minutes).'
+                  : 'Read every NSE stock’s history from your broker into memory now (15 minutes or more, at your broker’s pace).'
               }
               onClick={() => void marketData.loadNow()}
               disabled={!market}

@@ -13,7 +13,7 @@ import {
   type Tab,
 } from './tabs';
 
-const chart = (id: string, symbol = `zerodha:NSE:${id.toUpperCase()}`): Tab => ({ kind: 'chart', id, symbol });
+const chart = (id: string, symbol = `india:NSE:${id.toUpperCase()}`): Tab => ({ kind: 'chart', id, symbol });
 const python = (id = 'py'): Tab => ({ kind: 'python', id });
 const studies = (id = 'st'): Tab => ({ kind: 'studies', id });
 const home = (id = 'home'): Tab => ({ kind: 'home', id });

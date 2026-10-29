@@ -7,7 +7,7 @@
 //! A task-local doesn't follow `tokio::spawn`, so a background job wraps each task it spawns.
 
 use std::future::Future;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use tokio::sync::{Mutex, Notify};
@@ -28,13 +28,15 @@ pub async fn in_background<F: Future>(work: F) -> F::Output {
     LANE.scope(Lane::Background, work).await
 }
 
-fn current_lane() -> Lane {
+/// The lane the calling task is in: background only inside [`in_background`].
+pub fn current_lane() -> Lane {
     LANE.try_with(|lane| *lane).unwrap_or(Lane::Interactive)
 }
 
 /// Enforces a minimum gap between requests.
 pub struct Throttle {
-    gap: Duration,
+    /// Nanoseconds. Atomic, so a broker whose pace depends on the user's plan can change it.
+    gap: AtomicU64,
     last: Mutex<Option<Instant>>,
     interactive_waiting: AtomicUsize,
     interactive_done: Notify,
@@ -53,11 +55,20 @@ impl Drop for Queued<'_> {
 impl Throttle {
     pub fn new(gap: Duration) -> Self {
         Throttle {
-            gap,
+            gap: AtomicU64::new(gap.as_nanos() as u64),
             last: Mutex::new(None),
             interactive_waiting: AtomicUsize::new(0),
             interactive_done: Notify::new(),
         }
+    }
+
+    /// Changes the gap from the next request on (FYERS's limits depend on the account's plan).
+    pub fn set_gap(&self, gap: Duration) {
+        self.gap.store(gap.as_nanos() as u64, Ordering::SeqCst);
+    }
+
+    fn gap(&self) -> Duration {
+        Duration::from_nanos(self.gap.load(Ordering::SeqCst))
     }
 
     /// Waits until the gap since the previous request has passed, then claims the slot.
@@ -98,9 +109,9 @@ impl Throttle {
 
     async fn claim(&self, last: &mut Option<Instant>) {
         if let Some(at) = *last {
-            let elapsed = at.elapsed();
-            if elapsed < self.gap {
-                sleep(self.gap - elapsed).await;
+            let (elapsed, gap) = (at.elapsed(), self.gap());
+            if elapsed < gap {
+                sleep(gap - elapsed).await;
             }
         }
         *last = Some(Instant::now());
@@ -121,6 +132,16 @@ mod tests {
         }
         // The first goes straight through; the next two each wait a gap.
         assert!(start.elapsed() >= Duration::from_millis(115), "{:?}", start.elapsed());
+    }
+
+    #[tokio::test]
+    async fn a_new_gap_applies_from_the_next_request() {
+        let throttle = Throttle::new(Duration::from_secs(60));
+        throttle.wait().await;
+        throttle.set_gap(Duration::from_millis(10));
+        let start = Instant::now();
+        throttle.wait().await;
+        assert!(start.elapsed() < Duration::from_secs(1), "{:?}", start.elapsed());
     }
 
     #[tokio::test]

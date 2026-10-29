@@ -23,7 +23,7 @@ def spec(**changes):
     base = {
         "version": 1,
         "name": "100% Winners",
-        "universe": {"source": "instruments", "provider": "zerodha", "exchanges": ["NSE"]},
+        "universe": {"source": "instruments", "provider": "india", "exchanges": ["NSE"]},
         "period": {"start": "2018-01-01", "end": None},
         "event": {"conditions": [{"left": "return_252", "op": "crosses_above", "right": 1.0}], "cooldown_days": 252},
         "lookback_windows": [252, 126, 63, 21],
@@ -157,18 +157,18 @@ class UniverseTests(unittest.TestCase):
 
     def test_a_company_on_two_exchanges_is_studied_once(self):
         rows = [
-            ("zerodha:NSE:RELIANCE", "RELIANCE INDUSTRIES"),
-            ("zerodha:NSE:IRFC-N2", "IRFC"),
-            ("zerodha:NSE:XYZ-BE", "XYZ"),
-            ("zerodha:BSE:RELIANCE", "Reliance Industries Ltd."),
-            ("zerodha:BSE:RELIND", "RELIANCE INDUSTRIES LIMITED"),  # spelled differently on BSE
-            ("zerodha:BSE:XYZ", "XYZ Ltd"),
-            ("zerodha:BSE:BSEONLY", "BSE ONLY LTD"),
+            ("india:NSE:RELIANCE", "RELIANCE INDUSTRIES"),
+            ("india:NSE:IRFC-N2", "IRFC"),
+            ("india:NSE:XYZ-BE", "XYZ"),
+            ("india:BSE:RELIANCE", "Reliance Industries Ltd."),
+            ("india:BSE:RELIND", "RELIANCE INDUSTRIES LIMITED"),  # spelled differently on BSE
+            ("india:BSE:XYZ", "XYZ Ltd"),
+            ("india:BSE:BSEONLY", "BSE ONLY LTD"),
         ]
-        self.assertEqual([s for s, _ in study.pick_listings(rows)], ["zerodha:NSE:RELIANCE", "zerodha:BSE:XYZ", "zerodha:BSE:BSEONLY"])
+        self.assertEqual([s for s, _ in study.pick_listings(rows)], ["india:NSE:RELIANCE", "india:BSE:XYZ", "india:BSE:BSEONLY"])
         self.assertEqual(
             [s for s, _ in study.pick_listings(rows, ["EQ", "BE"])],
-            ["zerodha:NSE:RELIANCE", "zerodha:NSE:XYZ-BE", "zerodha:BSE:BSEONLY"],
+            ["india:NSE:RELIANCE", "india:NSE:XYZ-BE", "india:BSE:BSEONLY"],
         )
 
     def test_the_series_are_part_of_the_spec(self):
@@ -177,22 +177,23 @@ class UniverseTests(unittest.TestCase):
         with self.assertRaises(study.SpecError):
             study.normalize_spec(spec(universe={"series": ["GB"]}))
 
-    def test_only_zerodha_is_a_universe_provider(self):
-        self.assertEqual(study.normalize_spec(spec())["universe"]["provider"], "zerodha")
+    def test_only_india_is_a_universe_provider_and_its_old_name_reads_as_it(self):
+        self.assertEqual(study.normalize_spec(spec())["universe"]["provider"], "india")
+        self.assertEqual(study.normalize_spec(spec(universe={"provider": "zerodha"}))["universe"]["provider"], "india")
         with self.assertRaisesRegex(study.SpecError, "universe.provider"):
             study.normalize_spec(spec(universe={"provider": "nosuch"}))
 
 
 class EngineTests(unittest.TestCase):
     def setUp(self):
-        self.data = {"zerodha:NSE:WIN": features_of(doubler()), "zerodha:NSE:FLAT": features_of(wobble(3))}
+        self.data = {"india:NSE:WIN": features_of(doubler()), "india:NSE:FLAT": features_of(wobble(3))}
         self.study = study.ResearchStudy(spec(), progress=False)
 
     def test_an_event_is_the_day_the_condition_first_holds(self):
         events = self.study.detect_events(self.data)
-        self.assertEqual(list(events["symbol"]), ["zerodha:NSE:WIN"])
+        self.assertEqual(list(events["symbol"]), ["india:NSE:WIN"])
         row = events.iloc[0]
-        closes = self.data["zerodha:NSE:WIN"].get("close")
+        closes = self.data["india:NSE:WIN"].get("close")
         pos = int(row["pos"])
         self.assertGreaterEqual(closes.iloc[pos] / closes.iloc[pos - 252], 2.0)
         self.assertLess(closes.iloc[pos - 1] / closes.iloc[pos - 253], 2.0)
@@ -212,7 +213,7 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(before.detect_events(self.data).empty)
 
     def test_the_cooldown_keeps_one_event_per_move(self):
-        data = {"zerodha:NSE:WIN": features_of(doubler())}
+        data = {"india:NSE:WIN": features_of(doubler())}
         every = study.ResearchStudy(spec(event={"conditions": ["return_21 > 0.03"], "cooldown_days": 1}), progress=False)
         once = study.ResearchStudy(spec(event={"conditions": ["return_21 > 0.03"], "cooldown_days": 2000}), progress=False)
         self.assertGreaterEqual(len(every.detect_events(data)), 1)
@@ -222,7 +223,7 @@ class EngineTests(unittest.TestCase):
         events = self.study.detect_events(self.data)
         measured = self.study.measure(events, self.data)
         pos = int(events["pos"].iloc[0])
-        f = self.data["zerodha:NSE:WIN"]
+        f = self.data["india:NSE:WIN"]
         self.assertAlmostEqual(measured["return_63@-63"].iloc[0], f.get("return_63").iloc[pos - 63])
         self.assertAlmostEqual(measured["rsi_14@0"].iloc[0], f.get("rsi_14").iloc[pos])
         self.assertAlmostEqual(measured["fwd_return_63"].iloc[0], f.get("close").iloc[pos + 63] / f.get("close").iloc[pos] - 1)
@@ -233,7 +234,7 @@ class EngineTests(unittest.TestCase):
         events = self.study.detect_events(self.data)
         measured = self.study.measure(events, self.data)
         pos = int(events["pos"].iloc[0])
-        bars = self.data["zerodha:NSE:WIN"].bars
+        bars = self.data["india:NSE:WIN"].bars
         close = bars["close"].iloc[pos]
         for window in (63, 126):
             after = bars.iloc[pos + 1: pos + window + 1]
@@ -243,7 +244,7 @@ class EngineTests(unittest.TestCase):
     def test_measuring_many_symbols_reports_progress_along_the_way(self):
         # Progress is reported every 50 symbols; a report past the first once crashed because the
         # loop reused the band's names for each symbol's high and low prices.
-        data = {f"zerodha:NSE:W{i}": features_of(doubler()) for i in range(120)}
+        data = {f"india:NSE:W{i}": features_of(doubler()) for i in range(120)}
         s = study.ResearchStudy(spec(), progress=True)
         out = io.StringIO()
         with redirect_stdout(out):
@@ -256,8 +257,8 @@ class EngineTests(unittest.TestCase):
         # Thirty stocks that double (each at a different date) and thirty that drift: before the
         # event the winners were climbing, the control dates weren't.
         days = pd.Timestamp("2019-03-01")
-        data = {f"zerodha:NSE:W{i}": features_of(doubler(f"{days + pd.offsets.BDay(7 * i):%Y-%m-%d}")) for i in range(30)}
-        data.update({f"zerodha:NSE:F{i}": features_of(wobble(i)) for i in range(30)})
+        data = {f"india:NSE:W{i}": features_of(doubler(f"{days + pd.offsets.BDay(7 * i):%Y-%m-%d}")) for i in range(30)}
+        data.update({f"india:NSE:F{i}": features_of(wobble(i)) for i in range(30)})
         s = study.ResearchStudy(spec(), progress=False)
         events = s.detect_events(data)
         measured = s.measure(events, data)
@@ -303,7 +304,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(list(again.control_group(self.data, events)["pos"]), list(control["pos"]))
         event_pos = int(events["pos"].iloc[0])
         for symbol, pos in zip(control["symbol"], control["pos"]):
-            if symbol == "zerodha:NSE:WIN":
+            if symbol == "india:NSE:WIN":
                 self.assertGreater(abs(pos - event_pos), 252)
 
     def test_the_result_aggregates_and_labels_what_it_lacks(self):
@@ -328,7 +329,7 @@ class EngineTests(unittest.TestCase):
         json.dumps(result)  # everything is JSON
 
     def test_an_outcome_splits_events_into_those_that_reached_it_and_those_that_did_not(self):
-        data = {"zerodha:NSE:WIN": features_of(doubler()), "zerodha:NSE:FLAT": features_of(wobble(3))}
+        data = {"india:NSE:WIN": features_of(doubler()), "india:NSE:FLAT": features_of(wobble(3))}
         s = study.ResearchStudy(spec(event={"conditions": ["return_21 crosses_above 0.02"], "cooldown_days": 60}, outcome={"window": 63, "min_return": 0.2}), progress=False)
         events = s.detect_events(data)
         met, missed = s.split_by_outcome(events, data)
@@ -380,7 +381,7 @@ class EngineTests(unittest.TestCase):
             s.universe()
 
 
-SERIES = {"zerodha:NSE:WIN": doubler(), "zerodha:NSE:FLAT": wobble(3), "zerodha:NSE:SLOW": wobble(4)}
+SERIES = {"india:NSE:WIN": doubler(), "india:NSE:FLAT": wobble(3), "india:NSE:SLOW": wobble(4)}
 
 
 def bars_route(query):
@@ -400,7 +401,7 @@ class RunTests(Case):
         "/v1/ping": lambda q: (200, {"ok": True, "api": 1, "app": "9.9.9"}),
         "/v1/instruments": lambda q: (
             200,
-            [{"symbol": s, "name": s.split(":")[-1].title(), "exchange": "NSE", "kind": "EQUITY", "expiry": None} for s in [*SERIES, "zerodha:NSE:GONE"]],
+            [{"symbol": s, "name": s.split(":")[-1].title(), "exchange": "NSE", "kind": "EQUITY", "expiry": None} for s in [*SERIES, "india:NSE:GONE"]],
         ),
         "/v1/bars": bars_route,
     }
@@ -423,7 +424,7 @@ class RunTests(Case):
         self.assertEqual((posted[0]["runId"], posted[0]["kind"], posted[0]["title"]), ("run-9", "study", "100% Winners"))
         data = posted[0]["data"]
         self.assertEqual(data["summary"]["events"], 1)
-        self.assertEqual(data["events"]["rows"][0][:2], ["zerodha:NSE:WIN", "Win"])
+        self.assertEqual(data["events"]["rows"][0][:2], ["india:NSE:WIN", "Win"])
         self.assertEqual(data["meta"]["app_version"], "9.9.9")
         self.assertRegex(data["meta"]["engine_build"], r"^[0-9a-f]{8}$")
         self.assertEqual(data["meta"]["symbols_requested"], 4)
@@ -436,10 +437,10 @@ class RunTests(Case):
     def test_the_universe_is_offered_for_a_quote_top_up_before_the_historical_fetch(self):
         out = io.StringIO()
         with redirect_stdout(out), redirect_stderr(io.StringIO()):
-            study.ResearchStudy(spec()).load(list(SERIES) + ["zerodha:NSE:GONE"])
+            study.ResearchStudy(spec()).load(list(SERIES) + ["india:NSE:GONE"])
         synced = self.stub.posted("/v1/bars/sync")
         self.assertEqual(len(synced), 1)
-        self.assertEqual(set(synced[0]["symbols"]), set(SERIES) | {"zerodha:NSE:GONE"})
+        self.assertEqual(set(synced[0]["symbols"]), set(SERIES) | {"india:NSE:GONE"})
         self.assertIn("already up to date", out.getvalue())
 
     def test_symbols_the_market_data_store_holds_are_read_in_batches_with_the_same_study(self):
@@ -459,7 +460,7 @@ class RunTests(Case):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             after = study.ResearchStudy(spec(), progress=False).run()
         fetched = {r["query"]["symbol"] for r in self.stub.requests if r["path"] == "/v1/bars"}
-        self.assertEqual(fetched, {"zerodha:NSE:GONE"}, "only what the store lacks")
+        self.assertEqual(fetched, {"india:NSE:GONE"}, "only what the store lacks")
         self.assertEqual(after["summary"], before["summary"])
         self.assertEqual(after["events"], before["events"])
         for key in ("symbols_requested", "symbols_failed"):
@@ -468,7 +469,7 @@ class RunTests(Case):
     def test_a_missing_or_broken_sync_route_does_not_stop_the_run(self):
         del self.stub.posts["/v1/bars/sync"]  # as an app build without the route would 404
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            data = study.ResearchStudy(spec()).load(list(SERIES) + ["zerodha:NSE:GONE"])
+            data = study.ResearchStudy(spec()).load(list(SERIES) + ["india:NSE:GONE"])
         self.assertEqual(len(data), 3, "the ordinary per-symbol fetch still ran")
 
     def test_loading_keeps_many_requests_in_flight_and_reports_time_left(self):
@@ -479,7 +480,7 @@ class RunTests(Case):
 
         state = {"now": 0, "most": 0}
         lock = threading.Lock()
-        many = {f"zerodha:NSE:S{i}": wobble(i) for i in range(40)}
+        many = {f"india:NSE:S{i}": wobble(i) for i in range(40)}
 
         def slow(query):
             with lock:
