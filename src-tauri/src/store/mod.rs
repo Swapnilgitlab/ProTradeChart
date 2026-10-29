@@ -7,6 +7,7 @@ pub mod bar_tables;
 pub mod datasets;
 pub mod day_topup;
 pub mod index_catalog;
+pub mod india_symbols;
 pub mod instrument_list;
 pub mod layouts;
 pub mod market_symbols;

@@ -8,6 +8,8 @@ import {
   resampleIntraday,
   resampleTo,
   timeframeToString,
+  toBrokerPlan,
+  toFyersPlan,
   toKitePlan,
 } from './timeframes';
 
@@ -171,5 +173,27 @@ describe('toKitePlan', () => {
 
   it('refuses anything longer than a trading day', () => {
     expect(plan('2880')).toBeNull();
+  });
+});
+
+describe('toFyersPlan', () => {
+  const plan = (tf: string) => toFyersPlan(parseTimeframe(tf)!);
+
+  it('uses FYERS-native intervals directly, including the ones Kite lacks', () => {
+    for (const m of ['1', '2', '3', '5', '10', '15', '20', '30', '60', '120', '240']) expect(plan(m)).toEqual({ interval: m });
+    expect(plan('D')).toEqual({ interval: 'D' });
+  });
+
+  it('builds the rest the same way as for Kite', () => {
+    expect(plan('45')).toEqual({ interval: '15', groupSize: 3 });
+    expect(plan('180')).toEqual({ interval: '60', groupSize: 3 });
+    expect(plan('480')).toEqual({ interval: '240', groupSize: 2 });
+    expect(plan('W')).toEqual({ interval: 'D', resampleDaily: 'week' });
+  });
+
+  it('is what toBrokerPlan gives for each broker', () => {
+    const tf = parseTimeframe('120')!;
+    expect(toBrokerPlan('fyers', tf)).toEqual({ interval: '120' });
+    expect(toBrokerPlan('zerodha', tf)).toEqual({ interval: '60', groupSize: 2 });
   });
 });

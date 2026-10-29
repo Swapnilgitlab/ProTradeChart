@@ -94,13 +94,13 @@ export const PRESETS: readonly ScreenPreset[] = [
   },
 ];
 
-/** A new, unsaved screen from a preset, over NSE through Zerodha (the Screener's default). */
+/** A new, unsaved screen from a preset, over NSE (the Screener's default), through whichever broker is connected. */
 export function fromPreset(id: string): ScreenSpec {
   const preset = PRESETS.find((p) => p.id === id) ?? PRESETS[0];
   return {
     version: 1,
     name: preset.id === 'custom' ? 'New screen' : preset.name,
-    universe: { source: 'instruments', provider: 'zerodha', exchanges: ['NSE'], series: ['EQ'], watchlist: null, symbols: [], max_symbols: null },
+    universe: { source: 'instruments', provider: 'india', exchanges: ['NSE'], series: ['EQ'], watchlist: null, symbols: [], max_symbols: null },
     filters: structuredClone(preset.filters),
     columns: [...preset.columns],
     sort: preset.sort ? { ...preset.sort } : null,

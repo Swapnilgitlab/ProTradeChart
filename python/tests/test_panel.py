@@ -23,7 +23,7 @@ def body(times, base=0.0):
     return b
 
 
-A, B, C = "zerodha:NSE:AAA", "zerodha:NSE:BBB", "zerodha:NSE:CCC"
+A, B, C = "india:NSE:AAA", "india:NSE:BBB", "india:NSE:CCC"
 
 
 class PanelTests(Case):

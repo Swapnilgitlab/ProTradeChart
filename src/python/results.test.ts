@@ -17,7 +17,7 @@ const event = (kind: string, data: unknown, title: string | null = null) => ({ k
 
 const tableData = (over: Record<string, unknown> = {}) => ({
   columns: ['symbol', 'close'],
-  rows: [['zerodha:NSE:TCS', 4000.5]],
+  rows: [['india:NSE:TCS', 4000.5]],
   totalRows: 1,
   symbolColumn: 0,
   digits: 2,
@@ -33,7 +33,7 @@ describe('parsing a table', () => {
     expect(table.kind).toBe('table');
     expect(table.title).toBe('Screen');
     expect(table.columns).toEqual(['symbol', 'close']);
-    expect(table.rows).toEqual([['zerodha:NSE:TCS', 4000.5]]);
+    expect(table.rows).toEqual([['india:NSE:TCS', 4000.5]]);
     expect(table.symbolColumn).toBe(0);
     expect(table.totalRows).toBe(1);
     expect(table.digits).toBe(2);
@@ -258,7 +258,7 @@ describe('formatCell', () => {
   });
 
   it('writes text, yes/no and blanks', () => {
-    expect(formatCell('zerodha:NSE:TCS', 2)).toBe('zerodha:NSE:TCS');
+    expect(formatCell('india:NSE:TCS', 2)).toBe('india:NSE:TCS');
     expect(formatCell(true, 2)).toBe('yes');
     expect(formatCell(false, 2)).toBe('no');
     expect(formatCell(null, 2)).toBe('');

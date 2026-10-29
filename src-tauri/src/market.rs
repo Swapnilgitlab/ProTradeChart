@@ -30,6 +30,27 @@ pub fn ist_day_start(ms: i64) -> i64 {
     (ms + IST_OFFSET_MS).div_euclid(DAY_MS) * DAY_MS - IST_OFFSET_MS
 }
 
+/// The first instant after `ms` (or `ms` itself) at `minute` minutes past midnight IST: when a
+/// broker's daily token reset that follows a save comes (Kite's 06:00, FYERS's 06:30).
+pub fn next_ist_minute(ms: i64, minute: i64) -> i64 {
+    let at = ist_day_start(ms) + minute * MINUTE_MS;
+    if at >= ms {
+        at
+    } else {
+        at + DAY_MS
+    }
+}
+
+/// The latest instant up to `ms` at `minute` minutes past midnight IST: the most recent reset.
+pub fn last_ist_minute(ms: i64, minute: i64) -> i64 {
+    let at = ist_day_start(ms) + minute * MINUTE_MS;
+    if at <= ms {
+        at
+    } else {
+        at - DAY_MS
+    }
+}
+
 fn is_weekday(ms: i64) -> bool {
     // 1970-01-01 was a Thursday; counting from Sunday = 0, that is 4.
     matches!(((ms + IST_OFFSET_MS).div_euclid(DAY_MS) + 4).rem_euclid(7), 1..=5)
@@ -38,6 +59,17 @@ fn is_weekday(ms: i64) -> bool {
 /// Whether the equity session is running: a weekday, 09:15 up to 15:30 IST.
 pub fn is_open(now_ms: i64) -> bool {
     is_weekday(now_ms) && (OPEN_MS..CLOSE_MS).contains(&(now_ms - ist_day_start(now_ms)))
+}
+
+/// Whether `exchange`'s session is running: MCX trades 09:00 to 23:30 IST, everything else follows
+/// the equity session. Holidays aren't known (see the module's note).
+pub fn is_trading(exchange: &str, now_ms: i64) -> bool {
+    if exchange == "MCX" {
+        let into = now_ms - ist_day_start(now_ms);
+        is_weekday(now_ms) && (9 * HOUR_MS..23 * HOUR_MS + 30 * MINUTE_MS).contains(&into)
+    } else {
+        is_open(now_ms)
+    }
 }
 
 /// When the most recent session that is certainly over became final: its close plus the

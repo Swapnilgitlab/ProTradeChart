@@ -53,7 +53,7 @@ const AFTER_6M = { start: { offset: 0 }, end: { offset: 126 } };
 /** ₹1 Cr a day of average traded value: the liquidity floor the templates use in place of a
  *  market-cap floor, which no data source can supply. */
 export const DEFAULT_MIN_TRADED_VALUE = 1e7;
-export const DEFAULT_BENCHMARK = 'zerodha:NSE:NIFTY_500';
+export const DEFAULT_BENCHMARK = 'india:NSE:NIFTY_500';
 
 /** What a template changes from the base. Measures are written in their short form (defaults left
  *  out); `normalizeSpec` completes them. */
@@ -67,7 +67,7 @@ function base(name: string, template: string, description: string, event: StudyS
     template,
     universe: {
       source: 'instruments',
-      provider: 'zerodha',
+      provider: 'india',
       exchanges: ['NSE'],
       series: ['EQ'],
       watchlist: null,

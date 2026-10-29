@@ -3,8 +3,8 @@ import { fromPreset } from './presets';
 import { screenReadiness } from './readiness';
 import type { ScreenSpec } from './spec';
 
-const zerodha = [{ id: 'zerodha', usable: true }];
-const facts = { providers: zerodha, pythonReady: true, watchlists: ['Swing'], estimate: null };
+const india = [{ id: 'india', usable: true, label: 'Zerodha' }];
+const facts = { providers: india, pythonReady: true, watchlists: ['Swing'], estimate: null };
 
 function withUniverse(patch: Partial<ScreenSpec['universe']>): ScreenSpec {
   const spec = fromPreset('near_high');
@@ -23,7 +23,7 @@ describe('screenReadiness', () => {
   });
 
   it('is blocked when the universe’s broker is not set up', () => {
-    const r = screenReadiness(withUniverse({ provider: 'zerodha' }), { ...facts, providers: [{ id: 'zerodha', usable: false }] });
+    const r = screenReadiness(withUniverse({ provider: 'india' }), { ...facts, providers: [{ id: 'india', usable: false, label: 'Zerodha' }] });
     expect(r.ready).toBe(false);
     expect(r.checks.some((c) => c.text.includes('Zerodha isn\'t set up'))).toBe(true);
   });

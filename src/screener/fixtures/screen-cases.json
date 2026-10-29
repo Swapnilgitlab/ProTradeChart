@@ -3,7 +3,7 @@
   "base": {
     "version": 1,
     "name": "Near 52-week high",
-    "universe": { "source": "instruments", "provider": "zerodha", "exchanges": ["NSE"] },
+    "universe": { "source": "instruments", "provider": "india", "exchanges": ["NSE"] },
     "filters": [{ "left": "dist_high_252", "op": ">=", "right": -0.05 }],
     "columns": ["close", "return_1", "volume"],
     "sort": { "column": "return_1", "descending": true }
@@ -49,7 +49,7 @@
         "name": "Near 52-week high",
         "universe": {
           "source": "instruments",
-          "provider": "zerodha",
+          "provider": "india",
           "exchanges": ["NSE"],
           "series": ["EQ"],
           "watchlist": null,
@@ -66,7 +66,7 @@
       }
     },
     {
-      "about": "a watchlist with no filters and no sort is a plain table; series keep their canonical order",
+      "about": "a watchlist with no filters and no sort is a plain table; series keep their canonical order; a screen saved under the namespace's old name (zerodha) reads as india",
       "patch": {
         "name": "  My list  ",
         "universe": { "source": "watchlist", "watchlist": " Swing ", "provider": "zerodha", "exchanges": ["BSE", "NSE", "BSE"], "series": ["SME", "EQ"], "max_symbols": 50 },
@@ -80,7 +80,7 @@
         "name": "My list",
         "universe": {
           "source": "watchlist",
-          "provider": "zerodha",
+          "provider": "india",
           "exchanges": ["BSE", "NSE"],
           "series": ["EQ", "SME"],
           "watchlist": "Swing",
@@ -90,7 +90,7 @@
         "filters": [],
         "columns": ["rs_126"],
         "sort": null,
-        "benchmark": "zerodha:NSE:NIFTY 500"
+        "benchmark": "india:NSE:NIFTY 500"
       }
     },
     {
@@ -110,7 +110,7 @@
         "name": "Near 52-week high",
         "universe": {
           "source": "instruments",
-          "provider": "zerodha",
+          "provider": "india",
           "exchanges": ["NSE"],
           "series": ["EQ"],
           "watchlist": null,

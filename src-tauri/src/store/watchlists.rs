@@ -476,15 +476,15 @@ pub fn set_section_collapsed(conn: &Connection, id: i64, collapsed: bool) -> rus
 
 const SEEDED_PREF: &str = "watchlists_seeded";
 
-/// The starter list shown on a fresh install — well-known NSE names through Zerodha, so a
-/// new user has something to click straight away once their account is connected. Runs once
-/// per database: deleting the list later doesn't bring it back.
+/// The starter list shown on a fresh install — well-known NSE names, so a new user has something
+/// to click straight away once a broker account is connected. Runs once per database: deleting the
+/// list later doesn't bring it back.
 const STARTER_SYMBOLS: &[(&str, &str)] = &[
-    ("zerodha:NSE:RELIANCE", "Reliance Industries"),
-    ("zerodha:NSE:TCS", "Tata Consultancy Services"),
-    ("zerodha:NSE:HDFCBANK", "HDFC Bank"),
-    ("zerodha:NSE:INFY", "Infosys"),
-    ("zerodha:NSE:NIFTY_50", "Nifty 50"),
+    ("india:NSE:RELIANCE", "Reliance Industries"),
+    ("india:NSE:TCS", "Tata Consultancy Services"),
+    ("india:NSE:HDFCBANK", "HDFC Bank"),
+    ("india:NSE:INFY", "Infosys"),
+    ("india:NSE:NIFTY_50", "Nifty 50"),
 ];
 
 pub fn seed_starter_list_once(conn: &mut Connection) -> rusqlite::Result<()> {
@@ -819,13 +819,13 @@ mod tests {
     fn the_flags_of_symbols_on_no_list_are_read_by_symbol() {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
-        set_symbol_flag(&conn, "zerodha:NSE:TCS", Some("green"), 1).unwrap();
-        set_symbol_flag(&conn, "zerodha:NSE:INFY", Some("red"), 1).unwrap();
-        set_symbol_flag(&conn, "zerodha:NSE:INFY", None, 2).unwrap();
-        let asked = ["zerodha:NSE:TCS", "zerodha:NSE:INFY", "zerodha:NSE:SBIN"].map(String::from);
+        set_symbol_flag(&conn, "india:NSE:TCS", Some("green"), 1).unwrap();
+        set_symbol_flag(&conn, "india:NSE:INFY", Some("red"), 1).unwrap();
+        set_symbol_flag(&conn, "india:NSE:INFY", None, 2).unwrap();
+        let asked = ["india:NSE:TCS", "india:NSE:INFY", "india:NSE:SBIN"].map(String::from);
         let flags = flags_of(&conn, &asked).unwrap();
         assert_eq!(flags.len(), 1, "a cleared or never-set flag is absent");
-        assert_eq!(flags["zerodha:NSE:TCS"], "green");
+        assert_eq!(flags["india:NSE:TCS"], "green");
     }
 
     #[test]

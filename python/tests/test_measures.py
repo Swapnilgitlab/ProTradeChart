@@ -73,6 +73,12 @@ class SharedCaseTests(unittest.TestCase):
                 spec = study.normalize_spec(patched(cases["base"], case["patch"]))
                 if "measures" in case:
                     self.assertEqual(spec["measures"], case["measures"])
+                if "provider" in case:
+                    self.assertEqual(spec["universe"]["provider"], case["provider"])
+                if "symbols" in case:
+                    self.assertEqual(spec["universe"]["symbols"], case["symbols"])
+                if "benchmark" in case:
+                    self.assertEqual(spec["benchmark"], case["benchmark"])
                 self.assertEqual(study.normalize_spec(spec), spec, "normalising twice changes nothing")
 
 
@@ -358,7 +364,7 @@ class LookAheadTests(unittest.TestCase):
 
 class EngineTests(unittest.TestCase):
     def setUp(self):
-        self.data = {"zerodha:NSE:WIN": ts.features_of(ts.doubler()), "zerodha:NSE:FLAT": ts.features_of(ts.wobble(3))}
+        self.data = {"india:NSE:WIN": ts.features_of(ts.doubler()), "india:NSE:FLAT": ts.features_of(ts.wobble(3))}
         self.study = study.ResearchStudy(ts.spec(), progress=False)
 
     def analyzed(self):
@@ -376,7 +382,7 @@ class EngineTests(unittest.TestCase):
             progress=False,
         )
         measured, _, result = self.analyzed()
-        f = self.data["zerodha:NSE:WIN"]
+        f = self.data["india:NSE:WIN"]
         pos = int(measured["pos"].iloc[0])
         d = f.get("dist_ema_21").to_numpy()[pos - 251: pos + 1]
         self.assertAlmostEqual(measured["measure_0"].iloc[0], np.mean((d >= 0) & (d <= 0.03)))
@@ -407,8 +413,8 @@ class EngineTests(unittest.TestCase):
         self.assertGreaterEqual(study.history_bars(study.normalize_spec(anchored)), 700)
 
     def test_a_measure_joins_the_significance_tests(self):
-        winners = {f"zerodha:NSE:W{i}": ts.features_of(ts.doubler() * (1 + i / 100)) for i in range(30)}
-        drifters = {f"zerodha:NSE:D{i}": ts.features_of(ts.wobble(i)) for i in range(30)}
+        winners = {f"india:NSE:W{i}": ts.features_of(ts.doubler() * (1 + i / 100)) for i in range(30)}
+        drifters = {f"india:NSE:D{i}": ts.features_of(ts.wobble(i)) for i in range(30)}
         self.data = {**winners, **drifters}
         measured, control, result = self.analyzed()
         test = result["measures"][0]["test"]

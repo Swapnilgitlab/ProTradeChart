@@ -75,7 +75,7 @@ class SharedCaseTests(unittest.TestCase):
 def spec(**changes):
     base = {
         "name": "Above the 50 EMA",
-        "universe": {"source": "instruments", "provider": "zerodha", "exchanges": ["NSE"]},
+        "universe": {"source": "instruments", "provider": "india", "exchanges": ["NSE"]},
         "filters": [{"left": "close", "op": ">", "right": "ema_50"}],
         "columns": ["close", "return_1"],
         "sort": {"column": "return_1", "descending": True},
@@ -110,7 +110,7 @@ def body(symbol, closes, volume=1e5):
 
 def latest(frame, s):
     """One symbol's (passed, not judged, values), as a whole run judges it."""
-    return screen.judge({"zerodha:NSE:X": frame}, s)["zerodha:NSE:X"][1:]
+    return screen.judge({"india:NSE:X": frame}, s)["india:NSE:X"][1:]
 
 
 class LatestBarTests(unittest.TestCase):
@@ -150,11 +150,11 @@ class LatestBarTests(unittest.TestCase):
 
 
 SERIES = {
-    "zerodha:NSE:UP": pd.Series(np.linspace(100, 300, len(DAYS)), index=DAYS),
-    "zerodha:NSE:FAST": pd.Series(np.concatenate([np.linspace(100, 200, len(DAYS) - 1), [260.0]]), index=DAYS),
-    "zerodha:NSE:DOWN": pd.Series(np.linspace(300, 100, len(DAYS)), index=DAYS),
+    "india:NSE:UP": pd.Series(np.linspace(100, 300, len(DAYS)), index=DAYS),
+    "india:NSE:FAST": pd.Series(np.concatenate([np.linspace(100, 200, len(DAYS) - 1), [260.0]]), index=DAYS),
+    "india:NSE:DOWN": pd.Series(np.linspace(300, 100, len(DAYS)), index=DAYS),
     # Stopped trading a month before the others: never judged on its old bar.
-    "zerodha:NSE:HALTED": pd.Series(np.linspace(100, 300, len(DAYS) - 22), index=DAYS[:-22]),
+    "india:NSE:HALTED": pd.Series(np.linspace(100, 300, len(DAYS) - 22), index=DAYS[:-22]),
 }
 
 
@@ -177,7 +177,7 @@ class RunTests(Case):
             200,
             [
                 {"symbol": s, "name": s.split(":")[-1].title(), "exchange": "NSE", "kind": "EQUITY", "expiry": None}
-                for s in [*SERIES, "zerodha:NSE:GONE", "zerodha:NSE:SGBAUG28V-GB"]
+                for s in [*SERIES, "india:NSE:GONE", "india:NSE:SGBAUG28V-GB"]
             ],
         ),
         "/v1/bars": bars_route,
@@ -202,7 +202,7 @@ class RunTests(Case):
         data = posted[0]["data"]
         self.assertEqual(data["columns"], ["close", "return_1", "ema_50"])
         # The day's biggest gainer first; the falling stock and the halted one don't match.
-        self.assertEqual([r["symbol"] for r in data["rows"]], ["zerodha:NSE:FAST", "zerodha:NSE:UP"])
+        self.assertEqual([r["symbol"] for r in data["rows"]], ["india:NSE:FAST", "india:NSE:UP"])
         self.assertEqual(data["rows"][0]["name"], "Fast")
         self.assertEqual(data["rows"][0]["date"], "2025-06-30")
         self.assertEqual(data["rows"][0]["values"][0], 260.0)
@@ -215,7 +215,7 @@ class RunTests(Case):
         self.assertEqual({w["code"] for w in data["warnings"]}, {"load_failed", "stale"})
         # A bond on the equity list is never fetched.
         fetched = {r["query"]["symbol"] for r in self.stub.requests if r["path"] == "/v1/bars"}
-        self.assertNotIn("zerodha:NSE:SGBAUG28V-GB", fetched)
+        self.assertNotIn("india:NSE:SGBAUG28V-GB", fetched)
 
     def test_the_universe_is_offered_for_a_quote_top_up_before_the_historical_fetch(self):
         out = io.StringIO()
@@ -223,7 +223,7 @@ class RunTests(Case):
             screen.Screen(spec()).run(today=TODAY)
         synced = self.stub.posted("/v1/bars/sync")
         self.assertEqual(len(synced), 1)
-        self.assertEqual(set(synced[0]["symbols"]), set(SERIES) | {"zerodha:NSE:GONE"}, "the bond is never offered either")
+        self.assertEqual(set(synced[0]["symbols"]), set(SERIES) | {"india:NSE:GONE"}, "the bond is never offered either")
         self.assertEqual(synced[0]["interval"], "D")
         self.assertIn("already up to date", out.getvalue())
 
@@ -231,7 +231,7 @@ class RunTests(Case):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             before = screen.Screen(spec()).run(today=TODAY)
         self.stub.requests.clear()
-        held = {s for s in SERIES if s != "zerodha:NSE:DOWN"}
+        held = {s for s in SERIES if s != "india:NSE:DOWN"}
         self.stub.posts["/v1/panel"] = lambda p: (
             200,
             panel_bytes([(s, body(s, SERIES[s]) if s in held else None, s in held) for s in p["symbols"]]),
@@ -239,8 +239,8 @@ class RunTests(Case):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             after = screen.Screen(spec()).run(today=TODAY)
         fetched = {r["query"]["symbol"] for r in self.stub.requests if r["path"] == "/v1/bars"}
-        self.assertEqual(fetched, {"zerodha:NSE:DOWN", "zerodha:NSE:GONE"}, "only what the store lacks")
-        self.assertEqual(set(self.stub.posted("/v1/bars/sync")[0]["symbols"]), {"zerodha:NSE:DOWN", "zerodha:NSE:GONE"})
+        self.assertEqual(fetched, {"india:NSE:DOWN", "india:NSE:GONE"}, "only what the store lacks")
+        self.assertEqual(set(self.stub.posted("/v1/bars/sync")[0]["symbols"]), {"india:NSE:DOWN", "india:NSE:GONE"})
         for key in ("rows", "columns", "warnings"):
             self.assertEqual(after[key], before[key], key)
         for key in ("symbols_requested", "symbols_loaded", "symbols_failed", "symbols_stale", "matched", "as_of"):
@@ -260,7 +260,7 @@ class RunTests(Case):
                 data = screen.Screen(spec()).run(today=TODAY)
             finally:
                 screen.MAX_ROWS = old
-        self.assertEqual([r["symbol"] for r in data["rows"]], ["zerodha:NSE:FAST"])
+        self.assertEqual([r["symbol"] for r in data["rows"]], ["india:NSE:FAST"])
         self.assertEqual(data["meta"]["matched"], 2)
         self.assertIn("truncated", {w["code"] for w in data["warnings"]})
 
@@ -365,13 +365,13 @@ class SnapshotRuleTests(unittest.TestCase):
                 "volume": [1.0, 2.0, 3.0],
                 "traded": pd.to_datetime(["2025-06-30 15:29", "2025-06-30 15:29", "2025-06-20 15:29"]).tz_localize("Asia/Kolkata"),
             },
-            index=["zerodha:NSE:A", "zerodha:NSE:NOPREV", "zerodha:NSE:SUSPENDED"],
+            index=["india:NSE:A", "india:NSE:NOPREV", "india:NSE:SUSPENDED"],
         )
         quotes.attrs["session"] = session
         frames = screen.snapshot_frames(quotes)
-        self.assertEqual(list(frames), ["zerodha:NSE:A"])
-        self.assertEqual(list(frames["zerodha:NSE:A"]["close"]), [10.0, 10.5])
-        self.assertEqual(frames["zerodha:NSE:A"].index[-1], pd.Timestamp("2025-06-30"))
+        self.assertEqual(list(frames), ["india:NSE:A"])
+        self.assertEqual(list(frames["india:NSE:A"]["close"]), [10.0, 10.5])
+        self.assertEqual(frames["india:NSE:A"].index[-1], pd.Timestamp("2025-06-30"))
         quotes.attrs["session"] = None
         self.assertEqual(screen.snapshot_frames(quotes), {}, "pre-open: no quote is a day's bar")
 
@@ -385,7 +385,7 @@ def random_series(seed: int, n_symbols: int = 14) -> dict:
         n = len(DAYS) if i % 7 else len(DAYS) - 30  # one in seven stopped trading a while ago
         close = 100 * np.exp(np.cumsum(rng.normal(0, 0.02, n)))
         opened = np.concatenate([[close[0]], close[:-1]]) * np.exp(rng.normal(0, 0.01, n))
-        out[f"zerodha:NSE:S{i:02d}"] = pd.DataFrame(
+        out[f"india:NSE:S{i:02d}"] = pd.DataFrame(
             {
                 "open": opened,
                 "high": np.maximum(opened, close) * 1.01,

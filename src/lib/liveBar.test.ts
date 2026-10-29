@@ -137,6 +137,19 @@ describe('LiveBarBuilder', () => {
     expect(bar.high).toBe(105);
   });
 
+  it('gives a daily bar the polled quote’s own day range, which samples alone would miss', () => {
+    const b = new LiveBarBuilder({ tf: { kind: 'day' }, sessionOpenMin: OPEN, seed: null });
+    const quote = (ltp: number, dayOpen: number, dayHigh: number, dayLow: number) => ({ ltp, ltt: null, volume: null, dayOpen, dayHigh, dayLow });
+    expect(b.onTick(quote(101, 98, 104, 97), at(30))).toMatchObject({ open: 98, high: 104, low: 97, close: 101 });
+    expect(b.onTick(quote(103, 98, 106, 96), at(60))).toMatchObject({ open: 98, high: 106, low: 96, close: 103 });
+  });
+
+  it('never lets a day range reshape an intraday bar', () => {
+    const b = build();
+    const bar = b.onTick({ ltp: 101, ltt: null, volume: null, dayOpen: 90, dayHigh: 110, dayLow: 80 }, at(1))!;
+    expect(bar).toMatchObject({ open: 101, high: 101, low: 101, close: 101 });
+  });
+
   it('uses the tick timestamp when it agrees with the clock', () => {
     const b = build();
     // Traded at 09:19 but delivered at 09:23 (a delayed link): the trade belongs to the 09:15 bar.

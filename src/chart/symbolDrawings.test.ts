@@ -57,8 +57,8 @@ describe('SymbolDrawings', () => {
 
   it('shows a symbol’s stored drawings when the chart opens', async () => {
     const chart = fakeChart(['from-layout']);
-    const db = fakeStore({ 'zerodha:NSE:TCS': ['line'] });
-    await new SymbolDrawings(chart.port, db.store).start('zerodha:NSE:TCS');
+    const db = fakeStore({ 'india:NSE:TCS': ['line'] });
+    await new SymbolDrawings(chart.port, db.store).start('india:NSE:TCS');
     expect(chart.port.names()).toEqual(['line']);
     expect(db.saves).toEqual([]);
   });
@@ -66,60 +66,60 @@ describe('SymbolDrawings', () => {
   it('adopts a layout’s drawings for a symbol that has none stored, once', async () => {
     const chart = fakeChart(['from-layout']);
     const db = fakeStore();
-    await new SymbolDrawings(chart.port, db.store).start('zerodha:NSE:TCS');
+    await new SymbolDrawings(chart.port, db.store).start('india:NSE:TCS');
     expect(chart.port.names()).toEqual(['from-layout']);
-    expect(db.stored('zerodha:NSE:TCS')).toEqual(['from-layout']);
+    expect(db.stored('india:NSE:TCS')).toEqual(['from-layout']);
     // A chart with no drawings stores nothing: "never had any" stays distinguishable.
     const empty = fakeStore();
-    await new SymbolDrawings(fakeChart().port, empty.store).start('zerodha:NSE:INFY');
-    expect(empty.stored('zerodha:NSE:INFY')).toBeNull();
+    await new SymbolDrawings(fakeChart().port, empty.store).start('india:NSE:INFY');
+    expect(empty.stored('india:NSE:INFY')).toBeNull();
   });
 
   it('swaps drawings when the chart changes symbol, keeping the old symbol’s edits', async () => {
     const chart = fakeChart();
-    const db = fakeStore({ 'zerodha:NSE:INFY': ['infy-line'] });
+    const db = fakeStore({ 'india:NSE:INFY': ['infy-line'] });
     const sd = new SymbolDrawings(chart.port, db.store);
-    await sd.start('zerodha:NSE:TCS');
+    await sd.start('india:NSE:TCS');
     chart.draw('tcs-line');
     sd.edited();
-    await sd.switchTo('zerodha:NSE:INFY');
+    await sd.switchTo('india:NSE:INFY');
     expect(chart.port.names()).toEqual(['infy-line']);
-    expect(db.stored('zerodha:NSE:TCS')).toEqual(['tcs-line']);
+    expect(db.stored('india:NSE:TCS')).toEqual(['tcs-line']);
     // A symbol with nothing stored shows a clean chart, not the last symbol's drawings.
-    await sd.switchTo('zerodha:NSE:HFCL');
+    await sd.switchTo('india:NSE:HFCL');
     expect(chart.port.names()).toEqual([]);
-    await sd.switchTo('zerodha:NSE:TCS');
+    await sd.switchTo('india:NSE:TCS');
     expect(chart.port.names()).toEqual(['tcs-line']);
   });
 
   it('saves once an edit settles, and a cleared symbol stays cleared', async () => {
     const chart = fakeChart();
-    const db = fakeStore({ 'zerodha:NSE:TCS': ['a'] });
+    const db = fakeStore({ 'india:NSE:TCS': ['a'] });
     const sd = new SymbolDrawings(chart.port, db.store);
-    await sd.start('zerodha:NSE:TCS');
+    await sd.start('india:NSE:TCS');
     chart.draw('b');
     sd.edited();
     sd.edited();
     expect(db.saves).toEqual([]);
     vi.advanceTimersByTime(SAVE_DELAY_MS);
     await settle();
-    expect(db.saves).toEqual([['zerodha:NSE:TCS', ['a', 'b']]]);
+    expect(db.saves).toEqual([['india:NSE:TCS', ['a', 'b']]]);
     chart.clear();
     sd.edited();
     await sd.flush();
-    expect(db.stored('zerodha:NSE:TCS')).toEqual([]);
+    expect(db.stored('india:NSE:TCS')).toEqual([]);
   });
 
   it('never takes its own replacement of the drawings for an edit', async () => {
     const chart = fakeChart();
-    const db = fakeStore({ 'zerodha:NSE:TCS': ['a'] });
+    const db = fakeStore({ 'india:NSE:TCS': ['a'] });
     const sd = new SymbolDrawings(chart.port, { ...db.store, load: db.store.load });
     const apply = chart.port.fromJSON;
     chart.port.fromJSON = (doc) => {
       apply(doc);
       sd.edited(); // Vela reporting the load as a change
     };
-    await sd.start('zerodha:NSE:TCS');
+    await sd.start('india:NSE:TCS');
     vi.advanceTimersByTime(SAVE_DELAY_MS);
     await settle();
     expect(db.saves).toEqual([]);
@@ -127,11 +127,11 @@ describe('SymbolDrawings', () => {
 
   it('ignores a load that finishes after the chart has moved on', async () => {
     const chart = fakeChart();
-    const db = fakeStore({ 'zerodha:NSE:TCS': ['tcs'], 'zerodha:NSE:INFY': ['infy'] });
+    const db = fakeStore({ 'india:NSE:TCS': ['tcs'], 'india:NSE:INFY': ['infy'] });
     const sd = new SymbolDrawings(chart.port, db.store);
     const release = db.holdLoads();
-    const first = sd.start('zerodha:NSE:TCS');
-    const second = sd.switchTo('zerodha:NSE:INFY');
+    const first = sd.start('india:NSE:TCS');
+    const second = sd.switchTo('india:NSE:INFY');
     release();
     await Promise.all([first, second]);
     expect(chart.port.names()).toEqual(['infy']);
@@ -139,17 +139,17 @@ describe('SymbolDrawings', () => {
 
   it('follows another chart’s edits to the same symbol, unless it has edits of its own', async () => {
     const chart = fakeChart();
-    const db = fakeStore({ 'zerodha:NSE:TCS': ['a'] });
+    const db = fakeStore({ 'india:NSE:TCS': ['a'] });
     const sd = new SymbolDrawings(chart.port, db.store);
-    await sd.start('zerodha:NSE:TCS');
-    await db.store.save('zerodha:NSE:TCS', JSON.stringify({ version: 1, drawings: [{ id: 'a' }, { id: 'elsewhere' }] }));
-    await sd.remoteChanged('zerodha:NSE:INFY');
+    await sd.start('india:NSE:TCS');
+    await db.store.save('india:NSE:TCS', JSON.stringify({ version: 1, drawings: [{ id: 'a' }, { id: 'elsewhere' }] }));
+    await sd.remoteChanged('india:NSE:INFY');
     expect(chart.port.names()).toEqual(['a']);
-    await sd.remoteChanged('zerodha:NSE:TCS');
+    await sd.remoteChanged('india:NSE:TCS');
     expect(chart.port.names()).toEqual(['a', 'elsewhere']);
     chart.draw('mine');
     sd.edited();
-    await sd.remoteChanged('zerodha:NSE:TCS');
+    await sd.remoteChanged('india:NSE:TCS');
     expect(chart.port.names()).toEqual(['a', 'elsewhere', 'mine']);
   });
 
@@ -157,9 +157,9 @@ describe('SymbolDrawings', () => {
     const errors: string[] = [];
     const chart = fakeChart(['x']);
     const sd = new SymbolDrawings(chart.port, { load: () => Promise.reject(new Error('locked')), save: () => Promise.reject(new Error('disk full')) }, (m) => errors.push(m));
-    await sd.start('zerodha:NSE:TCS');
+    await sd.start('india:NSE:TCS');
     sd.edited();
     await sd.flush();
-    expect(errors).toEqual(['Your drawings on zerodha:NSE:TCS couldn’t be loaded: locked', 'Your drawings on zerodha:NSE:TCS couldn’t be saved: disk full']);
+    expect(errors).toEqual(['Your drawings on india:NSE:TCS couldn’t be loaded: locked', 'Your drawings on india:NSE:TCS couldn’t be saved: disk full']);
   });
 });

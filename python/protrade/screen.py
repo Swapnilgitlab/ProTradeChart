@@ -102,9 +102,11 @@ def normalize_screen(spec) -> dict:
     source = _given(u.get("source"), "instruments")
     if source not in UNIVERSE_SOURCES:
         raise ScreenError("universe.source must be instruments, watchlist or symbols.")
-    provider = _given(u.get("provider"), "zerodha")
+    provider = _given(u.get("provider"), client.INDIA)
+    if isinstance(provider, str):
+        provider = client.canonical_provider(provider)
     if provider not in PROVIDERS:
-        raise ScreenError("universe.provider must be zerodha.")
+        raise ScreenError("universe.provider must be india.")
     exchanges = _given(u.get("exchanges"), ["NSE"])
     if not isinstance(exchanges, list) or not exchanges or any(e not in EXCHANGES for e in exchanges):
         raise ScreenError("universe.exchanges must list one or more of NSE, BSE.")
@@ -116,7 +118,7 @@ def normalize_screen(spec) -> dict:
         raise ScreenError("universe.watchlist must name a watchlist.")
     symbols = _given(u.get("symbols"), [])
     if not isinstance(symbols, list) or any(not isinstance(s, str) or ":" not in s for s in symbols):
-        raise ScreenError("universe.symbols must be a list of symbols like zerodha:NSE:RELIANCE.")
+        raise ScreenError("universe.symbols must be a list of symbols like india:NSE:RELIANCE.")
     if source == "symbols" and not symbols:
         raise ScreenError("universe.symbols needs at least one symbol.")
     if len(symbols) > MAX_SYMBOLS:
@@ -151,7 +153,7 @@ def normalize_screen(spec) -> dict:
             "exchanges": list(dict.fromkeys(exchanges)),
             "series": [x for x in SERIES if x in series],
             "watchlist": watchlist,
-            "symbols": list(dict.fromkeys(s.strip() for s in symbols)),
+            "symbols": list(dict.fromkeys(client.canonical_symbol_prefix(s.strip()) for s in symbols)),
             "max_symbols": max_symbols,
         },
         "filters": filters,
@@ -174,12 +176,12 @@ def normalize_screen(spec) -> dict:
 
     benchmark = spec.get("benchmark")
     if benchmark is not None and (not isinstance(benchmark, str) or ":" not in benchmark):
-        raise ScreenError("benchmark must be a symbol like zerodha:NSE:NIFTY_500, or null.")
-    out["benchmark"] = benchmark.strip() if isinstance(benchmark, str) else None
+        raise ScreenError("benchmark must be a symbol like india:NSE:NIFTY_500, or null.")
+    out["benchmark"] = client.canonical_symbol_prefix(benchmark.strip()) if isinstance(benchmark, str) else None
     if out["benchmark"] is None:
         needing = [n for n in output_columns(out) if feat.needs_benchmark(n)]
         if needing:
-            raise ScreenError(f"{', '.join(needing)} compare against an index: set a benchmark (e.g. zerodha:NSE:NIFTY_500).")
+            raise ScreenError(f"{', '.join(needing)} compare against an index: set a benchmark (e.g. india:NSE:NIFTY_500).")
     return out
 
 
@@ -328,14 +330,15 @@ class Screen:
             rows = client.get("/v1/watchlist", name=u["watchlist"])["symbols"]
             chosen = []
             for row in rows:
-                if row["symbol"].split(":", 1)[0].lower() in PROVIDERS:
-                    chosen.append(row["symbol"])
+                if client.canonical_provider(row["symbol"].split(":", 1)[0]) in PROVIDERS:
+                    symbol = client.canonical_symbol_prefix(row["symbol"])
+                    chosen.append(symbol)
                     if row.get("name"):
-                        self.names[row["symbol"]] = row["name"]
+                        self.names[symbol] = row["name"]
             if len(chosen) < len(rows):
-                self.warn("watchlist_other", f"{len(rows) - len(chosen)} symbols on the watchlist aren't Zerodha symbols and were left out.")
+                self.warn("watchlist_other", f"{len(rows) - len(chosen)} symbols on the watchlist aren't Indian market symbols and were left out.")
             if not chosen:
-                raise client.NotFoundError(f"The watchlist {u['watchlist']!r} has no Zerodha symbols on it.")
+                raise client.NotFoundError(f"The watchlist {u['watchlist']!r} has no Indian market symbols on it.")
         else:
             rows = []
             for exchange in u["exchanges"]:
@@ -346,7 +349,7 @@ class Screen:
             self.names.update({symbol: name for symbol, name in picked if name})
             if not chosen:
                 raise client.NotFoundError(
-                    f"{u['provider'].title()}'s instrument list has no equities for {', '.join(u['exchanges'])}. "
+                    f"The broker's instrument list has no equities for {', '.join(u['exchanges'])}. "
                     "Open Data providers and update the instrument list."
                 )
             if len(u["exchanges"]) > 1:

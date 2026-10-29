@@ -13,18 +13,20 @@ are drawn by [Vela](https://luxalgo.com/vela).
                                 │      Tauri IPC (lib/ipc.ts)                  │ │
                                 ▼                                              ▼ ▼
                           ┌──────────── Rust backend (src-tauri) ────────────────────┐
-                          │ commands.rs ─ zerodha/              ── broker API         │
+                          │ market_commands.rs ─ zerodha/ │ fyers/ ── broker APIs      │
                           │      └────── store/* ── SQLite (charting.db)             │
                           └───────────────────────────────────────────────────────────┘
 ```
 
-Zerodha sits behind Rust: its commands live in `zerodha_commands.rs` / `zerodha/` (the provider settings in
-`provider_commands.rs`), and its live feed is a single WebSocket owned by Rust that pushes `zerodha-tick` /
-`zerodha-status` events to every window.
+The brokers sit behind Rust. Zerodha's commands live in `zerodha_commands.rs` / `zerodha/`, FYERS's in `fyers_commands.rs` /
+`fyers/` (the provider settings in `provider_commands.rs`), and `market_commands.rs` routes the Indian market's data calls to
+whichever of them serves `india:` symbols (see "Broker-neutral Indian symbols"). Zerodha's live feed is a single WebSocket
+owned by Rust that pushes `zerodha-tick` / `zerodha-status` events to every window; FYERS's charts are kept live by a Rust
+poller of its quotes, which pushes `fyers-tick` / `fyers-status`.
 
 ## Symbols and providers
 
-A chart symbol is always `provider:TICKER` (`zerodha:NSE:RELIANCE`, `csv:MY_DATA`). The prefix is what
+A chart symbol is always `provider:TICKER` (`india:NSE:RELIANCE`, `csv:MY_DATA`). The prefix is what
 selects the data source: it's Vela's own routing rule, and `lib/symbols.ts` holds the helpers for it.
 
 A provider is a Vela [`DataProvider`](../node_modules/@luxalgo/vela/dist/DataProvider-DLeFs1gE.d.ts): an object with
@@ -33,26 +35,57 @@ registers one shared instance of each, so search and watchlist quotes use the sa
 
 | Provider | Where | Notes |
 | --- | --- | --- |
-| `zerodha` | `data/providers/zerodha.ts` + `src-tauri/src/zerodha/` | The user's own Kite Connect account. All calls go through Rust, which holds the credentials. |
+| `india` | `data/providers/india.ts` + `market_commands.rs` → `src-tauri/src/zerodha/` or `src-tauri/src/fyers/` | Indian markets, from the user's own Kite Connect or FYERS account, whichever serves them. All calls go through Rust, which holds the credentials. |
 | `csv` | `data/providers/csv.ts` + `src-tauri/src/store/datasets.rs` | User-imported files, served from SQLite. |
 
 ### How a symbol is shown
 
-The stored and canonical form of a broker symbol spells its exchange (`zerodha:NSE:HFCL`), so a watchlist row, an alert
+The stored and canonical form of a broker symbol spells its exchange (`india:NSE:HFCL`), so a watchlist row, an alert
 and a chart always agree on one string. What people see is shorter, and there are three forms in `lib/symbols.ts`:
 
-- `normalizeSymbol` — the canonical form. A broker ticker with no exchange means NSE, so `zerodha:HFCL` becomes
-  `zerodha:NSE:HFCL`. Everything that comes *back from Vela* passes through it.
+- `normalizeSymbol` — the canonical form. A broker ticker with no exchange means NSE, so `india:HFCL` becomes
+  `india:NSE:HFCL`. Everything that comes *back from Vela* passes through it.
 - `displayTicker` — for the app's own screens (watchlist, tabs, alerts, search, script results): no data source, and no
   `NSE:`. Other exchanges stay, because `BSE:RELIANCE` is a different instrument from `RELIANCE`.
 - `chartSymbol` — the form a chart is *given*. Vela writes a chart's title, status line and watermark from the ticker part
-  of the symbol it holds, so a chart holding `zerodha:HFCL` shows `HFCL`. The backends read a bare ticker as NSE, so it
+  of the symbol it holds, so a chart holding `india:HFCL` shows `HFCL`. The backends read a bare ticker as NSE, so it
   loads the same instrument. `ChartView` applies it at every point a symbol goes into Vela, and `withChartSymbols`
   (`features/layouts`) does the same for the charts inside a layout as it opens.
 
-Vela also prints the data source in the status line (`· ZERODHA · 1D`), from its provider registry rather than from the
+Vela also prints the data source in the status line (`· INDIAN MARKETS · 1D`), from its provider registry rather than from the
 symbol. `chart/statuslineMeta.ts` removes the source and keeps the timeframe, and puts the full symbol in the hover text.
 It watches Vela's `.vela-sl-meta` element, so a Vela upgrade that renames that class only brings the source name back.
+
+### Broker-neutral Indian symbols
+
+Two brokers can serve Indian market data, Zerodha and FYERS, and a symbol names neither: every Indian symbol is
+`india:EXCHANGE:SYMBOL`, in Kite's spelling (`india:NSE:NIFTY_50`, `india:NSE:HFCL-BE`, `india:NFO:NIFTY26OCTFUT`). So a
+watchlist, an alert, a drawing, a layout, a screen and a Study survive a change of broker. The broker is a setting.
+
+- **Which broker.** `symbols::india_broker` (Rust) decides, and the webview reads its answer (`market_source`,
+  `activeBroker()` in `data/providerStatus.ts`): the one the user picked (`ui_preferences['india.source']`, the **Indian market
+  data from** picker in Data providers, shown once two are set up), else the one set up and switched on (Zerodha first),
+  else Zerodha. Never two: when the broker changes, by a pick or because a setting change made another the one in use
+  (`market_commands::after_broker_settings_changed`), the session's `india:` series are dropped from `BarMemory`, FYERS's
+  quote cache is cleared, a market load in progress is stopped, and every window hears `market-source-changed` and rebuilds
+  its chart tabs from their own state (Vela ignores a switch to the symbol a chart already shows). Two brokers' bars are
+  never stitched into one series.
+- **Routing.** One Vela provider, `india` (`data/providers/india.ts`), calls `market_fetch_bars` / `market_quotes` /
+  `market_search_instruments`, which `market_commands.rs` hands to the broker's own module; it needs the broker itself only for
+  the timeframe plan (`toBrokerPlan`) and the live source. The Python API, the market-data job and the Studies' estimate
+  dispatch the same way. Each broker keeps its own instrument table (`zerodha_instruments`, `fyers_instruments`) under the
+  app's tickers; `store/instrument_list.rs` holds the shared lookups (`resolve`, `search`, `list`), and `Source::for_provider`
+  picks the active broker's table. An index both brokers punctuate differently (`NIFTY_MIDCAP_100`, `NIFTYMIDCAP100`) is
+  found by its name without the punctuation.
+- **Old spellings.** `zerodha:` (the namespace's name while Zerodha was the only broker) and `fyers:` read as `india:` at every
+  input: `splitSymbol` (TypeScript), `symbols::canonical_provider` (Rust), `client.canonical_provider` (Python), the spec
+  validators, and a `zerodha` Vela alias registered with no symbol list (for a Pine script's `request.security("zerodha:…")`).
+- **The migration.** `store/india_symbols.rs` rewrites stored `zerodha:` symbols to `india:` on the first launch after the
+  change, after `VACUUM INTO` a copy beside the database (`charting.before-india.db`; an older build would drop `india:` symbols
+  on its next layout save, so the copy is the way back). Plain symbol columns are updated row by row (an `india:` twin wins);
+  JSON documents (layouts, specs, results) go through a token rewriter that rewrites whole string tokens only (`zerodha:…`, and
+  `"provider": "zerodha"`), never text inside a string such as Pine source, and never respells a number. A run's
+  `data_source` names the broker that served it and is left alone. Each later launch repeats the cheap part of the pass.
 
 ### Symbols from a source the app no longer has
 
@@ -62,8 +95,8 @@ so such symbols stay where they were saved, and the handling is generic, keyed o
 - `isSupportedSymbol` (`lib/symbols.ts`) is false for them. Opening a layout moves each affected tab, and each affected
   cell of a grid, to the starter symbol and says so (`withoutUnsupportedSymbols`, in `Workspace`); clicking such a
   watchlist row says the source is gone; their quotes and alerts stay empty. Saving the layout again drops them.
-- **Defaults.** A bare ticker means Zerodha, naming NSE (`DEFAULT_PROVIDER`); a brand-new chart and the starter
-  watchlist are NSE names too, though they need the user's own account connected to load. The TradingView watchlist
+- **Defaults.** A bare ticker means the Indian namespace, naming NSE (`DEFAULT_PROVIDER`); a brand-new chart and the starter
+  watchlist are NSE names too, though they need the user's own broker account connected to load. The TradingView watchlist
   importer maps NSE/BSE with a broker set up; everything else is reported as skipped.
 - **Company names** come only from the broker's instrument list (`store/symbol_names.rs`); imported data has none.
 
@@ -73,7 +106,7 @@ Don't add a source that reads an unofficial endpoint.
 
 The three free crypto providers were Vela's own bundled `DataProvider`s, fetched directly from the webview over HTTPS
 and WebSocket rather than through Rust — the only providers that ever worked that way. They were removed at the
-owner's request, leaving Zerodha as the only live data source (CSV import is still free, but needs a file). They were
+owner's request, leaving Zerodha as the only live data source then (FYERS has since been added; CSV import is still free, but needs a file). They were
 hard-deleted: there's no purge job, and nothing tracks them as a special case.
 
 - **Removed.** The imports (`@luxalgo/vela/providers/{binance,coinbase,hyperliquid}`), their shared instances and
@@ -91,8 +124,9 @@ hard-deleted: there's no purge job, and nothing tracks them as a special case.
 - **Python.** `pyapi`'s `WATCHLIST_PROVIDERS` (routes.rs) already only ever accepted `zerodha` and `csv`; the free
   crypto providers were never readable from a script, so nothing there changed.
 
-Don't bring back a free crypto source without the owner's say-so, and don't widen `pyapi`'s `WATCHLIST_PROVIDERS` or
-`ProviderId` beyond `zerodha`/`csv` without updating `DEFAULT_PROVIDER` and the starter symbols to match.
+Don't bring back a free crypto source without the owner's say-so, and don't widen the symbol namespaces (`ProviderId`,
+`symbols::PROVIDERS` in Rust) beyond `india`/`csv` without updating `DEFAULT_PROVIDER` and the starter symbols to match. A new
+Indian broker is not a new namespace: it serves `india:`.
 
 ### History on demand
 
@@ -169,7 +203,7 @@ ProTradeChart updates itself through `tauri-plugin-updater`; the pieces:
    milliseconds. Report failures with `notify('error', …)` from `data/events.ts` (it becomes a toast) and return `[]`.
 2. Add it to `instances` and `providerFactories` in `data/providers/index.ts`, and add its id to `ProviderId` and
    `PROVIDER_LABELS` in `lib/symbols.ts`.
-3. Search: write a results function beside `zerodhaResults`/`importedResults` in `data/search.ts` and call it from
+3. Search: write a results function beside `indiaResults`/`importedResults` in `data/search.ts` and call it from
    `searchSymbols`. If it needs the network from Rust (to dodge CORS, or to cache), add a command in
    `src-tauri/src/commands.rs` and a wrapper in `lib/ipc.ts`.
 4. Add tests for anything that parses or plans a request.
@@ -199,30 +233,51 @@ a new provider appears there with no UI work.
 
 ### Adding a broker
 
-Zerodha is the worked example: `zerodha/` has the layers a broker needs, and its module docs say where Kite is unusual (a
-login every morning, a bad key refused at the WebSocket handshake). Two things are meant to be shared: `throttle.rs`
-(request pacing) and, on the webview side, `data/feedHub.ts` (fans one Rust socket's ticks out to the charts that want
-them). A second streaming broker would be the moment to extract `zerodha/feed.rs`'s connect/backoff/refcount loop.
+Zerodha and FYERS are the worked examples: `zerodha/` and `fyers/` have the layers a broker needs, and their module docs say
+where each is unusual (Kite: a login every morning, a bad key refused at the WebSocket handshake; FYERS: limits that block an
+account for the day, a refresh token renewed with a PIN, no documented live feed). Shared: `throttle.rs` (request pacing, with
+a gap that can change), `login_callback.rs` (the loopback login redirect, one fixed port per broker), `store/instrument_list.rs`
+(the instrument tables' lookups) and, on the webview side, `data/feedHub.ts` (fans one Rust feed's ticks out to the charts
+that want them). An Indian broker serves the `india:` namespace; it doesn't get one of its own.
 
 1. **Spec.** Add a `ProviderSpec` to `PROVIDERS` in `providers.rs`: fields (say `apiKey` non-secret, `accessToken` secret),
-   `category: "broker"`, and its capabilities. The settings screen now shows it.
-2. **Backend.** Add `src-tauri/src/<broker>/` beside `zerodha/`. Keep the layers the same: a pure `protocol.rs` (request
-   bodies, response parsing, error classification, all unit-tested), an `instruments.rs` if the broker needs a symbol →
-   id table, a `client.rs` for HTTP (paced, with retry on rate limits, tested against a local mock server), and a
-   `feed.rs` if it streams. Read credentials with `providers::credential`; never accept them from the frontend per call.
-3. **Commands.** Expose `<broker>_fetch_bars`, `_search_instruments`, `_quotes` and `_subscribe`/`_unsubscribe` in
-   a `<broker>_commands.rs` beside `zerodha_commands.rs`, register them in `lib.rs`, and add typed wrappers to `lib/ipc.ts`.
-4. **Symbols.** Use `provider:EXCHANGE:SYMBOL` (`zerodha:NSE:RELIANCE`), with the exchange codes Zerodha uses, so tickers
-   stay consistent across Indian brokers. Add the id to `ProviderId` and `PROVIDER_LABELS` in
-   `lib/symbols.ts`.
-5. **Provider.** Add `data/providers/<broker>.ts` (a Vela `DataProvider`). Reuse `data/providers/common.ts` for range
-   sizing and bar conversion, `lib/timeframes.ts` for resampling (add a `to<Broker>Plan` next to `toKitePlan`), and
-   `lib/liveBar.ts` if the broker streams ticks rather than candles. Register it in `data/providers/index.ts`.
-6. **Search and quotes.** Add a results function to `data/search.ts` and a batch to `data/quotes.ts`, both gated on
-   `isProviderUsable`.
-7. **Verify against the real service** with deliberately fake credentials: real error responses are the cheapest way to
+   `category: "broker"`, and its capabilities. The settings screen now shows it. Add it to `symbols::Broker` (and `BrokerId` /
+   `BROKER_LABELS` in `lib/symbols.ts`); the compiler then names every `match` that needs an arm (`market_commands.rs`, the
+   Python API's backend, the market-data job, the Studies' estimate, `instrument_list::Source`).
+2. **Backend.** Add `src-tauri/src/<broker>/` beside `zerodha/` and `fyers/`. Keep the layers the same: a pure `protocol.rs`
+   (request bodies, response parsing, error classification, all unit-tested), an `instruments.rs` that maps the broker's
+   instrument list to the app's tickers (Kite's spelling) into its own table, a `client.rs` for HTTP (paced, with retry on
+   rate limits, tested against a local mock server), and a `feed.rs` if it streams. Read credentials with
+   `providers::credential`; never accept them from the frontend per call.
+3. **Commands.** Put the data calls (`fetch_bars`, `quotes`, `search_instruments`) in a `<broker>_commands.rs` as plain
+   functions `market_commands.rs` calls, plus the broker's own commands (status, login, `_subscribe`/`_unsubscribe`);
+   register them in `lib.rs`, and add typed wrappers to `lib/ipc.ts`.
+4. **Symbols.** Map the broker's own instruments to the app's `EXCHANGE:SYMBOL` tickers, in Kite's spelling (`NSE:RELIANCE`,
+   `NSE:NIFTY_50`, `NFO:NIFTY26OCTFUT`), so every stored `india:` symbol finds the same instrument through either broker.
+   Pin the mapping with a live test against the real list (`fyers::live` checks every catalogued index).
+5. **Webview.** Add the broker's native minutes to `NATIVE_MINUTES` in `lib/timeframes.ts` (`toBrokerPlan`) and its live
+   source to `LIVE` in `data/providers/india.ts` (a `createFeedHub` instance for its events), and a panel in the Data
+   providers dialog for its login.
+6. **Verify against the real service** with deliberately fake credentials: real error responses are the cheapest way to
    catch wrong endpoints, header names and error shapes. (A broker's feed can accept the socket and only
    then drop it on a bad token; only the real service shows that.)
+
+### FYERS
+
+FYERS (API v3, the user's own app at myapi.fyers.in) is the second broker, laid out like Zerodha (`fyers/`,
+`fyers_commands.rs`). What differs:
+
+| Piece | Where | Notes |
+| --- | --- | --- |
+| Pace and budget | `fyers/client.rs`, `fyers/budget.rs` | FYERS's data limits depend on the account's plan (Standard: 5/s, 50/min, 5,000/day; Prime: 10/s, 500/min, 500,000/day), and an account that goes over the per-minute limit more than three times in a day is blocked until the next. So one throttle paces every data call (history and quotes share the allowance) at the plan's gap (`Throttle::set_gap`), the day's requests are counted (refused at 80% for background work, 97% for the rest), and a rate-limit answer is retried once, after the next minute starts. The user says which plan they have (`fyers_set_plan`); "Keep the market loaded" refuses Standard. |
+| Quotes | `fyers/quotes.rs` | Watchlists, tab prices, alerts and live charts share one per-symbol cache, asked again only after the plan's freshness (Standard 30 s, Prime 3 s while the exchange trades; minutes otherwise), 50 symbols a call. |
+| Live charts | `fyers/poller.rs`, `data/fyersLive.ts` | FYERS's data socket speaks a binary protocol its documentation doesn't describe and its terms forbid reverse-engineering, so a chart subscribes to a Rust poller of the quote cache, which emits `fyers-tick` in the shape `LiveBarBuilder` takes, with the day's own open, high and low for a daily bar. |
+| Login | `fyers/callback.rs`, `login_callback.rs` | `generate-authcode` redirects to `http://127.0.0.1:47822/` (part of the user's FYERS app configuration: don't change it) with `auth_code` and the `state` the login sent, which is checked. `validate-authcode` gets `appIdHash` (SHA-256 of `app_id:secret`), never the secret. |
+| Renewal | `fyers/session.rs`, `fyers_commands::with_credentials` | Tokens expire at 06:30 IST. A login also gives a refresh token (about 15 days). With the user's PIN saved (`fyers_set_pin`, keychain only), a data call made with a token from before the reset first renews it through `validate-refresh-token` — an endpoint FYERS's documentation doesn't describe, which the user chose to rely on — one renewal at a time; a call refused for its token renews and retries once. Any refusal of a renewal forgets the refresh token and asks for a login. |
+| Symbols | `fyers/instruments.rs` | The public symbol master (no login), mapped to the app's tickers: `NSE:SBIN-EQ` → `NSE:SBIN`, a series other than EQ kept (`NSE:HFCL-BE`), BSE's group dropped (`BSE:SBIN-A` → `BSE:SBIN`), indices by their own name or `INDEX_SPELLINGS`, futures under NFO/BFO/MCX. BSE files most shares as "miscellaneous", beside debentures and fund units; an equity ISIN (`INE…01…`) tells them apart. |
+
+FYERS's API terms (fyers.in/terms-and-conditions-api) restrict using its data for charting tools and keeping copies of it
+without FYERS's written consent; the owner's decision is not to release FYERS support until FYERS has agreed in writing.
 
 ## Timeframes and resampling
 
@@ -290,7 +345,7 @@ the dock is open on a chart tab, which `PineDock` reports through `onOpenChange`
   not) that opens the same swatches as the row's right-click menu (`FlagSwatches`).
 - **Browsing** (`WatchlistBrowserDialog.tsx`): every list, searchable, with star, open, rename and delete.
 - **The Indices list** (`store/index_catalog.rs`): a curated catalogue of ~55 NSE/BSE indices in three sections (Broad market,
-  Sectors, Themes), each with its Zerodha ticker (`NSE:NIFTY_BANK`). `create_indices_watchlist` keeps only what the broker's instrument list has and builds the list with its
+  Sectors, Themes), each with the app's ticker (Kite's spelling, `NSE:NIFTY_BANK`, which FYERS's list is mapped to). `create_indices_watchlist` keeps only what the broker's instrument list has and builds the list with its
   sections. Strategy, factor and bond indices are left out. There are no sector *stock* lists: no source the app uses publishes
   index constituents (the owner chose not to add one).
 - **Panel width** (`features/rail/panelWidth.ts`, pure; `PanelResizer.tsx`): the three side panels share
@@ -330,6 +385,7 @@ carries the old market-data preferences over: a user who had downloaded the mark
 | `screeners` | Saved screens and the last run of each (see "Screener") |
 | `symbol_drawings` | Each symbol's drawings, as Vela's own document (see "Drawings per symbol") |
 | `script_schedules`, `schedule_runs` | Scheduled Python scripts and what happened each time one came due (see "Scheduled scripts") |
+| `zerodha_instruments`, `fyers_instruments` | Each broker's instrument list under the app's tickers: names and codes, never prices |
 | `provider_settings` | Per-provider `enabled` flag and non-secret configuration |
 | `provider_secrets_fallback` | Credentials, **only** when no OS keychain exists (unencrypted; the UI says so) |
 
@@ -460,7 +516,7 @@ places an order, and nothing here writes a broker's prices to disk.
       ▲                        │  stdout/stderr                       │
       └────── events ◀─────────┘                                      │ HTTP, Authorization: Bearer <token>
                                 pyapi/ (127.0.0.1) ◀──────────────────┘
-                                   │  bar memory  ── Zerodha client (paced) ──▶ broker
+                                   │  bar memory  ── broker client (paced) ──▶ Zerodha / FYERS
 ```
 
 | Piece | Where | Notes |
@@ -521,7 +577,9 @@ places an order, and nothing here writes a broker's prices to disk.
   daily range selects whole dates (an `end` date includes that day), and the client returns them on a timezone-aware IST index.
   Intraday bars keep their real instant. Only the brokers' native intervals are served (Kite 1, 3, 5, 10, 15, 30, 60 minutes and
   daily); `pt.resample` builds the rest, restarting each bucket at the session open like the charts.
-- **Sources.** Zerodha and imported CSV datasets only — the only two providers there are.
+- **Sources.** Indian market data (`india:`, through whichever broker serves it; `/v1/providers` names it) and imported CSV
+  datasets only — the only two namespaces there are. FYERS serves 1, 2, 3, 5, 10, 15, 20, 30, 60, 120 and 240 minutes and
+  daily natively.
   Errors carry a stable `code` (`auth`, `not_configured`, `no_access`, `rate_limited`, `not_found`, `bad_request`, `upstream`) that the
   client turns into an exception class; `auth` and its kin are *fatal* to a batch, since every later symbol would fail the same way.
 - **Python is not a sandbox.** A script has the user's own privileges, as from a terminal, so it could read `charting.db` or the
@@ -811,7 +869,7 @@ state" in "Security model" for the approval rule; this is the shape that rule ta
   the proposal is dropped silently — never shown as a broken card. Nothing runs until the card's Approve is pressed; Reject or
   leaving it alone calls nothing.
 - **A symbol argument is resolved the same way the search box would type it** (`resolveTypedSymbol`): a bare ticker gets the
-  default provider, a known `provider:` prefix is honoured, and Zerodha tickers get `NSE:` where they need an exchange.
+  default provider, a known `provider:` prefix is honoured, and Indian tickers get `NSE:` where they need an exchange.
 - **Single-turn.** A proposed action's result isn't fed back to the model automatically — simpler, and keeps every action fully
   human-gated; a user who wants the assistant to react to what happened asks a plain follow-up, the same as they would a person.
 
@@ -825,7 +883,8 @@ properties on `<html>` and persists the choice. To add a theme, append one entry
 
 - The webview's Content-Security-Policy (`tauri.conf.json`) blocks remote scripts, frames and images, and allows
   outbound connections (`connect-src https: wss:`) — broader than either remaining provider needs, since both
-  `zerodha` and `csv` call out through Rust over Tauri IPC rather than fetching from the webview directly. That
+  `india` (through Zerodha or FYERS) and `csv` call out through Rust over Tauri IPC rather than fetching from the webview
+  directly. That
   `connect-src` allowance dates from when Vela's own crypto providers fetched straight from the webview; narrowing it
   now that they're gone would need testing against a release build (the dev server doesn't enforce the CSP).
 - **`script-src` includes `'unsafe-eval'`, and only for Pine.** PineTS compiles a script to JavaScript with

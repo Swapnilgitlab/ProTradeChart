@@ -5,7 +5,7 @@
     "name": "Above the 50 EMA",
     "universe": {
       "source": "instruments",
-      "provider": "zerodha",
+      "provider": "india",
       "exchanges": [
         "NSE"
       ],
@@ -40,7 +40,7 @@
   ],
   "rows": [
     {
-      "symbol": "zerodha:NSE:FAST",
+      "symbol": "india:NSE:FAST",
       "name": "Fast",
       "date": "2025-06-30",
       "values": [
@@ -50,7 +50,7 @@
       ]
     },
     {
-      "symbol": "zerodha:NSE:UP",
+      "symbol": "india:NSE:UP",
       "name": "Up",
       "date": "2025-06-30",
       "values": [

@@ -1,4 +1,5 @@
 import type { OHLCV } from '@luxalgo/vela';
+import type { BrokerId } from './symbols';
 
 /** Vela timeframes are canonical strings: minutes as bare digits (`"5"`,
  *  `"60"`), and `D` / `W` / `M` for day / week / month. `"1D"`-style spellings
@@ -158,23 +159,27 @@ export function localMidnight(dayKey: string): number {
   return new Date(y, m - 1, d).getTime();
 }
 
-// ---- Zerodha ---------------------------------------------------------------
+// ---- Indian brokers ----------------------------------------------------------
 
-/** How Zerodha (Kite Connect) should be asked for a timeframe. Kite serves 1, 3,
- *  5, 10, 15, 30 and 60 minute bars and daily bars; everything else is built
- *  from those — grouped within the trading day (`groupSize`), or, for weeks and
- *  months, from daily bars (`resampleDaily`). */
-export interface KitePlan {
+/** How a broker should be asked for a timeframe. Each serves some minute sizes and
+ *  daily bars natively; everything else is built from those — grouped within the
+ *  trading day (`groupSize`), or, for weeks and months, from daily bars
+ *  (`resampleDaily`, so both brokers' weekly bars end on the same Friday). */
+export interface BrokerPlan {
   /** `"D"` or a native minute count as a string. */
   interval: string;
   groupSize?: number;
   resampleDaily?: 'week' | 'month';
 }
 
-/** Largest first, so the coarsest divisor wins (4h = 4 × 60m, not 240 × 1m). */
-const KITE_MINUTES = [60, 30, 15, 10, 5, 3, 1];
+/** Largest first, so the coarsest divisor wins (4h = 4 × 60m, not 240 × 1m). Kite serves
+ *  1, 3, 5, 10, 15, 30 and 60 minutes; FYERS also 2, 20, 120 and 240. */
+const NATIVE_MINUTES: Record<BrokerId, number[]> = {
+  zerodha: [60, 30, 15, 10, 5, 3, 1],
+  fyers: [240, 120, 60, 30, 20, 15, 10, 5, 3, 2, 1],
+};
 
-export function toKitePlan(tf: Timeframe): KitePlan | null {
+function planFrom(native: number[], tf: Timeframe): BrokerPlan | null {
   switch (tf.kind) {
     case 'day':
       return { interval: 'D' };
@@ -184,9 +189,16 @@ export function toKitePlan(tf: Timeframe): KitePlan | null {
       return { interval: 'D', resampleDaily: 'month' };
     case 'minutes': {
       if (tf.minutes > 24 * 60) return null;
-      const base = KITE_MINUTES.find((m) => tf.minutes % m === 0);
+      const base = native.find((m) => tf.minutes % m === 0);
       if (base === undefined) return null;
       return base === tf.minutes ? { interval: String(base) } : { interval: String(base), groupSize: tf.minutes / base };
     }
   }
 }
+
+export const toKitePlan = (tf: Timeframe): BrokerPlan | null => planFrom(NATIVE_MINUTES.zerodha, tf);
+
+export const toFyersPlan = (tf: Timeframe): BrokerPlan | null => planFrom(NATIVE_MINUTES.fyers, tf);
+
+export const toBrokerPlan = (broker: BrokerId, tf: Timeframe): BrokerPlan | null =>
+  planFrom(NATIVE_MINUTES[broker], tf);

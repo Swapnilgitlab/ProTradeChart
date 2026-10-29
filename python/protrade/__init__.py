@@ -4,8 +4,8 @@ Scripts run from the app's Python tab reach market data through it::
 
     import protrade as pt
 
-    df = pt.bars("zerodha:NSE:RELIANCE", "D", start="2023-01-01")
-    universe = pt.watchlist("Nifty 50", providers=("zerodha",))
+    df = pt.bars("india:NSE:RELIANCE", "D", start="2023-01-01")
+    universe = pt.watchlist("Nifty 50", providers=("india",))
     frames = pt.bars_many(universe, "D", start="2024-01-01")
     closes = pt.panel(universe, bars=260).wide("close")
 

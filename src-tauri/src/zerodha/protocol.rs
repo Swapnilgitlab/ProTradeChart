@@ -5,7 +5,7 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use super::instruments::Instrument;
+use super::instruments::{Instrument, QuoteKey};
 use crate::market::ist_datetime;
 use crate::models::{Bar, DaySnapshot, Quote};
 

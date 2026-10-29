@@ -51,7 +51,9 @@ SPEC_VERSION = 1
 ENGINE_VERSION = "1.1"
 RESULT_FORMAT = 1
 
-PROVIDERS = ("zerodha",)
+# Studies read Indian market data (through whichever broker the app uses); a spec saved under a
+# broker's name (`zerodha`) reads as the Indian namespace.
+PROVIDERS = (client.INDIA,)
 EXCHANGES = ("NSE", "BSE")
 UNIVERSE_SOURCES = ("instruments", "watchlist", "symbols")
 # Which listings of an instrument list count as stocks: ordinary shares ("EQ"), the trade-for-trade
@@ -183,7 +185,9 @@ def normalize_spec(spec: dict) -> dict:
     source = raw.get("source", "instruments")
     if source not in UNIVERSE_SOURCES:
         raise SpecError(f"universe.source must be one of {', '.join(UNIVERSE_SOURCES)}.")
-    provider = raw.get("provider", "zerodha")
+    provider = raw.get("provider", client.INDIA)
+    if isinstance(provider, str):
+        provider = client.canonical_provider(provider)
     if provider not in PROVIDERS:
         raise SpecError(f"universe.provider must be one of {', '.join(PROVIDERS)}.")
     exchanges = raw.get("exchanges", ["NSE"])
@@ -194,7 +198,7 @@ def normalize_spec(spec: dict) -> dict:
         raise SpecError("universe.watchlist must name a watchlist.")
     symbols = raw.get("symbols") or []
     if not isinstance(symbols, list) or any(not isinstance(s, str) or ":" not in s for s in symbols):
-        raise SpecError("universe.symbols must be a list of symbols like zerodha:NSE:RELIANCE.")
+        raise SpecError("universe.symbols must be a list of symbols like india:NSE:RELIANCE.")
     if source == "symbols" and not symbols:
         raise SpecError("universe.symbols needs at least one symbol.")
     if len(symbols) > MAX_SYMBOLS:
@@ -209,7 +213,7 @@ def normalize_spec(spec: dict) -> dict:
         "exchanges": list(dict.fromkeys(exchanges)),
         "series": [x for x in SERIES if x in series],
         "watchlist": watchlist.strip() if isinstance(watchlist, str) and watchlist.strip() else None,
-        "symbols": list(dict.fromkeys(s.strip() for s in symbols)),
+        "symbols": list(dict.fromkeys(client.canonical_symbol_prefix(s.strip()) for s in symbols)),
         "market_cap_min": _number(raw.get("market_cap_min"), "universe.market_cap_min", 0),
         "min_avg_traded_value": _number(raw.get("min_avg_traded_value"), "universe.min_avg_traded_value", 0),
         "min_price": _number(raw.get("min_price"), "universe.min_price", 0),
@@ -268,7 +272,7 @@ def normalize_spec(spec: dict) -> dict:
         outcome = {"window": _int(outcome.get("window"), "outcome.window", 1, feat.MAX_WINDOW), "min_return": min_return}
     benchmark = spec.get("benchmark")
     if benchmark is not None and (not isinstance(benchmark, str) or ":" not in benchmark):
-        raise SpecError("benchmark must be a symbol like zerodha:NSE:NIFTY_500, or null.")
+        raise SpecError("benchmark must be a symbol like india:NSE:NIFTY_500, or null.")
 
     normalized = {
         "version": SPEC_VERSION,
@@ -289,7 +293,7 @@ def normalize_spec(spec: dict) -> dict:
         "metrics": metrics,
         "characteristics": _conditions(spec.get("characteristics"), "characteristics", MAX_CHARACTERISTICS, need_one=False, need_label=True),
         "measures": measures,
-        "benchmark": benchmark.strip() if isinstance(benchmark, str) else None,
+        "benchmark": client.canonical_symbol_prefix(benchmark.strip()) if isinstance(benchmark, str) else None,
         "outcome": outcome,
         "control_group": {
             "enabled": bool(control.get("enabled", True)),
@@ -305,7 +309,7 @@ def normalize_spec(spec: dict) -> dict:
     if normalized["benchmark"] is None:
         needing = [n for n in required_features(normalized) if feat.needs_benchmark(n)]
         if needing:
-            raise SpecError(f"{', '.join(needing)} compare against an index: set benchmark (e.g. zerodha:NSE:NIFTY_500).")
+            raise SpecError(f"{', '.join(needing)} compare against an index: set benchmark (e.g. india:NSE:NIFTY_500).")
     return normalized
 
 
@@ -576,12 +580,12 @@ class ResearchStudy:
             rows = client.get("/v1/watchlist", name=u["watchlist"])["symbols"]
             chosen = []
             for row in rows:
-                if row["symbol"].split(":", 1)[0].lower() in PROVIDERS:
-                    chosen.append(row["symbol"])
+                if client.canonical_provider(row["symbol"].split(":", 1)[0]) in PROVIDERS:
+                    chosen.append(client.canonical_symbol_prefix(row["symbol"]))
                     if row.get("name"):
-                        self.names[row["symbol"]] = row["name"]
+                        self.names[client.canonical_symbol_prefix(row["symbol"])] = row["name"]
             if not chosen:
-                raise client.NotFoundError(f"The watchlist {u['watchlist']!r} has no Zerodha symbols on it.")
+                raise client.NotFoundError(f"The watchlist {u['watchlist']!r} has no Indian market symbols on it.")
             self.warn("hindsight_universe", "The universe is a watchlist chosen today, so it may carry hindsight (survivorship or selection bias).")
         else:
             rows = []
@@ -594,7 +598,7 @@ class ResearchStudy:
             self.names.update({symbol: name for symbol, name in picked if name})
             if not chosen:
                 raise client.NotFoundError(
-                    f"{u['provider'].title()}'s instrument list has no equities for {', '.join(u['exchanges'])}. "
+                    f"The broker's instrument list has no equities for {', '.join(u['exchanges'])}. "
                     "Open Data providers and update the instrument list."
                 )
             if len(u["exchanges"]) > 1:
@@ -1085,7 +1089,7 @@ class ResearchStudy:
             "app_version": _app_version(),
             "python_version": platform.python_version(),
             "pandas_version": pd.__version__,
-            "data_source": ", ".join(sorted({s.split(":", 1)[0] for s in series})) or None,
+            "data_source": _data_source(series),
             "data_from": _cell(min(firsts)) if firsts else None,
             "data_through": _cell(max(lasts)) if lasts else None,
             "data_version": _data_version(series),
@@ -1354,6 +1358,18 @@ def _app_version() -> str | None:
         return api.status().get("app")
     except client.ProTradeError:
         return None
+
+
+def _data_source(series) -> str | None:
+    """Where the bars came from, as the app names it: the broker serving Indian market symbols
+    ("Zerodha", "FYERS"), not the symbols' namespace — so a run says which broker it read even after
+    the user switches. A run outside the app names the namespace."""
+    namespaces = sorted({client.canonical_provider(s.split(":", 1)[0]) for s in series})
+    try:
+        labels = {p["id"]: p.get("label") for p in client.get("/v1/providers")}
+    except client.ProTradeError:
+        labels = {}
+    return ", ".join(labels.get(n) or n for n in namespaces) or None
 
 
 def _data_version(series: dict[str, tuple]) -> str | None:

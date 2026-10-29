@@ -136,7 +136,7 @@ export function AboutDialog({ onClose }: Props) {
         </button>
       </p>
       <p className="secondary">
-        Zerodha, Kite and Kite Connect, NSE, BSE, MCX, Claude, Anthropic, GPT, OpenAI and Python are trademarks of their
+        Zerodha, Kite and Kite Connect, FYERS, NSE, BSE, MCX, Claude, Anthropic, GPT, OpenAI and Python are trademarks of their
         respective owners. They are named only to say which services the app connects to; ProTradeChart is not affiliated
         with, sponsored by or endorsed by any of them.
       </p>
@@ -146,19 +146,21 @@ export function AboutDialog({ onClose }: Props) {
         <ul>
           <li>
             <strong>Whose data it is.</strong> Prices come from the exchanges (NSE, BSE, MCX and others) through your own
-            Zerodha Kite Connect account and API key, or from files you import. Broker data is licensed to you, for your
-            own use, under Zerodha&rsquo;s Kite Connect terms and the exchanges&rsquo; rules. ProTradeChart supplies no
-            data and holds no data licence.
+            broker account and API app (Zerodha Kite Connect or FYERS), or from files you import. Broker data is licensed to
+            you, for your own use, under your broker&rsquo;s API terms and the exchanges&rsquo; rules. ProTradeChart supplies
+            no data and holds no data licence.
           </li>
           <li>
             <strong>Keep it to yourself.</strong> Don&rsquo;t publish, share, sell or show it to the public (on a stream or
             a website, or by passing on this app&rsquo;s data folder or prices exported from it), and don&rsquo;t use it
-            for mock trading or games, which Kite&rsquo;s terms forbid.
+            for mock trading or games, which Kite&rsquo;s terms forbid. FYERS&rsquo;s API terms also restrict using its
+            data for charting or technical tools and keeping copies of it without FYERS&rsquo;s written consent: read them
+            before connecting FYERS.
           </li>
           <li>
-            <strong>Never saved on this computer.</strong> Kite Connect&rsquo;s terms restrict permanent copies of its
-            data, so broker prices are held only in memory while the app is open (the charts&rsquo; recent bars, what
-            scripts, the Screener and Studies read, and the whole market if you keep it loaded) and are gone when it
+            <strong>Never saved on this computer.</strong> The brokers&rsquo; terms restrict copies of their data, so
+            broker prices are held only in memory while the app is open (the charts&rsquo; recent bars, what scripts,
+            the Screener and Studies read, and the whole market if you keep it loaded) and are gone when it
             closes. What the data folder above keeps is your own: layouts, watchlists, alerts, scripts, imported files,
             and the results of the screens and Studies you ran. None of it is sent to this project or anyone else. AI
             features send your question, symbols, watchlist names and a Study&rsquo;s summary statistics, never price

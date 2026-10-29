@@ -13,6 +13,9 @@ export interface ChartTab {
   /** Only set when this tab was just restored from a saved layout — consumed
    *  once by ChartView at construction. */
   initialState?: WorkspaceState;
+  /** Bumped to rebuild the tab's charts from `initialState`: when another broker starts serving
+   *  `india:` symbols, so they load and stream through it. */
+  rebuilds?: number;
 }
 
 /** The Home tab: a landing page linking to every other part of the app. At most one is open. */

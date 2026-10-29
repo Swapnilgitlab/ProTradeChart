@@ -284,10 +284,13 @@ pub fn bars_body<'a>(symbol: &'a str, interval: &'a str, data: &'a BarsData) -> 
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProviderStatus {
+    /// The symbol namespace: `india` or `csv`.
     pub id: &'static str,
     pub label: &'static str,
     /// Switched on and fully set up (for a broker, credentials saved).
     pub usable: bool,
+    /// For `india`, the broker serving it now (`zerodha`); none for imported data.
+    pub broker: Option<&'static str>,
 }
 
 /// One row of a provider's instrument list.
@@ -365,7 +368,7 @@ mod tests {
             },
         ];
         let d = data(bars);
-        let json: Value = serde_json::to_value(bars_body("zerodha:NSE:X", "D", &d)).unwrap();
+        let json: Value = serde_json::to_value(bars_body("india:NSE:X", "D", &d)).unwrap();
 
         assert_eq!(json["t"], serde_json::json!([1000, 2000]));
         assert_eq!(json["o"], serde_json::json!([1.0, 1.5]));
@@ -374,7 +377,7 @@ mod tests {
         assert_eq!(json["c"], serde_json::json!([1.5, 2.0]));
         assert_eq!(json["v"], serde_json::json!([7.0, null]), "missing volume is null");
         assert_eq!(json["count"], 2);
-        assert_eq!(json["symbol"], "zerodha:NSE:X");
+        assert_eq!(json["symbol"], "india:NSE:X");
         assert_eq!(json["timezone"], "Asia/Kolkata");
     }
 
@@ -408,14 +411,14 @@ mod tests {
     #[test]
     fn instruments_and_watchlists_use_the_apps_camel_case() {
         let row = InstrumentRow {
-            symbol: "zerodha:NSE:RELIANCE".into(),
+            symbol: "india:NSE:RELIANCE".into(),
             name: Some("Reliance Industries".into()),
             exchange: "NSE".into(),
             kind: "EQUITY".into(),
             expiry: None,
         };
         let json: Value = serde_json::to_value(row).unwrap();
-        assert_eq!(json["symbol"], "zerodha:NSE:RELIANCE");
+        assert_eq!(json["symbol"], "india:NSE:RELIANCE");
         assert!(json["expiry"].is_null());
     }
 }

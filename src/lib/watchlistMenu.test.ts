@@ -7,14 +7,14 @@ const lists = [
   { id: 3, name: 'Indices' },
 ];
 const members = membersByList([
-  [1, 'zerodha:NSE:TCS'],
-  [2, 'zerodha:NSE:HDFCBANK'],
-  [3, 'zerodha:NSE:TCS'],
+  [1, 'india:NSE:TCS'],
+  [2, 'india:NSE:HDFCBANK'],
+  [3, 'india:NSE:TCS'],
 ]);
 
 describe('the Add to watchlist submenu', () => {
   it('ticks the lists that hold the symbol', () => {
-    const items = watchlistSubmenu(lists, members, [], 'zerodha:NSE:TCS');
+    const items = watchlistSubmenu(lists, members, [], 'india:NSE:TCS');
     expect(items.map((i) => [i.label, i.checked ?? null])).toEqual([
       ['Banks', false],
       ['Indices', true],
@@ -25,7 +25,7 @@ describe('the Add to watchlist submenu', () => {
   });
 
   it('puts quick-access lists first, in pin order, and ignores a pin whose list is gone', () => {
-    const items = watchlistSubmenu(lists, members, [3, 99, 1], 'zerodha:NSE:INFY');
+    const items = watchlistSubmenu(lists, members, [3, 99, 1], 'india:NSE:INFY');
     expect(items.map((i) => i.label)).toEqual(['Indices', 'Swing', 'Banks', 'New watchlist…']);
     expect(items.slice(0, 3).every((i) => i.checked === false)).toBe(true);
   });
@@ -39,7 +39,7 @@ describe('the Add to watchlist submenu', () => {
   });
 
   it('draws every list as a checkbox, ticked or not, and the new-list item as a plain entry', () => {
-    const items = watchlistSubmenu(lists, members, [], 'zerodha:NSE:TCS');
+    const items = watchlistSubmenu(lists, members, [], 'india:NSE:TCS');
     expect(items.slice(0, 3).every((i) => i.checkbox === true && typeof i.checked === 'boolean')).toBe(true);
     expect(items[items.length - 1].checkbox).toBeUndefined();
   });

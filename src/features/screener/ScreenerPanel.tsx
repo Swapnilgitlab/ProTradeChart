@@ -44,6 +44,7 @@ import { loadFrom, normalizeScreen, outputColumns, screenProblem, type ScreenSpe
 import { canonicalFeature, featureLabel } from '../../studies/metrics';
 import { TRIAL_SYMBOLS, type UniverseEstimate } from '../../studies/readiness';
 import type { Series } from '../../studies/spec';
+import { namespaceStatus } from '../../data/providerStatus';
 import { useProviderState } from '../providers/useProviderState';
 import { AddToWatchlistDialog } from '../python/AddToWatchlistDialog';
 import { FEATURE_CHOICES } from '../studies/ConditionList';
@@ -183,7 +184,7 @@ export function ScreenerPanel({ visible, onOpenSymbol }: Props) {
     () =>
       normal &&
       screenReadiness(normal, {
-        providers: providers.map((p) => ({ id: p.id, usable: p.enabled && p.configured })),
+        providers: namespaceStatus(),
         pythonReady: env?.state === 'ready',
         pythonMessage: env?.message ?? 'Looking for Python…',
         watchlists,
@@ -486,8 +487,8 @@ export function ScreenerPanel({ visible, onOpenSymbol }: Props) {
                   {draft.universe.source === 'instruments' && (
                     <label className="study-field">
                       <span>Broker</span>
-                      <select className="python-input" value={draft.universe.provider} onChange={(e) => setUniverse({ provider: e.currentTarget.value as 'zerodha' })}>
-                        <option value="zerodha">Zerodha</option>
+                      <select className="python-input" value={draft.universe.provider} onChange={(e) => setUniverse({ provider: e.currentTarget.value as 'india' })}>
+                        <option value="india">Indian markets</option>
                                               </select>
                     </label>
                   )}
@@ -541,7 +542,7 @@ export function ScreenerPanel({ visible, onOpenSymbol }: Props) {
                 )}
                 {draft.universe.source === 'symbols' && (
                   <label className="study-field">
-                    <span>Symbols, one per line (zerodha:NSE:RELIANCE)</span>
+                    <span>Symbols, one per line (india:NSE:RELIANCE)</span>
                     <textarea
                       className="python-input study-textarea"
                       rows={4}

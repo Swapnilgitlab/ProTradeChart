@@ -49,7 +49,7 @@ class Panel:
         return len(self.symbols)
 
     def __contains__(self, symbol: str) -> bool:
-        return symbol in self._position
+        return client.canonical_symbol_prefix(symbol) in self._position
 
     @property
     def held(self) -> list[str]:
@@ -62,12 +62,12 @@ class Panel:
         return [s for s in self.symbols if not self._current[s]]
 
     def count(self, symbol: str) -> int:
-        i = self._position[symbol]
+        i = self._position[client.canonical_symbol_prefix(symbol)]
         return int(self.offsets[i + 1] - self.offsets[i])
 
     def arrays(self, symbol: str) -> dict[str, np.ndarray]:
         """One symbol's ``time`` (epoch ms) and price columns, as views into the panel."""
-        i = self._position[symbol]
+        i = self._position[client.canonical_symbol_prefix(symbol)]
         part = slice(int(self.offsets[i]), int(self.offsets[i + 1]))
         return {
             "time": self.time[part],
@@ -86,7 +86,7 @@ class Panel:
         frame.index.name = "time"
         if naive:
             frame.index = frame.index.tz_localize(None)
-        covered_from, covered_to = self._covered[symbol]
+        covered_from, covered_to = self._covered[client.canonical_symbol_prefix(symbol)]
         frame.attrs.update(
             symbol=symbol,
             interval=self.interval,

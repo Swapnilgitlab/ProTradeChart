@@ -1,5 +1,5 @@
 {
-  "_about": "Study Specification cases both validators are tested against: src/studies/spec.test.ts (normalizeSpec) and python/tests/test_measures.py (normalize_spec). Each case replaces top-level keys of `base`. A refused case must fail with a message containing `word`; an accepted case must normalise its measures to exactly `measures` (when given) in both languages.",
+  "_about": "Study Specification cases both validators are tested against: src/studies/spec.test.ts (normalizeSpec) and python/tests/test_measures.py (normalize_spec). Each case replaces top-level keys of `base`. A refused case must fail with a message containing `word`; an accepted case must normalise its measures to exactly `measures`, and its universe's `provider` and `symbols` and its `benchmark` to those given (when given), in both languages.",
   "base": {
     "version": 1,
     "name": "Doublers near the 21 EMA",
@@ -243,9 +243,19 @@
     {
       "name": "a measures-only Study with the benchmark set for an rs_ measure",
       "patch": {
-        "benchmark": "zerodha:NSE:NIFTY_500",
+        "benchmark": "india:NSE:NIFTY_500",
         "measures": [{ "stat": "mean", "feature": "rs_126", "window": { "start": { "offset": -63 }, "end": { "offset": 0 } } }]
       }
+    },
+    {
+      "name": "a Study saved under the Indian namespace's old name (zerodha) reads as india",
+      "patch": {
+        "universe": { "source": "symbols", "provider": "zerodha", "symbols": ["zerodha:NSE:TCS", " india:NSE:TCS ", "ZERODHA:BSE:SBIN", "csv:MINE"] },
+        "benchmark": "zerodha:NSE:NIFTY_500"
+      },
+      "provider": "india",
+      "symbols": ["india:NSE:TCS", "india:BSE:SBIN", "csv:MINE"],
+      "benchmark": "india:NSE:NIFTY_500"
     }
   ]
 }

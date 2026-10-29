@@ -63,7 +63,7 @@ import {
   type WatchlistSummary,
 } from '../../lib/ipc';
 import { mergeQuotes, quoteTargets, rowWindow, SMALL_LIST } from '../../lib/listWindow';
-import { displayTicker } from '../../lib/symbols';
+import { displayTicker, INDIA } from '../../lib/symbols';
 import { parseWatchlistFile } from '../../lib/watchlistImport';
 import {
   buildRows,
@@ -692,11 +692,11 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
     e.currentTarget.value = ''; // allow re-picking the same file
     if (!file) return;
     try {
-      // NSE and BSE symbols in the file go to Zerodha when it is the default or set up. With no broker
-      // they can't be charted and are reported as skipped.
+      // NSE and BSE symbols in the file become Indian market symbols when that is the default or a broker
+      // is set up. With no broker they can't be charted and are reported as skipped.
       const preferred = effectiveDefaultProvider();
-      const indianProvider = preferred === 'zerodha' || isProviderUsable('zerodha') ? ('zerodha' as const) : undefined;
-      const { items, skipped } = parseWatchlistFile(await file.text(), { indianProvider, defaultProvider: preferred });
+      const indian = preferred === INDIA || isProviderUsable(INDIA);
+      const { items, skipped } = parseWatchlistFile(await file.text(), { indian, defaultProvider: preferred });
       if (items.length === 0) {
         toast('No symbols were found in that file.', 'error');
         return;

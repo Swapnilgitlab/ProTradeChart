@@ -19,7 +19,7 @@ describe('parseStudyResult', () => {
     expect(r.offsets).toEqual([-252, -126, -63, -21, 0, 63, 126]);
     expect(r.events.columns.slice(0, 3)).toEqual(['symbol', 'name', 'event_date']);
     const event = eventRecord(r, r.events.rows[0]);
-    expect(event.symbol).toBe('zerodha:NSE:WIN');
+    expect(event.symbol).toBe('india:NSE:WIN');
     expect(event.name).toBe('Winner Ltd');
     expect(typeof event['rsi_14@-63']).toBe('number');
     expect(statFor(r, 'return_63', -63)?.events.count).toBe(1);
@@ -56,14 +56,14 @@ describe('parseStudyResult', () => {
 
   it('squares off and sanitises the parts it keeps', () => {
     const raw = fresh();
-    raw.events = { columns: ['symbol', 'x'], rows: [['zerodha:NSE:A', { html: '<b>' }, 'extra'], ['zerodha:NSE:B']], total: -4 };
+    raw.events = { columns: ['symbol', 'x'], rows: [['india:NSE:A', { html: '<b>' }, 'extra'], ['india:NSE:B']], total: -4 };
     raw.histograms = [{ metric: 'rsi_14', offset: 0, edges: [0, 1], events: [1, 2], control: [0] }];
     raw.stats = [{ metric: 'rsi_14', offset: 'x' }];
     raw.warnings = [{ code: 'x', message: 7 }, 'nope'];
     const r = parseStudyResult(raw)!;
     expect(r.events.rows).toEqual([
-      ['zerodha:NSE:A', null],
-      ['zerodha:NSE:B', null],
+      ['india:NSE:A', null],
+      ['india:NSE:B', null],
     ]);
     expect(r.events.total).toBe(2);
     expect(r.histograms).toEqual([]);

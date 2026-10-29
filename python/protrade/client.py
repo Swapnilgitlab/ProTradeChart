@@ -28,6 +28,30 @@ NO_SNAPSHOT_ENV = "PROTRADE_NO_SNAPSHOT"
 # second), so a long first sync of many symbols is normal, not a hang.
 DEFAULT_TIMEOUT = 900.0
 
+INDIA = "india"
+"""The namespace every Indian market symbol lives in (``india:NSE:RELIANCE``), whichever of the
+user's brokers serves it. The app's Data providers say which one does."""
+
+# Older spellings of the Indian namespace: what scripts said while Zerodha was the only broker, and a
+# broker's name written by hand. The app reads them as ``india`` too; this side does the same, so a
+# script's own spelling and the app's answer agree. The same rule as `src/lib/symbols.ts`.
+_ALIASES = {"zerodha": INDIA, "fyers": INDIA}
+
+
+def canonical_provider(provider: str) -> str:
+    """The namespace a provider prefix stands for: ``"zerodha"`` is ``"india"``."""
+    lower = provider.strip().lower()
+    return _ALIASES.get(lower, lower)
+
+
+def canonical_symbol_prefix(symbol: str) -> str:
+    """``symbol`` with an old spelling of its prefix replaced (``zerodha:NSE:X`` is
+    ``india:NSE:X``) and nothing else changed. The same rule as ``withCanonicalPrefix``."""
+    head, sep, rest = symbol.partition(":")
+    if sep and head.lower() in _ALIASES:
+        return f"{INDIA}:{rest}"
+    return symbol
+
 
 class ProTradeError(Exception):
     """Anything ProTradeChart's data API refused or could not do."""

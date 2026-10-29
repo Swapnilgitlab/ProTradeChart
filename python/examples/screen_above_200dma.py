@@ -1,7 +1,7 @@
 """Screens stocks for those trading above their 200-day moving average.
 
 It works the first time with no setup. What it looks at: the watchlist named in WATCHLIST below,
-if you name one; otherwise your first watchlist with Zerodha symbols on it; otherwise ten
+if you name one; otherwise your first watchlist with Indian market symbols on it; otherwise ten
 large NSE stocks. The first run fetches history from your broker; the app keeps it, so later runs
 only fetch what is new (a few hundred symbols take minutes the first time, at the brokers' rate
 limits). The result opens in the Results tab: click a symbol to open its chart.

@@ -32,6 +32,7 @@ import { applyFix, checkReadiness, loadFrom, type ReadinessFix, type UniverseEst
 import { parseRunSummary, parseStudyResult, type StudyResultData } from '../../studies/result';
 import { normalizeSpec, specProblem, type StudySpec } from '../../studies/spec';
 import { fromTemplate, TEMPLATES } from '../../studies/templates';
+import { namespaceStatus } from '../../data/providerStatus';
 import { useProviderState } from '../providers/useProviderState';
 import { AddToWatchlistDialog } from '../python/AddToWatchlistDialog';
 import { AssistantPanel, ResultExplainer } from './AssistantPanel';
@@ -147,7 +148,7 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
   const readiness = useMemo(() => {
     if (problem) return null;
     return checkReadiness(normalizeSpec(current.spec), {
-      providers: providers.map((p) => ({ id: p.id, usable: p.enabled && p.configured })),
+      providers: namespaceStatus(),
       pythonReady: env?.state === 'ready',
       pythonMessage: env?.message ?? 'Looking for Python…',
       watchlists,
@@ -160,7 +161,7 @@ export function StudiesPanel({ visible, onOpenEvent, onOpenPython }: Props) {
   const readinessOf = useCallback(
     (spec: StudySpec, estimate: UniverseEstimate | null) =>
       checkReadiness(spec, {
-        providers: providers.map((p) => ({ id: p.id, usable: p.enabled && p.configured })),
+        providers: namespaceStatus(),
         pythonReady: env?.state === 'ready',
         pythonMessage: env?.message ?? 'Looking for Python…',
         watchlists,

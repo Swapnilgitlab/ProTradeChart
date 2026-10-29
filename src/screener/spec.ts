@@ -5,6 +5,7 @@
  *  It is written in the Studies' feature grammar (`studies/metrics.ts`), so the numbers match a
  *  Study's. Field names are snake_case because the document is shared with Python. Pure. */
 
+import { canonicalProvider, INDIA, withCanonicalPrefix } from '../lib/symbols';
 import { BARS_PER_INTERVAL, canonicalFeature, featureInterval, needsBenchmark } from '../studies/metrics';
 import { parseCondition, SERIES, SpecError, type Condition, type Exchange, type Series, type StudyProvider, type UniverseSource } from '../studies/spec';
 
@@ -94,8 +95,9 @@ export function normalizeScreen(input: unknown): ScreenSpec {
   const u = isRecord(input.universe) ? input.universe : {};
   const source = (u.source ?? 'instruments') as UniverseSource;
   if (!['instruments', 'watchlist', 'symbols'].includes(source)) throw new ScreenError('universe.source must be instruments, watchlist or symbols.');
-  const provider = (u.provider ?? 'zerodha') as StudyProvider;
-  if (provider !== 'zerodha') throw new ScreenError('universe.provider must be zerodha.');
+  // A screen saved under a broker's name means the Indian namespace.
+  const provider = (typeof u.provider === 'string' ? canonicalProvider(u.provider) : (u.provider ?? INDIA)) as StudyProvider;
+  if (provider !== INDIA) throw new ScreenError('universe.provider must be india.');
   const exchanges = u.exchanges ?? ['NSE'];
   if (!Array.isArray(exchanges) || exchanges.length === 0 || exchanges.some((e) => e !== 'NSE' && e !== 'BSE')) {
     throw new ScreenError('universe.exchanges must list one or more of NSE, BSE.');
@@ -108,7 +110,7 @@ export function normalizeScreen(input: unknown): ScreenSpec {
   if (source === 'watchlist' && !watchlist) throw new ScreenError('universe.watchlist must name a watchlist.');
   const symbols = u.symbols ?? [];
   if (!Array.isArray(symbols) || symbols.some((s) => typeof s !== 'string' || !s.includes(':'))) {
-    throw new ScreenError('universe.symbols must be a list of symbols like zerodha:NSE:RELIANCE.');
+    throw new ScreenError('universe.symbols must be a list of symbols like india:NSE:RELIANCE.');
   }
   if (source === 'symbols' && symbols.length === 0) throw new ScreenError('universe.symbols needs at least one symbol.');
   if (symbols.length > SCREEN_LIMITS.symbols) throw new ScreenError(`universe.symbols can hold at most ${SCREEN_LIMITS.symbols} symbols.`);
@@ -150,12 +152,12 @@ export function normalizeScreen(input: unknown): ScreenSpec {
 
   const benchmarkRaw = input.benchmark;
   if (benchmarkRaw !== null && benchmarkRaw !== undefined && (typeof benchmarkRaw !== 'string' || !benchmarkRaw.includes(':'))) {
-    throw new ScreenError('benchmark must be a symbol like zerodha:NSE:NIFTY_500, or null.');
+    throw new ScreenError('benchmark must be a symbol like india:NSE:NIFTY_500, or null.');
   }
-  const benchmark = typeof benchmarkRaw === 'string' ? benchmarkRaw.trim() : null;
+  const benchmark = typeof benchmarkRaw === 'string' ? withCanonicalPrefix(benchmarkRaw.trim()) : null;
   if (!benchmark) {
     const needing = outputColumns({ columns, filters }).filter(needsBenchmark);
-    if (needing.length) throw new ScreenError(`${needing.join(', ')} compare against an index: set a benchmark (e.g. zerodha:NSE:NIFTY_500).`);
+    if (needing.length) throw new ScreenError(`${needing.join(', ')} compare against an index: set a benchmark (e.g. india:NSE:NIFTY_500).`);
   }
 
   return {
@@ -167,7 +169,7 @@ export function normalizeScreen(input: unknown): ScreenSpec {
       exchanges: [...new Set(exchanges as Exchange[])],
       series: SERIES.filter((x) => (series as unknown[]).includes(x)),
       watchlist,
-      symbols: [...new Set((symbols as string[]).map((s) => s.trim()))],
+      symbols: [...new Set((symbols as string[]).map((s) => withCanonicalPrefix(s.trim())))],
       max_symbols: maxSymbols as number | null,
     },
     filters,

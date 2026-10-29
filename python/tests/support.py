@@ -32,7 +32,7 @@ def error(status, code, message="nope"):
 def bars_body(times, interval="D", **extra):
     n = len(times)
     body = {
-        "symbol": "zerodha:NSE:X",
+        "symbol": "india:NSE:X",
         "interval": interval,
         "timezone": IST,
         "count": n,

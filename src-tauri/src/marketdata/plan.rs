@@ -157,15 +157,15 @@ mod tests {
             listed("NSE:TCS", "Tata Consultancy Services", "EQUITY"),
         ];
         let indices = [listed("NSE:NIFTY_50", "Nifty 50", "INDEX")];
-        let got = universe("zerodha", &equities, &indices);
+        let got = universe("india", &equities, &indices);
         assert_eq!(
             got.iter()
                 .map(|l| (l.symbol.as_str(), l.kind.as_str()))
                 .collect::<Vec<_>>(),
             [
-                ("zerodha:NSE:RELIANCE", "EQ"),
-                ("zerodha:NSE:TCS", "EQ"),
-                ("zerodha:NSE:NIFTY_50", "INDEX")
+                ("india:NSE:RELIANCE", "EQ"),
+                ("india:NSE:TCS", "EQ"),
+                ("india:NSE:NIFTY_50", "INDEX")
             ]
         );
         assert_eq!(got[1].name.as_deref(), Some("Tata Consultancy Services"));

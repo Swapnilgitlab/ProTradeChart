@@ -65,12 +65,13 @@ pub fn valid_run_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// Splits `provider:TICKER` (`zerodha:NSE:RELIANCE` → `zerodha`, `NSE:RELIANCE`) at its
-/// first colon. The ticker keeps its own colons.
+/// Splits `provider:TICKER` (`india:NSE:RELIANCE` → `india`, `NSE:RELIANCE`) at its
+/// first colon. The ticker keeps its own colons, and an old spelling of the Indian namespace
+/// (`zerodha:`) reads as `india`.
 pub fn split_symbol(symbol: &str) -> Option<(&str, &str)> {
     let (provider, ticker) = symbol.split_once(':')?;
     let (provider, ticker) = (provider.trim(), ticker.trim());
-    (!provider.is_empty() && !ticker.is_empty()).then_some((provider, ticker))
+    (!provider.is_empty() && !ticker.is_empty()).then_some((crate::symbols::canonical_provider(provider), ticker))
 }
 
 #[cfg(test)]
@@ -79,9 +80,14 @@ mod tests {
 
     #[test]
     fn a_symbol_splits_at_its_first_colon_only() {
-        assert_eq!(split_symbol("zerodha:NSE:RELIANCE"), Some(("zerodha", "NSE:RELIANCE")));
+        assert_eq!(split_symbol("india:NSE:RELIANCE"), Some(("india", "NSE:RELIANCE")));
         assert_eq!(split_symbol("csv:MY_DATA"), Some(("csv", "MY_DATA")));
-        assert_eq!(split_symbol(" zerodha : NSE:TCS "), Some(("zerodha", "NSE:TCS")));
+        assert_eq!(split_symbol(" india : NSE:TCS "), Some(("india", "NSE:TCS")));
+        assert_eq!(
+            split_symbol("zerodha:NSE:TCS"),
+            Some(("india", "NSE:TCS")),
+            "the old name"
+        );
     }
 
     #[test]
@@ -96,7 +102,7 @@ mod tests {
 
     #[test]
     fn a_symbol_without_a_provider_or_ticker_is_refused() {
-        for text in ["RELIANCE", "", ":", "zerodha:", ":NSE:RELIANCE"] {
+        for text in ["RELIANCE", "", ":", "india:", ":NSE:RELIANCE"] {
             assert_eq!(split_symbol(text), None, "{text:?}");
         }
     }

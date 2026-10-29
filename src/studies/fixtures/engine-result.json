@@ -8,7 +8,7 @@
   "template": null,
   "universe": {
    "source": "instruments",
-   "provider": "zerodha",
+   "provider": "india",
    "exchanges": [
     "NSE"
    ],
@@ -123,10 +123,10 @@
   "app_version": "0.1.0",
   "python_version": "3.13.13",
   "pandas_version": "3.0.2",
-  "data_source": "zerodha",
+  "data_source": "india",
   "data_from": "2016-01-01",
   "data_through": "2021-12-31",
-  "data_version": "ec22ddd10d539bb1",
+  "data_version": "74ef355ffc4f1ab8",
   "symbols_requested": 2,
   "symbols_loaded": 2,
   "symbols_kept": 2,
@@ -225,7 +225,7 @@
   ],
   "rows": [
    [
-    "zerodha:NSE:WIN",
+    "india:NSE:WIN",
     "Winner Ltd",
     "2019-04-02",
     1.00322,

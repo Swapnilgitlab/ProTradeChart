@@ -21,10 +21,10 @@ describe('CSV', () => {
     const r = result();
     const events = eventsCsv(r).split('\r\n');
     expect(events[0].startsWith('symbol,name,event_date,')).toBe(true);
-    expect(events[1].startsWith('zerodha:NSE:WIN,Winner Ltd,')).toBe(true);
+    expect(events[1].startsWith('india:NSE:WIN,Winner Ltd,')).toBe(true);
     const stocks = stocksCsv(r).split('\r\n');
     expect(stocks[0].startsWith('symbol,name,events,first_event,last_event,median_event_value')).toBe(true);
-    expect(stocks[1].startsWith('zerodha:NSE:WIN,Winner Ltd,1,')).toBe(true);
+    expect(stocks[1].startsWith('india:NSE:WIN,Winner Ltd,1,')).toBe(true);
     const metrics = metricsCsv(r);
     expect(metrics).toContain('return_63,-63,T-3M,events,1,');
     expect(metrics).toContain('return_63,-63,T-3M,control,2,');

@@ -19,7 +19,7 @@ describe('mapSymbol', () => {
   });
 
   it('passes through already-qualified provider symbols', () => {
-    expect(mapSymbol('zerodha:NSE:INFY')).toBe('zerodha:NSE:INFY');
+    expect(mapSymbol('india:NSE:INFY')).toBe('india:NSE:INFY');
     expect(mapSymbol('csv:mydata')).toBe('csv:MYDATA');
   });
 
@@ -29,8 +29,8 @@ describe('mapSymbol', () => {
   });
 
   it('sends a bare ticker to the default provider, or the one given', () => {
-    expect(mapSymbol('reliance')).toBe('zerodha:NSE:RELIANCE');
-    expect(mapSymbol('TCS')).toBe('zerodha:NSE:TCS');
+    expect(mapSymbol('reliance')).toBe('india:NSE:RELIANCE');
+    expect(mapSymbol('TCS')).toBe('india:NSE:TCS');
     expect(mapSymbol('mydata', { defaultProvider: 'csv' })).toBe('csv:MYDATA');
   });
 
@@ -43,8 +43,8 @@ describe('mapSymbol', () => {
 
 describe('parseWatchlistFile', () => {
   it('reads a TradingView export, ignoring section headings and duplicates', () => {
-    const r = parseWatchlistFile('###MAJORS,NSE:RELIANCE,NSE:TCS,###MORE,NSE:INFY,NSE:RELIANCE', { indianProvider: 'zerodha' });
-    expect(r.items.map((i) => i.symbol)).toEqual(['zerodha:NSE:RELIANCE', 'zerodha:NSE:TCS', 'zerodha:NSE:INFY']);
+    const r = parseWatchlistFile('###MAJORS,NSE:RELIANCE,NSE:TCS,###MORE,NSE:INFY,NSE:RELIANCE', { indian: true });
+    expect(r.items.map((i) => i.symbol)).toEqual(['india:NSE:RELIANCE', 'india:NSE:TCS', 'india:NSE:INFY']);
     expect(r.skipped).toEqual([]);
   });
 
@@ -56,8 +56,8 @@ describe('parseWatchlistFile', () => {
   it('reads a CSV with a Symbol column and an optional Name', () => {
     const r = parseWatchlistFile('Symbol,Name,Price\nRELIANCE,Reliance Industries,2900\nTCS,Tata Consultancy,4100\n');
     expect(r.items).toEqual([
-      { symbol: 'zerodha:NSE:RELIANCE', name: 'Reliance Industries' },
-      { symbol: 'zerodha:NSE:TCS', name: 'Tata Consultancy' },
+      { symbol: 'india:NSE:RELIANCE', name: 'Reliance Industries' },
+      { symbol: 'india:NSE:TCS', name: 'Tata Consultancy' },
     ]);
   });
 
@@ -80,32 +80,32 @@ describe('parseWatchlistFile', () => {
 });
 
 describe('importing into Zerodha', () => {
-  const zerodha = { indianProvider: 'zerodha' } as const;
+  const indian = { indian: true } as const;
 
   it("sends NSE and BSE symbols to the user's Zerodha account", () => {
-    expect(mapSymbol('NSE:RELIANCE', zerodha)).toBe('zerodha:NSE:RELIANCE');
-    expect(mapSymbol('BSE:TCS', zerodha)).toBe('zerodha:BSE:TCS');
+    expect(mapSymbol('NSE:RELIANCE', indian)).toBe('india:NSE:RELIANCE');
+    expect(mapSymbol('BSE:TCS', indian)).toBe('india:BSE:TCS');
   });
 
   it("maps TradingView index shorthands to Zerodha's index names", () => {
-    expect(mapSymbol('NSE:NIFTY', zerodha)).toBe('zerodha:NSE:NIFTY_50');
-    expect(mapSymbol('NSE:NIFTY50', zerodha)).toBe('zerodha:NSE:NIFTY_50');
-    expect(mapSymbol('NSE:BANKNIFTY', zerodha)).toBe('zerodha:NSE:NIFTY_BANK');
-    expect(mapSymbol('BSE:SENSEX', zerodha)).toBe('zerodha:BSE:SENSEX');
+    expect(mapSymbol('NSE:NIFTY', indian)).toBe('india:NSE:NIFTY_50');
+    expect(mapSymbol('NSE:NIFTY50', indian)).toBe('india:NSE:NIFTY_50');
+    expect(mapSymbol('NSE:BANKNIFTY', indian)).toBe('india:NSE:NIFTY_BANK');
+    expect(mapSymbol('BSE:SENSEX', indian)).toBe('india:BSE:SENSEX');
   });
 
   it('still skips what has no source, crypto included', () => {
-    expect(mapSymbol('BINANCE:BTCUSDT', zerodha)).toBeNull();
-    expect(mapSymbol('NASDAQ:AAPL', zerodha)).toBeNull();
+    expect(mapSymbol('BINANCE:BTCUSDT', indian)).toBeNull();
+    expect(mapSymbol('NASDAQ:AAPL', indian)).toBeNull();
   });
 
   it('takes its own symbols back unchanged', () => {
-    expect(mapSymbol('zerodha:NSE:INFY')).toBe('zerodha:NSE:INFY');
+    expect(mapSymbol('india:NSE:INFY')).toBe('india:NSE:INFY');
   });
 
   it('maps a whole file', () => {
-    const r = parseWatchlistFile('NSE:TCS,NSE:INFY,NASDAQ:AAPL', zerodha);
-    expect(r.items.map((i) => i.symbol)).toEqual(['zerodha:NSE:TCS', 'zerodha:NSE:INFY']);
+    const r = parseWatchlistFile('NSE:TCS,NSE:INFY,NASDAQ:AAPL', indian);
+    expect(r.items.map((i) => i.symbol)).toEqual(['india:NSE:TCS', 'india:NSE:INFY']);
     expect(r.skipped).toEqual(['NASDAQ:AAPL']);
   });
 });

@@ -166,13 +166,13 @@ mod tests {
     #[test]
     fn a_company_on_two_exchanges_is_counted_once_as_in_the_engine() {
         let rows: Vec<(String, Option<String>)> = [
-            ("zerodha:NSE:RELIANCE", "RELIANCE INDUSTRIES"),
-            ("zerodha:NSE:IRFC-N2", "IRFC"),
-            ("zerodha:NSE:XYZ-BE", "XYZ"),
-            ("zerodha:BSE:RELIANCE", "Reliance Industries Ltd."),
-            ("zerodha:BSE:RELIND", "RELIANCE INDUSTRIES LIMITED"),
-            ("zerodha:BSE:XYZ", "XYZ Ltd"),
-            ("zerodha:BSE:BSEONLY", "BSE ONLY LTD"),
+            ("india:NSE:RELIANCE", "RELIANCE INDUSTRIES"),
+            ("india:NSE:IRFC-N2", "IRFC"),
+            ("india:NSE:XYZ-BE", "XYZ"),
+            ("india:BSE:RELIANCE", "Reliance Industries Ltd."),
+            ("india:BSE:RELIND", "RELIANCE INDUSTRIES LIMITED"),
+            ("india:BSE:XYZ", "XYZ Ltd"),
+            ("india:BSE:BSEONLY", "BSE ONLY LTD"),
         ]
         .iter()
         .map(|(s, n)| (s.to_string(), Some(n.to_string())))
@@ -180,12 +180,12 @@ mod tests {
         let eq = ["EQ".to_string()];
         assert_eq!(
             pick_listings(&rows, &eq),
-            ["zerodha:NSE:RELIANCE", "zerodha:BSE:XYZ", "zerodha:BSE:BSEONLY"]
+            ["india:NSE:RELIANCE", "india:BSE:XYZ", "india:BSE:BSEONLY"]
         );
         let eq_be = ["EQ".to_string(), "BE".to_string()];
         assert_eq!(
             pick_listings(&rows, &eq_be),
-            ["zerodha:NSE:RELIANCE", "zerodha:NSE:XYZ-BE", "zerodha:BSE:BSEONLY"]
+            ["india:NSE:RELIANCE", "india:NSE:XYZ-BE", "india:BSE:BSEONLY"]
         );
     }
 
@@ -197,17 +197,12 @@ mod tests {
         let cover = |symbol: &str, from_ms: i64, to_ms: i64| {
             memory.extend_coverage(symbol, "D", Range { from_ms, to_ms }, now);
         };
-        cover("zerodha:NSE:FRESH", from - DAY_MS, now);
-        cover("zerodha:NSE:OLD", from, now - 5 * DAY_MS);
-        cover("zerodha:NSE:SHORT", from + 100 * DAY_MS, now);
-        let symbols: Vec<String> = [
-            "zerodha:NSE:FRESH",
-            "zerodha:NSE:OLD",
-            "zerodha:NSE:SHORT",
-            "zerodha:NSE:NEW",
-        ]
-        .map(String::from)
-        .to_vec();
+        cover("india:NSE:FRESH", from - DAY_MS, now);
+        cover("india:NSE:OLD", from, now - 5 * DAY_MS);
+        cover("india:NSE:SHORT", from + 100 * DAY_MS, now);
+        let symbols: Vec<String> = ["india:NSE:FRESH", "india:NSE:OLD", "india:NSE:SHORT", "india:NSE:NEW"]
+            .map(String::from)
+            .to_vec();
         let e = estimate(&memory, &symbols, from, now, 2000, 350, 200, 1100);
         assert_eq!(
             (e.symbols, e.stored, e.requests, e.quote_requests),
@@ -225,7 +220,7 @@ mod tests {
         let memory = BarMemory::default();
         let now = 3_000 * DAY_MS;
         let from = now - 1_500 * DAY_MS;
-        let symbols: Vec<String> = (0..450).map(|i| format!("zerodha:NSE:S{i}")).collect();
+        let symbols: Vec<String> = (0..450).map(|i| format!("india:NSE:S{i}")).collect();
         for symbol in &symbols {
             memory.extend_coverage(
                 symbol,

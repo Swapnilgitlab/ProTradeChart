@@ -7,6 +7,8 @@ use std::collections::HashMap;
 
 use rusqlite::Connection;
 
+use crate::fyers::instruments as fyers;
+use crate::symbols::{canonical_provider, INDIA};
 use crate::zerodha::instruments as zerodha;
 
 /// The names known for `symbols`; symbols with none are left out.
@@ -15,8 +17,14 @@ pub fn known(conn: &Connection, symbols: &[String]) -> rusqlite::Result<HashMap<
     for symbol in symbols {
         let name = match symbol.split_once(':') {
             // The same lookup charts use, so a stock Zerodha lists as `NSE:HFCL-BE` is named
-            // under the `NSE:HFCL` a list or import calls it.
-            Some(("zerodha", ticker)) => zerodha::resolve(conn, ticker)?.and_then(|instrument| instrument.name),
+            // under the `NSE:HFCL` a list or import calls it. A name is a name whichever broker's
+            // list it comes from, so this doesn't ask which one serves the prices.
+            Some((provider, ticker)) if canonical_provider(provider) == INDIA => {
+                match zerodha::resolve(conn, ticker)?.and_then(|instrument| instrument.name) {
+                    Some(name) => Some(name),
+                    None => fyers::resolve(conn, ticker)?.and_then(|instrument| instrument.name),
+                }
+            }
             _ => continue,
         };
         if let Some(name) = name.filter(|n| !n.trim().is_empty()) {
@@ -49,8 +57,8 @@ mod tests {
         let names = known(
             &conn,
             &syms(&[
-                "zerodha:NSE:RELIANCE",
-                "zerodha:NSE:TCS",
+                "india:NSE:RELIANCE",
+                "india:NSE:TCS",
                 "nosuch:NSE:INFY",
                 "binance:BTCUSDT",
             ]),
@@ -61,7 +69,7 @@ mod tests {
             1,
             "no name in the list means no name, and only the broker has a list"
         );
-        assert_eq!(names["zerodha:NSE:RELIANCE"], "RELIANCE INDUSTRIES");
+        assert_eq!(names["india:NSE:RELIANCE"], "RELIANCE INDUSTRIES");
     }
 
     #[test]
@@ -74,9 +82,9 @@ mod tests {
             [],
         )
         .unwrap();
-        let names = known(&conn, &syms(&["zerodha:NSE:HFCL", "zerodha:NSE:HFCL-BE"])).unwrap();
-        assert_eq!(names["zerodha:NSE:HFCL"], "HFCL LIMITED");
-        assert_eq!(names["zerodha:NSE:HFCL-BE"], "HFCL LIMITED");
+        let names = known(&conn, &syms(&["india:NSE:HFCL", "india:NSE:HFCL-BE"])).unwrap();
+        assert_eq!(names["india:NSE:HFCL"], "HFCL LIMITED");
+        assert_eq!(names["india:NSE:HFCL-BE"], "HFCL LIMITED");
     }
 
     #[test]

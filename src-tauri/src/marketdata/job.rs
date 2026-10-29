@@ -426,9 +426,9 @@ mod tests {
         w.memory.get(symbol, D, day, day, None).first().map(|b| b.close)
     }
 
-    const A: &str = "zerodha:NSE:AAA";
-    const B: &str = "zerodha:NSE:BBB";
-    const NIFTY: &str = "zerodha:NSE:NIFTY_50";
+    const A: &str = "india:NSE:AAA";
+    const B: &str = "india:NSE:BBB";
+    const NIFTY: &str = "india:NSE:NIFTY_50";
 
     #[tokio::test]
     async fn the_first_run_loads_five_years_into_memory_and_the_next_session_is_one_quote() {
@@ -561,13 +561,13 @@ mod tests {
         let w = world();
         // Listed, but the broker refuses it (as Kite does an instrument it no longer serves).
         let mut fake = Fake::new(&[(A, 100.0)], at(0, 0));
-        fake.refuse.insert("zerodha:NSE:GONE".to_string());
-        let s = update(&w, &fake, &[eq(A), eq("zerodha:NSE:GONE")], at(0, 17))
+        fake.refuse.insert("india:NSE:GONE".to_string());
+        let s = update(&w, &fake, &[eq(A), eq("india:NSE:GONE")], at(0, 17))
             .await
             .unwrap();
         assert_eq!((s.loaded, s.failed, s.reloaded), (1, 1, 0));
         let asked = fake.fetched();
-        assert_eq!(asked.iter().filter(|f| *f == "zerodha:NSE:GONE").count(), 1);
+        assert_eq!(asked.iter().filter(|f| *f == "india:NSE:GONE").count(), 1);
     }
 
     #[tokio::test]

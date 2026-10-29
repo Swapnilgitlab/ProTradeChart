@@ -60,7 +60,7 @@ describe('parseLayout', () => {
 
   it('normalises bare tickers to the default provider', () => {
     const parsed = parseLayout(JSON.stringify({ version: 1, tabs: [{ symbol: 'RELIANCE' }], activeTabIndex: 0 }));
-    expect(parsed?.tabs[0].symbol).toBe('zerodha:NSE:RELIANCE');
+    expect(parsed?.tabs[0].symbol).toBe('india:NSE:RELIANCE');
   });
 
   it('clamps an out-of-range or missing active tab index', () => {
@@ -155,13 +155,13 @@ describe('a chosen canvas background belongs to the layout', () => {
 });
 
 describe('withoutUnsupportedSymbols', () => {
-  const FALLBACK = 'zerodha:NSE:RELIANCE';
+  const FALLBACK = 'india:NSE:RELIANCE';
   const gridState = (...symbols: string[]) =>
     ({ version: 1, layout: '2x1', charts: symbols.map((symbol, i) => ({ id: `c${i + 1}`, symbol, provider: 'nosuch', timeframe: 'D' })) }) as unknown as WorkspaceState;
   const symbolsOf = (state: WorkspaceState) => state.charts.map((c) => c.symbol);
 
   it('leaves a layout of supported symbols exactly as it is', () => {
-    const supported: LayoutDocument = { version: 1, tabs: [{ symbol: 'zerodha:NSE:TCS' }, { symbol: 'csv:MY_DATA' }], activeTabIndex: 0 };
+    const supported: LayoutDocument = { version: 1, tabs: [{ symbol: 'india:NSE:TCS' }, { symbol: 'csv:MY_DATA' }], activeTabIndex: 0 };
     const out = withoutUnsupportedSymbols(supported, FALLBACK);
     expect(out.replaced).toBe(0);
     expect(out.doc).toEqual(supported);
@@ -215,21 +215,21 @@ describe('withChartSymbols', () => {
   const symbolsOf = (s: WorkspaceState) => s.charts.map((c) => c.symbol);
 
   it('gives each chart of a layout saved before the short form its short symbol', () => {
-    const out = withChartSymbols(state('zerodha:NSE:HFCL', 'zerodha:BSE:RELIANCE', 'binance:BTCUSDT'));
-    expect(symbolsOf(out)).toEqual(['zerodha:HFCL', 'zerodha:BSE:RELIANCE', 'binance:BTCUSDT']);
+    const out = withChartSymbols(state('india:NSE:HFCL', 'india:BSE:RELIANCE', 'binance:BTCUSDT'));
+    expect(symbolsOf(out)).toEqual(['india:HFCL', 'india:BSE:RELIANCE', 'binance:BTCUSDT']);
   });
 
   it('keeps everything else about a chart', () => {
-    const out = withChartSymbols(state('zerodha:NSE:INFY'));
-    expect(out.charts[0]).toMatchObject({ id: '0', provider: 'zerodha', symbol: 'zerodha:INFY' });
+    const out = withChartSymbols(state('india:NSE:INFY'));
+    expect(out.charts[0]).toMatchObject({ id: '0', provider: 'india', symbol: 'india:INFY' });
   });
 
   it('returns the state itself when nothing needs changing, and never edits its input', () => {
-    const already = state('zerodha:HFCL', 'binance:BTCUSDT');
+    const already = state('india:HFCL', 'binance:BTCUSDT');
     expect(withChartSymbols(already)).toBe(already);
-    const old = state('zerodha:NSE:HFCL');
+    const old = state('india:NSE:HFCL');
     withChartSymbols(old);
-    expect(symbolsOf(old)).toEqual(['zerodha:NSE:HFCL']);
+    expect(symbolsOf(old)).toEqual(['india:NSE:HFCL']);
   });
 
   it('copes with a state that has no charts', () => {

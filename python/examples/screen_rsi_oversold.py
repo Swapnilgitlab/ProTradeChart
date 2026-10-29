@@ -1,7 +1,7 @@
 """Finds stocks whose 14-day RSI is below 30 (oversold), most oversold first.
 
 Like the other screens it works with no setup: the watchlist named in WATCHLIST, else your first
-watchlist with Zerodha symbols, else ten large NSE stocks. The result opens in the
+watchlist with Indian market symbols, else ten large NSE stocks. The result opens in the
 Results tab; click a symbol to open its chart, or add the lot to a watchlist.
 """
 

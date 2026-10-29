@@ -8,13 +8,15 @@
  *  Field names are snake_case because the document is shared with Python and exported as a file.
  *  Pure. */
 
+import { canonicalProvider, INDIA, withCanonicalPrefix } from '../lib/symbols';
 import { measureLine } from './measures';
 import { canonicalFeature, describeCondition, featureInterval, featureLabel, needsBenchmark, windowLabel } from './metrics';
 
 export const SPEC_VERSION = 1;
 
 export type UniverseSource = 'instruments' | 'watchlist' | 'symbols';
-export type StudyProvider = 'zerodha';
+/** Studies read Indian market data, from whichever broker serves it. */
+export type StudyProvider = typeof INDIA;
 export type Exchange = 'NSE' | 'BSE';
 /** Which listings count as stocks: ordinary shares, the trade-for-trade series (BE/BZ) and the SME
  *  platforms. Bonds, SGBs, G-secs, T-bills and funds on an exchange's "equity" list never do. The
@@ -362,8 +364,9 @@ export function normalizeSpec(input: unknown): StudySpec {
   const u = isRecord(input.universe) ? input.universe : {};
   const source = (u.source ?? 'instruments') as UniverseSource;
   if (!['instruments', 'watchlist', 'symbols'].includes(source)) throw new SpecError('universe.source must be instruments, watchlist or symbols.');
-  const provider = (u.provider ?? 'zerodha') as StudyProvider;
-  if (provider !== 'zerodha') throw new SpecError('universe.provider must be zerodha.');
+  // A spec saved (or proposed) under a broker's name means the Indian namespace.
+  const provider = (typeof u.provider === 'string' ? canonicalProvider(u.provider) : (u.provider ?? INDIA)) as StudyProvider;
+  if (provider !== INDIA) throw new SpecError('universe.provider must be india.');
   const exchanges = u.exchanges ?? ['NSE'];
   if (!Array.isArray(exchanges) || exchanges.length === 0 || exchanges.some((e) => e !== 'NSE' && e !== 'BSE')) {
     throw new SpecError('universe.exchanges must list one or more of NSE, BSE.');
@@ -376,7 +379,7 @@ export function normalizeSpec(input: unknown): StudySpec {
   if (source === 'watchlist' && !watchlist) throw new SpecError('universe.watchlist must name a watchlist.');
   const symbols = u.symbols ?? [];
   if (!Array.isArray(symbols) || symbols.some((s) => typeof s !== 'string' || !s.includes(':'))) {
-    throw new SpecError('universe.symbols must be a list of symbols like zerodha:NSE:RELIANCE.');
+    throw new SpecError('universe.symbols must be a list of symbols like india:NSE:RELIANCE.');
   }
   if (source === 'symbols' && symbols.length === 0) throw new SpecError('universe.symbols needs at least one symbol.');
   if (symbols.length > LIMITS.symbols) throw new SpecError(`universe.symbols can hold at most ${LIMITS.symbols} symbols.`);
@@ -426,7 +429,7 @@ export function normalizeSpec(input: unknown): StudySpec {
 
   const benchmarkRaw = input.benchmark;
   if (benchmarkRaw !== null && benchmarkRaw !== undefined && (typeof benchmarkRaw !== 'string' || !benchmarkRaw.includes(':'))) {
-    throw new SpecError('benchmark must be a symbol like zerodha:NSE:NIFTY_500, or null.');
+    throw new SpecError('benchmark must be a symbol like india:NSE:NIFTY_500, or null.');
   }
   const control = isRecord(input.control_group) ? input.control_group : {};
   const output = isRecord(input.output) ? input.output : {};
@@ -450,7 +453,7 @@ export function normalizeSpec(input: unknown): StudySpec {
       exchanges: [...new Set(exchanges as Exchange[])],
       series: SERIES.filter((x) => (series as unknown[]).includes(x)),
       watchlist,
-      symbols: [...new Set((symbols as string[]).map((s) => s.trim()))],
+      symbols: [...new Set((symbols as string[]).map((s) => withCanonicalPrefix(s.trim())))],
       market_cap_min: num(u.market_cap_min, 'universe.market_cap_min', 0),
       min_avg_traded_value: num(u.min_avg_traded_value, 'universe.min_avg_traded_value', 0),
       min_price: num(u.min_price, 'universe.min_price', 0),
@@ -464,7 +467,7 @@ export function normalizeSpec(input: unknown): StudySpec {
     metrics,
     characteristics,
     measures: studyMeasures,
-    benchmark: typeof benchmarkRaw === 'string' ? benchmarkRaw.trim() : null,
+    benchmark: typeof benchmarkRaw === 'string' ? withCanonicalPrefix(benchmarkRaw.trim()) : null,
     outcome,
     control_group: {
       enabled: control.enabled === undefined ? true : Boolean(control.enabled),
@@ -478,7 +481,7 @@ export function normalizeSpec(input: unknown): StudySpec {
   if (periodic.length) throw new SpecError(`${periodic.join(', ')}: weekly and monthly features are for the Screener; a Study reads daily bars.`);
   if (!spec.benchmark) {
     const needing = requiredFeatures(spec).filter(needsBenchmark);
-    if (needing.length) throw new SpecError(`${needing.join(', ')} compare against an index: set a benchmark (e.g. zerodha:NSE:NIFTY_500).`);
+    if (needing.length) throw new SpecError(`${needing.join(', ')} compare against an index: set a benchmark (e.g. india:NSE:NIFTY_500).`);
   }
   return spec;
 }
@@ -532,7 +535,7 @@ export function interpret(spec: StudySpec): Interpretation[] {
   const universe =
     u.source === 'instruments'
       ? [
-          `${u.exchanges.join(' + ')} listed ${u.series.length === 1 ? 'ordinary shares' : `shares (${u.series.join(', ')} series)`} (Zerodha instrument list; bonds, SGBs and funds left out)`,
+          `${u.exchanges.join(' + ')} listed ${u.series.length === 1 ? 'ordinary shares' : `shares (${u.series.join(', ')} series)`} (the broker's instrument list; bonds, SGBs and funds left out)`,
         ]
       : u.source === 'watchlist'
         ? [`The watchlist "${u.watchlist}"`]

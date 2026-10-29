@@ -8,7 +8,7 @@ import { onOpenAlerts, openAlerts } from '../../alerts/ui';
 import { ChartView, type ChartViewHandle } from '../../chart/ChartView';
 import { ThemeSelect } from '../../components/ThemeSelect';
 import { useToast } from '../../components/Toasts';
-import { ensureProvidersLoaded, starterSymbol } from '../../data/providerStatus';
+import { ensureProvidersLoaded, refreshProviders, starterSymbol } from '../../data/providerStatus';
 import {
   deleteChartLayout,
   errorMessage,
@@ -18,7 +18,7 @@ import {
   setPreference,
   type ChartLayoutRow,
 } from '../../lib/ipc';
-import { displayTicker, isSupportedSymbol } from '../../lib/symbols';
+import { displayTicker, isSupportedSymbol, normalizeSymbol } from '../../lib/symbols';
 import { openNewWindow } from '../../lib/windows';
 import { publishDockRequest, subscribeDockRequests, type DockRequest } from '../../pine/dockBus';
 import { AboutDialog } from '../about/AboutDialog';
@@ -51,7 +51,7 @@ import {
 import { AiProvidersDialog, useAiProviders } from '../ai/AiProvidersDialog';
 import { AskAiPanel } from '../ai/AskAiPanel';
 import { DataProvidersDialog } from '../providers/DataProvidersDialog';
-import { ZerodhaLoginPrompt } from '../providers/ZerodhaLogin';
+import { BrokerLoginPrompt } from '../providers/BrokerLogin';
 import { parseLayout, serializeLayout, withoutUnsupportedSymbols, type LayoutDocument } from '../layouts/layoutDocument';
 import { SymbolSearchBox } from '../search/SymbolSearchBox';
 import { WatchlistPanel } from '../watchlist/WatchlistPanel';
@@ -368,7 +368,9 @@ export function Workspace() {
   /** Routes a symbol pick — from the search box, the watchlist, the data dialog or a Python
    *  script's results — to the chart the chrome is following, and shows it. */
   const goToSymbol = useCallback(
-    (symbol: string) => {
+    (picked: string) => {
+      // A script's results may name a symbol in an older spelling (`zerodha:NSE:X`); a tab holds the canonical one.
+      const symbol = normalizeSymbol(picked);
       if (!isSupportedSymbol(symbol)) {
         // e.g. a watchlist row saved from a data source the app no longer has: nothing can load it.
         toast(`${displayTicker(symbol)} came from a data source that is no longer available.`, 'info');
@@ -513,6 +515,34 @@ export function Workspace() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [openTab, closeTab, stepTab, openPython, openPine, toggleTester, toggleRailPanel, openHelp, activeTabId, chartSymbol]);
+
+  // Another broker now serves `india:` symbols (picked in Data providers, or the one in use was switched off): every
+  // chart tab is rebuilt from its own current state, so its charts load and stream through the new broker. Vela
+  // ignores a switch to the symbol a chart already shows, so rebuilding is the way to reload it.
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    let cancelled = false;
+    void listen('market-source-changed', () => {
+      void refreshProviders()
+        .catch(() => {})
+        .then(() =>
+          setTabs((prev) =>
+            prev.map((t) =>
+              isChartTab(t)
+                ? { ...t, initialState: chartRefs.current.get(t.id)?.getState() ?? t.initialState, rebuilds: (t.rebuilds ?? 0) + 1 }
+                : t,
+            ),
+          ),
+        );
+    }).then((unlisten) => {
+      if (cancelled) unlisten();
+      else stop = unlisten;
+    });
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, []);
 
   /** Never silently drops the save. A tab that was never shown has no live
    *  chart (see ChartView), so it falls back to its own last-known state —
@@ -733,6 +763,7 @@ export function Workspace() {
               <div key={tab.id} className={tab.id === activeTabId ? 'tab-panel' : undefined} style={tab.id === activeTabId ? undefined : { display: 'none' }}>
                 {isChartTab(tab) ? (
                   <ChartView
+                    key={tab.rebuilds ?? 0}
                     ref={(handle) => {
                       if (handle) chartRefs.current.set(tab.id, handle);
                       else chartRefs.current.delete(tab.id);
@@ -852,7 +883,7 @@ export function Workspace() {
       )}
       {providersOpen && <DataProvidersDialog onClose={() => setProvidersOpen(false)} />}
       {/* Once per launch, and only in the main window, so extra windows don't each ask again. */}
-      {isMainWindow && <ZerodhaLoginPrompt onOpenDataProviders={() => setProvidersOpen(true)} />}
+      {isMainWindow && <BrokerLoginPrompt onOpenDataProviders={() => setProvidersOpen(true)} />}
       {aiProvidersOpen && <AiProvidersDialog providers={aiProviders} onClose={() => setAiProvidersOpen(false)} onChanged={reloadAiProviders} say={toast} />}
       {alertForm && <AlertFormDialog seed={alertForm} onClose={() => setAlertForm(null)} />}
     </div>

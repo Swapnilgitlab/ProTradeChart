@@ -5,7 +5,7 @@ market loaded), so a whole universe arrives in about a second instead of one bro
 symbol. Symbols it doesn't hold yet are listed and left out; pt.bars_many would fetch them instead.
 
 Like the other screens it works with no setup: the watchlist named in WATCHLIST, else your first
-watchlist with Zerodha symbols, else ten large NSE stocks.
+watchlist with Indian market symbols, else ten large NSE stocks.
 """
 
 import pandas as pd

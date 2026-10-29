@@ -78,8 +78,8 @@ Returns, distances, slopes and volatilities are fractions: 0.25 is +25%, 1.0 is 
 - version: always 1.
 - name: a short title (at most 120 characters). description: one or two sentences of what the Study asks.
 - template: null.
-- universe.source: "instruments" (every listed stock of the exchanges), "watchlist" (universe.watchlist names one of the user's watchlists) or "symbols" (universe.symbols lists symbols written provider:EXCHANGE:TICKER, e.g. zerodha:NSE:RELIANCE).
-- universe.provider: always "zerodha". universe.exchanges: one or more of "NSE", "BSE" (NSE alone unless asked).
+- universe.source: "instruments" (every listed stock of the exchanges), "watchlist" (universe.watchlist names one of the user's watchlists) or "symbols" (universe.symbols lists symbols written provider:EXCHANGE:TICKER, e.g. india:NSE:RELIANCE).
+- universe.provider: always "india". universe.exchanges: one or more of "NSE", "BSE" (NSE alone unless asked).
 - universe.series: which listings count as stocks, one or more of ${SERIES.map((s) => `"${s}"`).join(', ')} (EQ: ordinary shares; BE: trade-for-trade; SME: the SME platforms). ["EQ"] unless asked.
 - universe.market_cap_min: always null (no market-cap data exists).
 - universe.min_avg_traded_value: rupees a day, the 50-day average of close × volume at the event, or null. 1e7 is ₹1 Cr.
@@ -119,7 +119,7 @@ A Study needs at least one metric or one measure; metrics may be [] when measure
 - Example measure: {"label": "Closed within 3% above its 21 EMA", "stat": "count", "conditions": [{"left": "dist_ema_21", "op": ">=", "right": 0, "label": null}, {"left": "dist_ema_21", "op": "<=", "right": 0.03, "label": null}], "feature": null, "window": {"start": {"offset": -252}, "end": {"offset": 0}}, "headline": true}
 
 ## More fields
-- benchmark: an index symbol for rs_N features, e.g. "zerodha:NSE:NIFTY_500"; null when no rs_ feature is used.
+- benchmark: an index symbol for rs_N features, e.g. "india:NSE:NIFTY_500"; null when no rs_ feature is used.
 - outcome: null, or {window, min_return}: split the events into those whose price rose at least min_return within window bars after the event, and those that didn't, and compare the two instead of using random dates.
 - control_group: {enabled, samples_per_event (1–10), seed}. Enabled with 2 samples per event and seed 42 unless asked: random non-event dates of the same stocks, filtered the same way.
 - output.max_events: 5000 unless asked (at most ${LIMITS.maxEvents}).
@@ -179,7 +179,7 @@ export const SPEC_SCHEMA = object({
   template: nullable(STRING),
   universe: object({
     source: { type: 'string', enum: ['instruments', 'watchlist', 'symbols'] },
-    provider: { type: 'string', enum: ['zerodha'] },
+    provider: { type: 'string', enum: ['india'] },
     exchanges: { type: 'array', items: { type: 'string', enum: ['NSE', 'BSE'] } },
     series: { type: 'array', items: { type: 'string', enum: [...SERIES] } },
     watchlist: nullable(STRING),
