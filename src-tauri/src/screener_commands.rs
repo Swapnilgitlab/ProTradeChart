@@ -79,6 +79,7 @@ pub async fn screen_run(
             run_id,
             remove_after: Some(file.clone()),
             on_exit: None,
+            env: Vec::new(),
         },
     )
     .await;

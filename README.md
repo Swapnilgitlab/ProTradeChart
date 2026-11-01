@@ -19,7 +19,7 @@ data needs no account; Indian market data needs your own Zerodha or FYERS accoun
 
 - **Serious charts.** Candles, bars, line, area, baseline and Heikin Ashi; a full drawing toolbar (lines, shapes, text
   annotations and more); 70+ built-in indicators; multiple panes; a WebGL2 renderer with a canvas fallback.
-  Drawn by [Vela](https://luxalgo.com/vela).
+  Drawn by [Vela](https://velacharts.dev).
 - **Bring your own broker.** Connect a [Zerodha](#connecting-zerodha) or [FYERS](#connecting-fyers) account for
   exchange-grade Indian market data — intraday history and live-updating charts. Credentials go in your operating
   system's keychain. Symbols don't name the broker (`india:NSE:RELIANCE`), so watchlists, alerts and layouts carry over
@@ -52,7 +52,8 @@ data needs no account; Indian market data needs your own Zerodha or FYERS accoun
 - **Six themes.** Daylight, Paper, Midnight, Graphite, Ocean and Terminal. The starting theme follows your OS's
   light/dark setting.
 - **Private by design.** No account and no telemetry. Everything you make (layouts, watchlists, imported data) lives in
-  one SQLite file on your machine, and broker prices are only ever held in memory; the app talks only to the data sources
+  one SQLite file on your machine, and broker prices are held in memory unless you choose to save them; the app talks
+  only to the data sources
   you turn on and, to check
   for updates, GitHub ([details](SECURITY.md#what-the-app-does-and-doesnt-do)).
 - **Updates.** ProTradeChart checks GitHub for a newer release about once a day and offers to install it (*About → Updates*).
@@ -113,6 +114,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib    # backend unit tests
 | Track symbols | The watchlist on the right (`Alt+W` shows or hides it). Click a row to chart it; `↑`/`↓` step through the list. Right-click a row to flag it, add an alert, open it in a new tab or add a section above it; drag rows to reorder, or click a section's name to fold it. |
 | Switch the side panel | The icons at the top of the right-hand rail: **Watchlist** and **Alerts**. Press the one that is showing to fold the panel away; the choice is remembered. Below them are the **Script Editor**, **Strategy Tester** and **Python** buttons, and the **Data providers** plug sits at the bottom. |
 | Import a watchlist | Watchlist **⋯** menu → *Import from file…* (a TradingView export or a CSV with a `Symbol` column). |
+| Export a watchlist | Watchlist **⋯** menu → *Export for TradingView…* (TradingView's format, as `.txt` or `.csv`). |
 | Chart your own data | The database icon in the tab bar → *Choose CSV file…* |
 | Choose and configure data sources | The plug icon at the bottom of the right-hand rail → *Data providers*. |
 | Search one source only | The dropdown to the left of the search box (shown when more than one source is on). |
@@ -168,12 +170,16 @@ A few things worth knowing:
 - **FYERS's terms are stricter.** [FYERS's API terms](https://fyers.in/terms-and-conditions-api) say exchange data may
   not be used to develop charting or technical tools, and need FYERS's written consent to build databases or keep
   permanent or temporary copies of its data. Read them, and make sure your use is allowed, before connecting FYERS.
-- **Never saved on your computer.** The brokers' terms restrict building databases or copies of their data,
-  so broker prices are held only in memory while the app is open: the bars charts show, what scripts, the Screener and
-  Studies read, and, with *Keep the market loaded* (*Data providers → Market data*), five years of every NSE stock. All of
-  it is gone when the app closes. The data folder keeps only what is yours (layouts, watchlists, alerts, scripts,
-  imported files, and the results of screens and Studies you ran). Nothing goes to this project or anyone else; AI
-  features send your question, symbols, watchlist names and a Study's summary statistics, never price history.
+- **Saved on your computer only if you choose.** The brokers' terms restrict building databases or copies of their
+  data, so by default broker prices are held only in memory while the app is open: the bars charts show, what scripts,
+  the Screener and Studies read, and, with *Keep the market loaded* (*Data providers → Market data*), five years of every
+  NSE stock. All of it is gone when the app closes. *Save prices on this computer* (*Data providers → Saved prices*)
+  keeps them in a file instead (by symbol, whichever broker supplied them), so charts open from it and the first screen after a launch is quick; it is
+  off until you switch it on and accept that your broker's terms may not allow it, and keeping to those terms is then
+  your responsibility. Switching it off deletes the files. The rest of the data folder is yours (layouts, watchlists,
+  alerts, scripts, imported files, and the results of screens and Studies you ran). Nothing goes to this project or
+  anyone else; AI features send your question, symbols, watchlist names and a Study's summary statistics, never price
+  history.
 - This software is for information only and is **not financial advice**. ProTradeChart is not a broker or a
   SEBI-registered investment adviser.
 
@@ -275,6 +281,12 @@ pt.show(pd.DataFrame(above), title="Above the 200-day average")
 can go to a watchlist. `pt.report(trades=…, equity=…)` shows a backtest — return, drawdown, CAGR, Sharpe, win rate, an
 equity curve against a benchmark, and the trades — and `pt.plot()` shows a matplotlib figure.
 
+The **Scheduler** tab runs your scripts by themselves at set times, while the app is open: one script, or a sequence of them
+run one after another (screen → update a watchlist → save charts → email yourself), the first failure ending the run. For
+those jobs a script has `pt.sql` (SQL on your watchlists, symbol lists, imported data and saved prices — it may change only the
+watchlists), `pt.screenshot` (a chart the app draws, as a PNG) and `pt.send_email` (mail to your own address through your own
+account), and the scripts of one run share a folder, `pt.run_folder()`.
+
 The first time, press **Set up Python** in the panel. Four example scripts are there to start from: a greeting, three
 screens (200-day average, RSI, 52-week highs) and a moving-average crossover backtest. Things worth knowing:
 
@@ -283,9 +295,10 @@ screens (200-day average, RSI, 52-week highs) and a moving-average crossover bac
   environment of your own instead (conda, uv), give its interpreter in the panel's settings (the gear).
 - **Your credentials stay in the app.** The app never hands a script a broker key or token. A script asks the app for bars over a
   local connection (`127.0.0.1`, protected by a one-off token that only scripts the app starts receive); the app fetches, paces
-  and holds them in memory. Only Indian market data (`india:…`, from your broker) and your imported CSV files are available to scripts, and only for
+  and holds them in memory (and saves them, if you chose to). Only Indian market data (`india:…`, from your broker) and your imported CSV files are available to scripts, and only for
   reading.
-- **Quick the second time.** The app holds what it fetched in memory while it is open (never on disk), so the first screen
+- **Quick the second time.** The app holds what it fetched in memory while it is open (and on disk, with *Save prices on
+  this computer* on, so it stays quick after a relaunch), so the first screen
   over a few hundred symbols takes minutes at the brokers' rate limits (Kite allows three history requests a second, FYERS's Standard plan fifty a
   minute), and
   later runs fetch only what is new: outside market hours, nothing at all, because a finished day's bar never changes.
@@ -402,7 +415,8 @@ src/                     React + TypeScript frontend
   lib/                   Pure helpers: timeframes & resampling, CSV and watchlist parsers, IPC wrappers
   theme/                 Theme registry and provider
 src-tauri/               Rust backend
-  src/store/             SQLite persistence (layouts, watchlists, datasets, Pine scripts), and the in-memory bar store
+  src/store/             SQLite persistence (layouts, watchlists, datasets, Pine scripts), the in-memory bar store, and
+                         the SQL of the opt-in saved prices (src/prices.rs opens their files)
   src/providers.rs       The catalogue of data providers and their settings
   src/secrets.rs         Credentials: OS keychain, with an explicit fallback
   src/zerodha/           Zerodha (Kite Connect): protocol, instrument list, HTTP client, live feed, login
@@ -438,7 +452,7 @@ Pine Script support is built on [**PineTS**](https://github.com/LuxAlgo/PineTS) 
 this app is too. "Pine Script" and "TradingView" are registered trademarks of TradingView, Inc.; this project is not
 affiliated with, sponsored by, or endorsed by TradingView. The script editor is [CodeMirror](https://codemirror.net) (MIT).
 
-Charts are rendered by [**Vela™**](https://luxalgo.com/vela) by LuxAlgo, licensed under Apache-2.0 with an attribution
+Charts are rendered by [**Vela™**](https://velacharts.dev) by LuxAlgo, licensed under Apache-2.0 with an attribution
 requirement — the small logomark at the bottom-left of every chart must stay visible. The app ships Vela with small
 changes of its own (the `patches/` folder). See
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (in the app, *About → Third-party notices*) for that and the other

@@ -10,13 +10,15 @@ Scripts run from the app's Python tab reach market data through it::
     closes = pt.panel(universe, bars=260).wide("close")
 
 The app fetches from the broker (it holds the credentials, and this package never sees
-them), keeps what it fetched in memory while it is open (never on disk), and answers over a
-local, token-protected connection. With "Keep the market loaded" on, daily bars for every NSE
-stock come from memory in one read (``pt.panel``) instead of one request per symbol, and
+them), keeps what it fetched in memory while it is open (on disk only if the user saves prices),
+and answers over a local, token-protected connection. With "Keep the market loaded" on, daily
+bars for every NSE stock come from memory in one read (``pt.panel``) instead of one request per symbol, and
 ``pt.snapshot`` gives today's quote for a whole market in a few seconds.
 
 A script can also keep one of the app's watchlists up to date (``pt.set_watchlist``), which is
-how a scheduled script refreshes a list every evening.
+how a scheduled script refreshes a list every evening. It can run SQL on the app's watchlists and
+read its saved prices (``pt.sql``), email you (``pt.send_email``), and have the app draw a chart
+(``pt.screenshot``). The scripts of one scheduled run share a folder (``pt.run_folder``).
 
 Studies (``pt.ResearchStudy``, see ``protrade.study``) measure what stocks looked like around
 historical events, from a Study Specification the app's Studies tab builds.
@@ -49,6 +51,7 @@ from .client import (
     RateLimitedError,
     UpstreamError,
 )
+from .helpers import run_folder, schedule, screenshot, send_email, sql
 from .results import plot, report, set_watchlist, show
 from .study import ResearchStudy, SpecError, StudyDataError
 
@@ -76,9 +79,14 @@ __all__ = [
     "providers",
     "report",
     "resample",
+    "run_folder",
+    "schedule",
+    "screenshot",
+    "send_email",
     "set_watchlist",
     "show",
     "snapshot",
+    "sql",
     "status",
     "universe",
     "watchlist",

@@ -16,6 +16,7 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
+  FileDown,
   FileUp,
   Flag,
   LayoutList,
@@ -43,6 +44,7 @@ import {
   deleteWatchlist,
   deleteWatchlistSection,
   errorMessage,
+  exportStudyFile,
   flagOfList,
   getPreference,
   getSymbolNames,
@@ -64,6 +66,7 @@ import {
 } from '../../lib/ipc';
 import { mergeQuotes, quoteTargets, rowWindow, SMALL_LIST } from '../../lib/listWindow';
 import { displayTicker, INDIA } from '../../lib/symbols';
+import { tradingViewList } from '../../lib/watchlistExport';
 import { parseWatchlistFile } from '../../lib/watchlistImport';
 import {
   buildRows,
@@ -717,7 +720,26 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
     }
   }
 
-  const sortMark = (key: SortKey) => (sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
+  /** Saves the list in TradingView's format, for its watchlist menu's **Import list…**: TradingView takes a
+   *  `.txt`, so that's the file type offered first, with `.csv` beside it for the same contents. */
+  async function handleExport() {
+    if (!detail) return;
+    const { text, count, skipped } = tradingViewList(rows);
+    if (count === 0) {
+      toast(skipped.length ? 'TradingView has none of the symbols in this list.' : 'This list has no symbols to export.', 'error');
+      return;
+    }
+    try {
+      const path = await exportStudyFile(detail.name, 'txt', text, ['csv']);
+      if (!path) return;
+      const left = skipped.length ? ` ${skipped.length} ${skipped.length === 1 ? 'symbol has' : 'symbols have'} no TradingView equivalent and ${skipped.length === 1 ? 'was' : 'were'} left out.` : '';
+      toast(`Saved ${count} ${count === 1 ? 'symbol' : 'symbols'} to ${path}.${left}`, 'success');
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    }
+  }
+
+  const sortMark =(key: SortKey) => (sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
   const menuRow = menu ? rowByKey.get(menu.key) : undefined;
   const pickedRow = flagPicker ? rowByKey.get(flagPicker.key) : undefined;
   const flagRow = pickedRow?.kind === 'item' ? pickedRow : undefined;
@@ -802,7 +824,7 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
             </button>
             {moreOpen && (
               <div className="menu" role="menu">
-                {/* A colour's list is simply what is flagged with it: nothing here applies to it. */}
+                {/* A colour's list is simply what is flagged with it: of what's here, only exporting applies to it. */}
                 {colourList && <div className="menu-empty small">Flag or unflag symbols to change this list.</div>}
                 {!colourList && (
                   <button
@@ -816,6 +838,20 @@ export function WatchlistPanel({ visible, activeSymbol, onSelectSymbol, onOpenIn
                   >
                     <FileUp size={14} />
                     <span className="grow">Import from file…</span>
+                  </button>
+                )}
+                {detail && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => {
+                      setMoreOpen(false);
+                      void handleExport();
+                    }}
+                  >
+                    <FileDown size={14} />
+                    <span className="grow">Export for TradingView…</span>
                   </button>
                 )}
                 {detail && !colourList && (

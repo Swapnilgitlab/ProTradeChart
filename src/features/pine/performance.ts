@@ -3,7 +3,8 @@ import { formatBars, formatMoney, formatPct, formatRatio, formatSignedMoney, pnl
 
 /** The Performance Summary table: TradingView's rows, with All / Long / Short columns.
  *  Rows that can only be measured on the whole account (drawdown, buy & hold) show a dash
- *  under Long and Short. */
+ *  under Long and Short. CAGR, the Sharpe and Sortino ratios and outperformance are the
+ *  engine's own figures, shown only when it reports them. */
 
 export interface Cell {
   text: string;
@@ -41,8 +42,14 @@ function accountRow(label: string, all: Cell): StatRow {
   return { label, all, long: NONE, short: NONE };
 }
 
+/** An account row of a figure only the engine reports, left out when it didn't. */
+function engineRow(label: string, v: number | null, cell: (n: number) => Cell): StatRow[] {
+  return v === null ? [] : [accountRow(label, cell(v))];
+}
+
 export function performanceSections(report: TesterReport, currency?: string): Section[] {
   const s = report.summary;
+  const e = report.engine;
   const returns: Section = {
     title: 'Returns',
     rows: [
@@ -52,9 +59,13 @@ export function performanceSections(report: TesterReport, currency?: string): Se
       perSide('Profit factor', report, (x) => optional(x.profitFactor, formatRatio)),
       perSide('Commission paid', report, (x) => plain(formatMoney(x.commissionPaid, currency))),
       perSide('Open P&L', report, (x) => money(x.openPnl, currency)),
-      accountRow('Buy & hold return', money(s.buyHold, currency, formatPct(s.buyHoldPct, true))),
+      accountRow('Buy & hold return', s.buyHold === null ? NONE : money(s.buyHold, currency, formatPct(s.buyHoldPct, true))),
+      ...engineRow('Outperformance vs buy & hold', e.outperformance, (v) => money(v, currency)),
+      ...engineRow('CAGR', e.cagr, (v) => ({ text: formatPct(v, true), tone: pnlClass(v) })),
       accountRow('Max run-up', money(s.maxRunup, currency, formatPct(s.maxRunupPct))),
       accountRow('Max drawdown', { text: formatMoney(-s.maxDrawdown, currency), tone: s.maxDrawdown > 0 ? 'neg' : '', sub: formatPct(s.maxDrawdownPct) }),
+      ...engineRow('Sharpe ratio', e.sharpe, (v) => plain(formatRatio(v))),
+      ...engineRow('Sortino ratio', e.sortino, (v) => plain(formatRatio(v))),
     ],
   };
   const trades: Section = {

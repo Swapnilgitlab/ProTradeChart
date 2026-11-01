@@ -22,18 +22,15 @@ use crate::fyers::client::{Credentials, FyersClient};
 use crate::fyers::instruments::{self, Instrument};
 use crate::fyers::poller::{Poller, Status as PollStatus};
 use crate::fyers::protocol::{
-    extract_auth_code, login_url, plan_windows, token_expiry_estimate_secs, FyersError, FyersErrorKind, Interval, Plan,
+    extract_auth_code, login_url, token_expiry_estimate_secs, FyersError, FyersErrorKind, Interval, Plan,
 };
 use crate::fyers::session::{can_renew, should_renew, FyersSession};
 use crate::market::ist_date;
-use crate::models::{Bar, BarsResponse, DaySnapshot, Quote, SymbolMatch};
+use crate::models::{Bar, DaySnapshot, Quote, SymbolMatch};
 use crate::provider_commands::TestResult;
 use crate::providers;
 use crate::secrets::Secrets;
-use crate::store::bar_memory::BarMemory;
 use crate::store::provider_settings::{self as settings, Table};
-use crate::store::research_bars::canonical_interval;
-use crate::symbols::INDIA;
 
 pub const FYERS: &str = "fyers";
 const INSTRUMENTS_UPDATED_KEY: &str = "instrumentsUpdatedAt";
@@ -52,8 +49,6 @@ const PIN: &str = "pin";
 pub(crate) const INSTRUMENTS_MAX_AGE_MS: i64 = 7 * 86_400_000;
 /// Told to every window when the FYERS login changes (a login, a renewal, a refused renewal).
 pub const SESSION_EVENT: &str = "fyers-session";
-/// India Standard Time, the zone FYERS's market keeps.
-const IST_OFFSET_SECS: i64 = 19_800;
 
 fn lock(db: &Database) -> Result<MutexGuard<'_, Connection>, String> {
     db.conn.lock().map_err(|e| e.to_string())
@@ -450,6 +445,8 @@ async fn save_login(app: &AppHandle, code: &str) -> Result<LoginResult, String> 
     if let Ok(mut error) = state.renewal_error.lock() {
         *error = None;
     }
+    // A first login can make FYERS the broker serving Indian symbols.
+    crate::market_commands::sync_market(app);
     let _ = app.emit(SESSION_EVENT, ());
     Ok(LoginResult {
         token_expires_at: token_expiry_estimate_secs(now_ms()),
@@ -555,7 +552,7 @@ pub async fn refresh_instruments_if_stale(db: &Database, secrets: &Secrets, clie
 
 // ---- Market data (for `market_commands` and the Python API) ---------------------
 
-fn resolve_or_explain(conn: &Connection, ticker: &str) -> Result<Instrument, String> {
+pub fn resolve_or_explain(conn: &Connection, ticker: &str) -> Result<Instrument, String> {
     sql(instruments::resolve(conn, ticker))?.ok_or_else(|| {
         format!("FYERS has no instrument called '{ticker}'. Search for it, or update the instrument list in Data providers.")
     })
@@ -565,8 +562,9 @@ pub fn search_instruments(db: &Database, query: &str, limit: usize) -> Result<Ve
     sql(instruments::search(&*lock(db)?, query, limit))
 }
 
-/// History for one instrument, and where it really began: a span longer than [`plan_windows`] covers
-/// is answered with only its newest part.
+/// History for one instrument, and where it really began: a span longer than
+/// [`plan_windows`](crate::fyers::protocol::plan_windows) covers
+/// is answered with only its newest part, and nothing is older than the oldest data FYERS holds.
 pub async fn fetch_history(
     app: &AppHandle,
     inst: &Instrument,
@@ -577,75 +575,10 @@ pub async fn fetch_history(
     let client = app.state::<FyersClient>();
     let client = client.inner();
     let now = now_ms();
-    let began = plan_windows(interval, from_ms, to_ms, now)
-        .first()
-        .map_or(from_ms.unwrap_or(now), |w| w.from_ms.max(from_ms.unwrap_or(i64::MIN)));
-    let bars = with_credentials(app, |creds| async move {
+    with_credentials(app, |creds| async move {
         client.fetch_history(&creds, inst, interval, from_ms, to_ms, now).await
     })
-    .await?;
-    Ok((bars, began))
-}
-
-/// A chart's bars, as `market_fetch_bars` answers while FYERS serves `india:` symbols — the same way
-/// Zerodha's are: daily from memory when the market is loaded, the rest from FYERS, and memory again
-/// (never the disk) when the network drops.
-pub async fn fetch_bars(
-    app: &AppHandle,
-    ticker: &str,
-    interval: &str,
-    from_ms: Option<i64>,
-    to_ms: Option<i64>,
-) -> Result<BarsResponse, String> {
-    let interval_kind =
-        Interval::parse(interval).ok_or_else(|| format!("FYERS doesn't serve a '{interval}' interval"))?;
-    let inst = resolve_or_explain(&*lock(&app.state::<Database>())?, ticker)?;
-    let cache_key = format!("{INDIA}:{}", inst.ticker);
-    let cache_interval = canonical_interval(interval);
-    let memory = app.state::<BarMemory>();
-    let response = |bars, from_cache| BarsResponse {
-        bars,
-        gmt_offset: IST_OFFSET_SECS,
-        timezone: Some("Asia/Kolkata".into()),
-        from_cache,
-    };
-    if let (true, Some(from)) = (cache_interval.as_deref() == Some("D"), from_ms) {
-        match crate::marketdata::chart_daily(app, &cache_key, from, to_ms).await {
-            Some(Ok(bars)) => return Ok(response(bars, false)),
-            Some(Err((_, stored))) if !stored.is_empty() => return Ok(response(stored, true)),
-            Some(Err((message, _))) => return Err(message),
-            None => {}
-        }
-    }
-    match fetch_history(app, &inst, interval_kind, from_ms, to_ms).await {
-        Ok((bars, _)) => {
-            if let Some(interval) = cache_interval.as_deref().filter(|_| !bars.is_empty()) {
-                // Daily bars sit on IST midnight in memory, as the Python API stores them.
-                let mut kept = bars.clone();
-                if interval == "D" {
-                    crate::pyapi::data::normalise_daily(&mut kept);
-                }
-                memory.put(&cache_key, interval, &kept);
-            }
-            Ok(response(bars, false))
-        }
-        Err(e) if e.kind == FyersErrorKind::Network => {
-            let cached = cache_interval.as_deref().map_or_else(Vec::new, |interval| {
-                memory.get(
-                    &cache_key,
-                    interval,
-                    from_ms.unwrap_or(i64::MIN),
-                    to_ms.unwrap_or(i64::MAX),
-                    None,
-                )
-            });
-            if cached.is_empty() {
-                return Err(e.message());
-            }
-            Ok(response(cached, true))
-        }
-        Err(e) => Err(e.message()),
-    }
+    .await
 }
 
 /// The instruments behind `tickers`, in order; `None` for one FYERS doesn't list.
@@ -816,7 +749,7 @@ pub async fn test(app: &AppHandle) -> Result<TestResult, String> {
         )
         .await
     {
-        Ok(bars) => {
+        Ok((bars, _)) => {
             let latest = bars.last().map(|b| ist_date(b.time)).unwrap_or_else(|| "none".into());
             details.push(format!(
                 "Daily history works: {} bars for RELIANCE, latest {latest}.",

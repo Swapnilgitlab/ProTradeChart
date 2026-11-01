@@ -2,7 +2,7 @@
 
 A [Tauri 2](https://tauri.app) desktop app: a **React + TypeScript** frontend running in the OS webview, and a small
 **Rust** backend that owns the database, holds broker credentials, and talks to the broker APIs. Charts
-are drawn by [Vela](https://luxalgo.com/vela).
+are drawn by [Vela](https://velacharts.dev).
 
 ```
 ┌────────────────────────── webview (React + TypeScript) ──────────────────────────┐
@@ -65,11 +65,16 @@ watchlist, an alert, a drawing, a layout, a screen and a Study survive a change 
 - **Which broker.** `symbols::india_broker` (Rust) decides, and the webview reads its answer (`market_source`,
   `activeBroker()` in `data/providerStatus.ts`): the one the user picked (`ui_preferences['india.source']`, the **Indian market
   data from** picker in Data providers, shown once two are set up), else the one set up and switched on (Zerodha first),
-  else Zerodha. Never two: when the broker changes, by a pick or because a setting change made another the one in use
-  (`market_commands::after_broker_settings_changed`), the session's `india:` series are dropped from `BarMemory`, FYERS's
-  quote cache is cleared, a market load in progress is stopped, and every window hears `market-source-changed` and rebuilds
-  its chart tabs from their own state (Vela ignores a switch to the symbol a chart already shows). Two brokers' bars are
-  never stitched into one series.
+  else Zerodha. Never two at once. When the broker changes, by a pick or because a setting change or a login made another the
+  one in use (`market_commands::sync_market`), FYERS's quote cache is cleared, a market load in progress is stopped, and every
+  window hears `market-source-changed` and rebuilds its chart tabs from their own state (Vela ignores a switch to the symbol a
+  chart already shows).
+- **The prices are broker-agnostic.** `BarMemory` (and the saved prices behind it) keys a series by its neutral symbol
+  whichever broker served it, so a change of broker keeps everything held and the new broker fills in only what is new. A
+  series records which brokers supplied it (`sources`), so a broker's prices can be deleted when its login is forgotten. What
+  keeps a series from mixing two brokers' different prices is `pyapi::data::load_bars`'s check of one already-final bar
+  against the answering broker's copy: at a seam (the answering broker supplied none of the series) the whole bar, volume
+  included, must agree, or the series is read again whole from that broker.
 - **Routing.** One Vela provider, `india` (`data/providers/india.ts`), calls `market_fetch_bars` / `market_quotes` /
   `market_search_instruments`, which `market_commands.rs` hands to the broker's own module; it needs the broker itself only for
   the timeframe plan (`toBrokerPlan`) and the live source. The Python API, the market-data job and the Studies' estimate
@@ -290,7 +295,9 @@ Vela speaks canonical timeframes — minutes as bare digits (`"5"`, `"60"`), and
   a day begins.
 
 **Daily-and-up bars are stamped at local midnight of the exchange's calendar date; intraday bars keep their real
-instant.** Each new chart is set to the machine's timezone (`ChartView.tsx`) so both read correctly on the axis.
+instant.** Each new chart is set to the machine's timezone (`ChartView.tsx`) so both read correctly on the axis. Since
+0.9.1, Vela reads a daily-or-longer bar's date in UTC (it assumes those bars sit on UTC midnight); our patch
+(`patches/`) keeps it in the chart's zone, or an IST user's daily bars would each read the day before.
 
 ## Side panels, watchlists and tab prices
 
@@ -365,8 +372,9 @@ wrapped by the tap**, or its tabs fall back to the poll.
 ## Persistence
 
 One SQLite file (`charting.db`, in the OS's per-user app data folder), opened by `src-tauri/src/db.rs`, shared through one
-connection (`Database`). **No table holds broker price history**: Kite Connect's terms restrict permanent copies of its data,
-so every broker bar lives in memory for the session (`store/bar_memory.rs`, see "Python") and is gone when the app closes.
+connection (`Database`). **No table in it holds broker price history**: Kite Connect's terms restrict permanent copies of its
+data, so every broker bar lives in memory (`store/bar_memory.rs`, see "Python") and is gone when the app closes, unless the user
+switches on "Save prices on this computer", which keeps them in a file of their own (see "Saved prices").
 Databases from before that had three bar tables (`bars_cache`, `research_bars`, `research_coverage`); `store/bar_tables.rs`
 drops them on the first launch after the change and `Database::init` then runs `VACUUM` once to hand the space back. It also
 carries the old market-data preferences over: a user who had downloaded the market (and left its daily update on) gets
@@ -376,7 +384,7 @@ carries the old market-data preferences over: a user who had downloaded the mark
 | --- | --- |
 | `ui_preferences` | Key/value settings (theme, which side panel the rail shows) |
 | `chart_layouts` | Named sessions. `state_json` is **opaque to Rust** — the frontend owns its shape (`LayoutDocument`, versioned) |
-| `pine_scripts` | The user's Pine Script library: name, kind (`indicator` / `strategy`) and source |
+| `pine_scripts` | The user's Pine Script library: name, kind (`indicator` / `strategy` / `library`) and source. A database from before libraries is rebuilt once to allow them (`store::scripts::migrate`) |
 | `watchlists`, `watchlist_items`, `watchlist_sections` | Lists, their symbols (with a colour flag) and their section headings; see "Watchlists" |
 | `datasets`, `dataset_bars` | Imported CSV data |
 | `market_symbols` | Every symbol "Keep the market loaded" covers, with when it was first and last listed: names, never prices (see "Keep the market loaded") |
@@ -445,6 +453,14 @@ background under a light theme would get a black mark on a dark canvas. The mark
 so `tintAttribution` re-inks it from its cell's background with Vela's own rule (white on dark, black on light) after
 construction, a theme switch, a grid change and any change to a chart's settings (`renderer.onConfigChanged`).
 
+The status line's OHLC and change values are inked by Vela from the price style's own colours — for candles, the body's —
+so up candles given the canvas colour as body (a hollow look, outlined by the border) would put their values in the
+canvas colour too. `keepStatuslineReadable` (`chart/statuslineInk.ts`) wraps each cell's `statusline.setDirectionColors`,
+which Vela calls with its pick on every settings change: per direction, the first part of the candle that is drawn
+(body, border, wick) and stands out from the canvas (2:1 — low on purpose, to catch the canvas's own colour without
+judging the palette), else the theme's colour. `statusline` and `syncStatuslineColors` are private to Vela's cell; if a
+Vela version renames them this quietly does nothing, so check the readout on a hollow-looking layout after an upgrade.
+
 Vela owns a chart's state after construction, so `initialSymbol` / `initialState` are seeds only, and symbol changes go
 through the imperative `ChartViewHandle`.
 
@@ -470,11 +486,23 @@ makes them belong to the symbol instead, for every cell of every grid (`ChartVie
 ## Vela specifics worth knowing
 
 - `installThinMovingAverages()` must run **after every** `new VelaWorkspace(...)`, because Vela re-registers its built-in
-  moving-average indicators on each construction. It swaps in 1px-wide lines.
+  moving-average indicators on each construction. It re-registers Vela's own descriptors with every line drawn 1px wide
+  (`thinLines`); the inputs, maths and titles stay Vela's.
 - Vela's attribution mark is left on. Don't disable it without showing an equivalent credit — see
   [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 - Links rendered by Vela (its attribution mark) would navigate the app window; `lib/externalLinks.ts` sends every
   `http(s)` link to the system browser instead.
+- **Drawing-tool settings are app-wide** (`chart/drawingToolPrefs.ts`). Vela keeps each tool's remembered settings and
+  saved styles per workspace (in its state's `drawingTools`) and mirrors a cell's onto the others. We keep them in one
+  preference (`drawing.tools`): laid over a new workspace's own (after its state is applied, the saved ones winning), and
+  updated **one tool at a time** from each cell's `drawing:defaults` / `drawing:templates` events, so two tabs or windows
+  never overwrite each other's other tools. The watchers start only after that restore, or a layout's older settings
+  would be taken as an edit.
+- **Bar replay** (`chart/replay.ts`, `features/replay/ReplayBar.tsx`). Vela replays (`ws.replay`, one clock for every
+  cell) but offers no way to start one, so we register a **Replay** topbar action and a **Replay from this bar** context
+  action (it reads the right-clicked bar from `ctx.pointer.time`). Both go through a small bus to the `ChartView` that owns
+  the chart, which shows the strip under its canvas. Whole bars only: tick replay would read one-minute history for every
+  bar, at the broker's pace.
 
 ## Pine Script
 
@@ -487,20 +515,22 @@ script.
 | --- | --- | --- |
 | Engine | `pine/engine.ts` | `registerDefaultEngine('pine', …)` in `main.tsx`, before any workspace exists. A `PineWorkerEngine` wrapped in `BarsTap`, which records the bars each script runs on (Vela hands them only to the engine) so the tester can build an equity curve |
 | Library | `store/scripts.rs`, `pine_scripts` table, `lib/ipc.ts` | Saved scripts. The frontend detects a script's kind from its declaration (`pine/source.ts`) |
+| Pine libraries | `pine/libraries.ts` | The engine's `importResolver`: `import <user>/<Name>/<version>` resolves to the saved `library("Name")`, whatever the user and version (the app has no accounts or published versions). Asked on the main thread at prepare; nothing is fetched. A library can be saved but not added to a chart |
 | Layout persistence | `pine/persistence.ts` | Vela doesn't save runtime-added scripts, so a `registerStatePersistence` handler stores each chart's script indicators in the layout's per-chart `ext`: source, plus only the input and prop values that differ from the defaults. The layout is self-contained: it still opens if the script was deleted from the library |
 | Ids | `pine/ids.ts` | An indicator this app adds is `<libraryScriptId>~<suffix>`, so a legend row leads back to its library script, and one Vela added itself (a bundled script) can be told apart |
 | Bundled scripts | `pine/indicators/**/*.pine`, `pine/bundled.ts` | Scripts that ship with the app. Vite inlines them (`import.meta.glob(…, '?raw')`), and they are handed to Vela as its indicator **manifest** with `enabled: false`, so they appear in the chart's Indicators dialog (grouped by folder) without being added to every chart. Vela saves a manifest indicator in layouts **by name**, so a script's declared title is its identity; `persistence.ts` skips them so they aren't restored twice. `bundled.engine.test.ts` compiles and runs every one on the real engine. Editing a `.pine` file reloads the dev app (`reloadOnPineChange` in `vite.config.ts`: a hot-swapped module would leave the live chart on the old script). See `pine/README.md` |
-| Backtest report | `pine/tester.ts` | Pure. The engine reports fills and account state, not P&L, commission or an equity history, so trades, net P&L, run-up, drawdown, the equity curve and the summary are derived from fills + bars + the strategy's commission setting. Tests hold the numbers to PineTS's own ledger (`tester.engine.test.ts`) |
+| Backtest report | `pine/tester.ts` | Pure. The engine reports fills and account state, not P&L, commission or an equity history, so trades, net P&L, run-up, drawdown, the equity curve and the summary are derived from fills + bars + the strategy's commission setting. Tests hold the numbers to the engine's own ledger (`tester.engine.test.ts`, each trade's `pnl` and the account's equity) |
 | UI | `features/pine/` | The Script Editor is a workspace tab (`kind: 'pine'`, `PineEditor`: a script library beside CodeMirror 6, `pineLanguage.ts`), opened from the right rail, `Ctrl+E`, Home, or the "Edit script" button registered on every script's legend row (`pine/hostActions.ts`, through `dockBus` to `Workspace`). It adds scripts to `activeChartTab` — the chart last looked at — and names it in its toolbar. The Strategy Tester stays in a dock under the charts (`PineDock`, `Ctrl+Shift+E`), mounted on that same chart while a workspace tab shows (only hidden), because a strategy reports its results as it runs and a late listener would miss them |
 
 - **The backtest covers the bars the chart has loaded**, so a longer test means scrolling the chart back (see "History on
   demand"). `script:run` events drive the tester; strategies removed from the chart are pruned.
-- **Results are approximate.** PineTS's broker emulator differs from TradingView's in order-handling details
-  (LuxAlgo/PineTS#316), and equity, run-up and drawdown here are measured on bar closes. One case bites often: an order
+- **Results are approximate.** PineTS 0.12 rebuilt its broker emulator on TradingView's intrabar path (open, nearer
+  extreme, farther extreme, close) and fills on the tick grid, but it is not TradingView's; equity, run-up and drawdown
+  here are measured on bar closes. One case bites often: an order
   for 100% of equity plus commission is closed at once by a "Margin call". The tester detects and explains it.
 - Adding a script to a chart uses `chart.runScript`, which puts it on the chart only if it compiles. Editing one in place
-  uses `handle.updateCode`, whose success is the script's next `script:run` with `cause: 'code'` — a handle's own
-  `ready` event fires only once.
+  uses `handle.updateCode`, which resolves `{ ok, error }` once the new code has run (a failure puts the old code back
+  and fires `indicator:error`) — a handle's own `ready` event fires only once.
 - `handle.title` is a placeholder until a script runs; the title it declares comes from `script:run` or
   `declaredTitle(source)`.
 
@@ -509,7 +539,8 @@ script.
 The user's own scripts run as **child processes** of the app and reach market data through a small **local API**, so a
 broker's credentials never leave Rust: a script asks for bars, and Rust fetches (through the same paced clients the charts
 use), holds them in memory for the session, and answers. It is for research — screening, backtesting, analysis. Nothing here
-places an order, and nothing here writes a broker's prices to disk.
+places an order, and nothing here writes a broker's prices to disk except through memory's saved prices (see "Saved
+prices"), when the user has switched them on.
 
 ```
  Python tab ─── invoke ──▶ python_commands.rs ── spawn ──▶ <venv>/python script.py   (import protrade as pt)
@@ -527,7 +558,7 @@ places an order, and nothing here writes a broker's prices to disk.
 | Client | `python/protrade/` | Standard library plus pandas. It is embedded in the app (`python/client_files.rs`), written to `<app data>/python/lib` at each run and put on the child's `PYTHONPATH`, so it is never `pip install`ed and always matches the running app. A debug build (`tauri:dev`) writes the repository's current copy instead of the embedded one, because the dev watcher doesn't rebuild for changes outside `src-tauri/`: a `git pull` of Python takes effect on the next run. A Study prints and records which engine ran (`[engine] protrade 1.0 (<hash>)`, `meta.engine_build`). A test fails if a module is added to the folder without being listed in `FILES`. |
 | Local API | `pyapi/` | `data.rs` (bars: memory reads plus broker fetches; also `sync_daily`, the quote top-up, and `snapshot`, a whole market's quote), `routes.rs` (auth and routing, against a `Backend` trait), `server.rs` (hyper), `backend.rs` (the real `Backend`, plus the error mapping), `wire.rs` (JSON, and the panel's binary columns). Read-only `GET`s: `/v1/bars`, `/v1/instruments`, `/v1/watchlists`, `/v1/watchlist`, `/v1/providers`, `/v1/ping`; and `POST /v1/panel` and `POST /v1/snapshot`, reads posted only because a market's symbol list doesn't fit a URL (see "Keep the market loaded" and "Screener"). `POST /v1/results` (which, for kind `watchlist`, writes a watchlist: see "Scripts writing watchlists") and `POST /v1/bars/sync` (brings many symbols' daily coverage up to date from a batched broker quote and answers a per-symbol status, never bars — see "Screener") are the two writes. |
 | Results | `pyapi` `POST /v1/results` → `python-result` → `python/results.ts` → `features/python/Results*.tsx` | What a script shows: `pt.show` (a table), `pt.report` (a backtest) and `pt.plot` (a matplotlib PNG); a Study's result is kind `study` (see "Studies"), and one sent by a script in the Python tab is stored with the Studies' results. Rust checks only what makes forwarding safe — the run id, the kind, a title's length, and that a figure's bytes really start like a PNG — and the webview validates the shape before drawing. The report reuses the Strategy Tester's `EquityChart`. |
-| Bar memory | `store/bar_memory.rs`, `store/research_bars.rs` | Every broker bar the app holds, in memory only, with a *coverage* per series (`bar_memory`), and the pure sync policy over it (`research_bars::plan`). See below. |
+| Bar memory | `store/bar_memory.rs`, `store/research_bars.rs` | Every broker bar the app holds, in memory (backed by the saved prices when they are on), with a *coverage* per series (`bar_memory`), and the pure sync policy over it (`research_bars::plan`). See below. |
 | UI | `features/python/`, `python/` (TS) | **A tab of its own**, beside the charts (`features/workspace/tabs.ts`), holding the script list, the editor, the console and the results. `python/console.ts`, `format.ts` and `results.ts` are pure and tested. It loads nothing until the tab is first shown: no Python is probed and no example is written for someone who never opens it. |
 
 - **A script's output is data, never markup.** A script is code the user wrote, so `python/results.ts` refuses anything it
@@ -543,10 +574,11 @@ places an order, and nothing here writes a broker's prices to disk.
   timeout and there is a cap on connections, so a stalled or runaway client can't hold it up. **Who is asking is settled before any
   body is read** (`server.rs` calls `authorize` first), so an unauthorised caller can't make the app buffer megabytes; a body is
   capped at 16 MB, by its declared length and again as it arrives.
-- **Bars live in memory, never on disk.** `BarMemory` (Tauri state, one per process) holds every series the session has read: the
-  Python API's, the Screener's and Studies', "Keep the market loaded"'s, and the charts' recent bars (put there without coverage,
-  as the offline fallback when the network drops). It has a budget (about 400 MB) and drops the series read least recently, bars
-  and coverage together, so a dropped series is simply fetched again. Its lock is never held across an await. It records per
+- **Bars live in memory, and on disk only through it.** `BarMemory` (Tauri state, one per process) holds every series the session
+  has read: the charts', the Python API's, the Screener's and Studies', and "Keep the market loaded"'s. With saved prices on, it is
+  backed by a file (see "Saved prices"). It has a budget (about 400 MB) and frees the series read least recently: wholly, bars and
+  coverage together, so a dropped series is simply fetched again; or, for a saved series, its bars only, read back from the file
+  when next wanted. Its lock is never held across an await. It records per
   `(symbol, interval)` the span whose bars are complete, because "no bars" (a holiday, a stock not yet listed) and "not fetched
   yet" look alike. `research_bars::plan` is the whole sync policy and is pure: given
   the coverage, the request and the time it says which ranges to fetch. Ranges always touch the existing coverage, so it stays one
@@ -554,7 +586,9 @@ places an order, and nothing here writes a broker's prices to disk.
   intraday tail is refetched from a few bars back (to replace the forming bar) once it is older than its ttl. A **daily** series
   follows the exchange's calendar instead (`market.rs`, pure like the planner): a settled session's bar never changes, so the age of
   a sync is no reason to look again. Only a session that settled after the coverage's end (15:30 IST plus half an hour) triggers a
-  refresh, from that last day, or during market hours a forming bar older than five minutes. So a second screen the same evening,
+  refresh, or during market hours a forming bar older than five minutes. A refresh starts on the last bar that was already final
+  when it was read, and `load_bars` compares that bar with the broker's copy: a mismatch means a split or bonus since, and the
+  whole series is read again (`replace_covered`) rather than stitching adjusted bars onto unadjusted ones. So a second screen the same evening,
   or over a weekend, costs no broker requests. Holidays are deliberately not modelled (a list in a binary rots): one is a single
   empty check, after which coverage reaches past it. MCX trades to 23:30, so its daily bar is taken as final early until the next
   refresh corrects it.
@@ -587,24 +621,25 @@ places an order, and nothing here writes a broker's prices to disk.
   returns one, and a script runs only when the user presses Run — never on opening a layout, importing a file or starting the app.
   The environment a script inherits has `TAURI_*` (the updater's signing key, during development) removed.
 
-### Scheduled scripts
+### Scheduled scripts (the Scheduler)
 
-A script can run by itself at set times — to refresh a watchlist every evening, say. This is the one way a script runs without
-the user pressing Run, so it is narrow on purpose.
+A schedule runs a **sequence** of Python scripts by itself at set times — screen, update a watchlist, save chart pictures,
+email the result. This is the one way a script runs without the user pressing Run, so it is narrow on purpose. Schedules run only
+while the app is open (no tray, no autostart: the owner's decision, 2026-10-31).
 
 | Piece | Where | Notes |
 | --- | --- | --- |
 | Rules | `scheduler/plan.rs` | Pure. A `Rule` is the days (Monday first) and either a time (`daily`) or every N minutes (5–720) between two times (`every`), all **IST** like `market.rs` (no DST, no timezone crate). `next_after` finds the next firing; `decide` says what to do with a schedule on one look: wait, plan it, run it, skip it (its last run is still going) or record it **missed**. |
-| Store | `store/schedules.rs`; `script_schedules`, `schedule_runs` | A schedule names a script (checked to exist when saved) and keeps `next_run_at`. Each time one comes due a history row records it: `running` → `ok` / `failed` / `stopped`, or `missed` / `skipped` at once, with a message and the tail of the output (16 KB). The newest 30 are kept per schedule; deleting a schedule deletes its history. |
-| Engine | `scheduler/engine.rs` | One task for the process, started once in `lib.rs` (not per window, so a run never starts twice). Every 15 s it applies `decide` to each switched-on schedule and starts due ones through `start_python` — the Run button's path, same environment and token — with a `StartRun::on_exit` that records how the run ended. A run that can't start (the script is gone, Python isn't set up) is recorded as failed. Emits `schedules-changed` and `schedule-run-finished`; the main window toasts a failure. |
-| UI | `features/python/SchedulesPane.tsx`, `python/schedules.ts` | The Python tab's third output tab, and a **Schedule** button in its toolbar that opens a new schedule for the open script. `schedules.ts` (pure, tested) words a rule, shows times on the IST clock and repeats `Rule::check`. |
+| Store | `store/schedules.rs`; `script_schedules`, `schedule_runs`, `schedule_steps` | A schedule has a name, its scripts in order (`scripts_json`, 1–20, each checked to exist when saved; a schedule from before sequences reads as its one `script`, `migrate` adding the newer columns), whether to email on failure, and `next_run_at`. Each time one comes due a history row records it — `running` → `ok` / `failed` / `stopped`, or `missed` / `skipped` at once — and each script of a run a step row, with its status, message and output tail (16 KB); scripts after a failure are `not-run`. The newest 30 runs are kept per schedule (their steps with them); deleting a schedule deletes its history. |
+| Engine | `scheduler/engine.rs` | One task for the process, started once in `lib.rs` (not per window, so a run never starts twice). Every 15 s it applies `decide` to each switched-on schedule and launches due ones: the run row is recorded, then a background task runs the scripts one after another (`run_steps`) through `start_python` — the Run button's path, same environment and token, plus `PROTRADE_RUN_FOLDER` (a folder the run's scripts share, deleted when it ends and cleared at launch), `PROTRADE_SCHEDULE` and `PROTRADE_STEP` — each awaited through its `StartRun::on_exit`. Stop stops the script going now (`running_script`), and a stop asked for between two scripts keeps the next from starting. A failed run with "email me" ticked sends `email::send_failure_notice`. Emits `schedules-changed` and `schedule-run-finished`; the main window toasts a failure. |
+| UI | `features/scheduler/SchedulerPanel.tsx`, `EmailSettingsDialog.tsx`, `python/schedules.ts` | The Scheduler workspace tab (rail, Home, or the Python tab's **Schedule** button, which opens a new schedule for the open script): the schedules, the form (name, the sequence with move up/down and remove, the rule, the switches) and each run's steps. `schedules.ts` (pure, tested) words a rule, shows times on the IST clock, edits a sequence and repeats the backend's checks. |
 
-- **Nothing is made up.** A schedule runs only while the app is open. On the engine's first look after launch, anything already
-  due is recorded as missed (however recently it came due), so starting the app never runs a script; later, a run more than two
-  minutes late (the machine slept) is missed too. Many missed firings are one row ("Missed 26 runs"). Switching a schedule on,
-  or editing it, plans it from now. A run left `running` when the app closed is marked failed at the next launch.
-- **Only the user makes a schedule**, with the form in the Schedules pane (`save_schedule`). Ask AI has no tool for it, and a
-  script or a layout can't create one.
+- **Nothing is made up.** On the engine's first look after launch, anything already due is recorded as missed (however recently
+  it came due), so starting the app never runs a script; later, a run more than two minutes late (the machine slept) is missed
+  too. Many missed firings are one row ("Missed 26 runs"). Switching a schedule on, or editing it, plans it from now. A run left
+  `running` when the app closed is marked failed at the next launch.
+- **Only the user makes a schedule**, with the form in the Scheduler tab (`save_schedule`). Ask AI has no tool for it, and a
+  script, a layout or `pt.sql` can't create one.
 
 ### Scripts writing watchlists
 
@@ -614,29 +649,60 @@ provider the app has; a bare broker ticker becomes `NSE:`) and `Backend::set_wat
 `store::watchlists::sync_named` — in one transaction, matched by name ignoring case, created if missing. `replace` removes what's
 no longer listed and keeps the rest in place with their flags; new symbols go at the end in the script's order, with company
 names from the instrument lists; section headings are untouched. The script is answered with what was done, which the client
-prints. `watchlists-changed` tells every window, and `watchlistBus` relays it to the panel. It is the only write the local API
-makes besides showing a result.
+prints. `watchlists-changed` tells every window, and `watchlistBus` relays it to the panel.
+
+### pt.sql, pt.send_email, pt.screenshot
+
+What a script can ask the app for besides prices (`protrade/helpers.py`, routes in `pyapi/routes.rs`):
+
+| Helper | Where | Notes |
+| --- | --- | --- |
+| `pt.sql` → `POST /v1/sql` | `pyapi/sql.rs`, `store::watchlists::repair_after_sql` | The script's SQL on a connection of its own to `charting.db` (30 s busy timeout), with `prices.db` attached read-only as `prices` when prices are saved. SQLite's authorizer (`policy`, tested action by action) lets it read the watchlist, symbol-list, dataset and instrument tables and the saved prices, and write only the four watchlist tables and TEMP tables; ATTACH, PRAGMA (but `table_info` and kin), triggers, transaction statements and schema changes are refused, with a message naming what is allowed. One transaction per call; a watchlist change is repaired (canonical symbols, positions renumbered, legacy flag column cleared) or rolled back whole; `dry_run` rolls back. At most 100,000 rows come back; 10 minutes at most (an interrupt handle, also fired if the request is dropped). A change emits `watchlists-changed`. |
+| `pt.send_email` → `POST /v1/email` | `email/mod.rs`, `email_commands.rs` | From and to the user's own address only (no recipient anywhere), through their SMTP account (`lettre`, STARTTLS or TLS, native TLS). Settings in `ui_preferences` (`email.smtp`); the password in `Secrets` (`smtp` / `password`), saved only after a login with it worked and never returned. Attachments come base64 in the JSON body, 10 MB together (the API's body limit is 16 MB). Also used for a schedule's failure note. |
+| `pt.screenshot` → `POST /v1/screenshot` | `screenshot.rs`, `chart/scriptScreenshots.ts` | Rust emits `script-screenshot` to the **main** window and waits (one at a time, two minutes); the window builds a `VelaWorkspace` in a sized off-screen box (a `display:none` one can't hold a chart) — local time zone, thin moving averages, the symbol's drawings, and a saved layout's first chart (`firstChartOf`) when one is named — waits for `history:complete` and a settle, and answers `script_screenshot_result` with the PNG, which Rust checks (signature, 10 MB) and returns to the script. The app writes no file of its own. |
 
 ## Keep the market loaded
 
 Five years of daily bars for every NSE stock (EQ series, one listing per company by the Studies' own rule) and every NSE index,
 read into memory while the app is open, so the Screener, Studies and scripts read a whole market at once instead of a request
-per symbol. It is opt-in (the preference `marketData.keepLoaded`) and nothing of it reaches the disk: after a relaunch the
-market is read again.
+per symbol. It is opt-in (the preference `marketData.keepLoaded`). After a relaunch the market is read again: from the broker,
+or, with saved prices on, from the file, so the first look fetches only what is new.
 
 | Piece | Where | Notes |
 | --- | --- | --- |
 | Rules | `marketdata/plan.rs` | Pure: the universe (`study_universe::pick_listings` over the instrument list), how far back (`HISTORY_DAYS`, more than the deepest screen), when the daily update is due (once per settled session, `market::last_settled_ms`; an hour's wait after a failure) and how a holiday shows (`was_holiday`). |
-| Job | `marketdata/job.rs` | One pass over the listing, tested against a fake broker: record the listing (`market_symbols`; a new row is a new listing), read into memory any history it lacks through `pyapi::data::load_bars` (the user's watchlist symbols first), then top up every series with the batched quote (`sync_daily`). A series the quote can't update is dropped and read again whole (`BarMemory::forget`): Kite serves five years of daily bars in one call, so that costs what reading the missing tail would, and old and adjusted prices are never mixed after a split. Quotes that last traded before the session trigger one probe (NIFTY 50): on a holiday every current series is marked current through it (`carry_daily_through`), and nothing else is read. |
+| Job | `marketdata/job.rs` | One pass over the listing, tested against a fake broker: record the listing (`market_symbols`; a new row is a new listing), read into memory any history it lacks through `pyapi::data::load_bars` (the user's watchlist symbols first), then top up every series with the batched quote (`sync_daily`). A series the quote can't update is read from its last final bar through `load_bars`, whose check reads it again whole if that bar has changed (a split), so old and adjusted prices are never mixed. Quotes that last traded before the session trigger one probe (NIFTY 50): on a holiday every current series is marked current through it (`carry_daily_through`), and nothing else is read. |
 | Engine, commands | `marketdata/mod.rs`, `marketdata_commands.rs` | One job at a time (`MarketData` state, which also keeps the session's record of the last load, in memory), stoppable, `market-data-progress` / `market-data-finished` events. The loop starts in `lib.rs`, first looks two minutes after launch, and does nothing unless the user has switched loading on. Switching it on starts a load at once; off stops one. |
 | Broker lanes | `throttle.rs` | Every job runs inside `throttle::in_background`: its broker requests wait while any interactive one (a chart, a script) is queued, at the same gap, so the broker's limit holds and a chart waits at most one gap. The lane is a task-local, so it must wrap each spawned task. |
 | Panel | `pyapi/data.rs` `read_panel`, `wire.rs` `panel_body`, `protrade/panels.py` | Many symbols' held daily bars in one answer, from memory alone (never a broker call), each marked `current` when a `/v1/bars` read of the same span would fetch nothing. Binary columns (a JSON header, then `ts` i64 and `o h l c v` f64, every series back to back): a market's history is millions of numbers. `pt.panel`, and `pt.bars_many` for daily bars, read it first and fetch only what isn't current. |
 | Wide features | `protrade/wide.py` | `WideFeatures` computes a feature for many symbols at once on a table with a column per symbol, **aligned on bar position** (each symbol's bars fill the bottom of its column), so rolling windows, `ewm` and `shift` count that symbol's own bars and the numbers equal `Features`'. `features.py` is written to work on a Series and a DataFrame alike; `tests/test_wide.py` checks every family. The Screener judges all symbols with it; a Study computes detection's features per batch with it. |
-| Charts | `marketdata::chart_daily` | A daily (so weekly and monthly) chart of a held symbol is answered from memory, with what it lacks read through `load_bars` on the interactive lane and held. Intraday is unchanged. |
+| Charts | `market_commands::market_fetch_bars` | Every chart (any interval) is answered through `load_chart_bars`: what memory (or the saved prices) holds, plus what it lacks read on the interactive lane. A request with no end during a running session always rereads the newest bars, since the live bar builds on them. |
 
 - **These are Rust jobs, not scripts.** Nothing here starts Python, so the rule that a script runs only on a press or a
   user-made schedule is untouched. Loading runs only while the app is open, never during startup, and never makes up a
   run: coverage decides what is fetched.
+
+## Saved prices
+
+"Save prices on this computer" (Data providers → **Saved prices**, or the Home tab) is the one way broker prices reach the disk:
+opt-in, off by default, and switched on only after the user accepts a notice that their broker's terms may restrict copies of
+its data (`lib/savedPrices.ts` `SAVING_NOTICE`). The owner reversed the earlier memory-only rule this way on 2026-10-29.
+
+| Piece | Where | Notes |
+| --- | --- | --- |
+| File | `prices.rs` | One SQLite file (`prices.db`) beside `charting.db`, never inside it, holding every broker's prices by neutral symbol. `PriceFile` holds an exclusive lock (`File::try_lock`), a read-only connection behind its own mutex, and a writer thread that applies queued changes in batched transactions (about every 200 ms). `SavedPrices` (Tauri state) keeps it open while saving is on, whichever broker serves `india:`. |
+| SQL | `store/price_store.rs` | `price_series` (coverage, bar count, last use, and `sources`, the brokers that supplied it as `Broker::bit`s) and `price_bars` (`WITHOUT ROWID`, keyed by series and time); `apply(DiskOp)` is everything that can happen to the file. `meta` pins the layout's version, and a file of another layout is refused. |
+| Memory | `store/bar_memory.rs` | The authority: it holds every saved series' coverage (the file's index, a few thousand rows, read at launch) and loads a series' bars on first use. Each change is made in memory and queued (`BarDisk::send`) inside the same write lock, so the file sees them in order; a saved series is freed only once the file holds its last change. Only `india:` series are saved. |
+| Broker | `market_commands::sync_market` | Called after anything that can change which broker serves `india:` or whether saving is on (a pick, a setup, a login, the switch, and once at launch). The prices held stay through a change of broker (see "Broker-neutral Indian symbols"); every write's `served_by` is recorded in its series' `sources`. |
+| Pruning | `BarMemory::prune` | Daily, a few minutes after launch: intraday bars older than a year are trimmed, intraday series unused for 90 days dropped, and above about 36 million bars (some 2 GB) the least recently used go, intraday first. Made in memory, then queued. |
+| Commands | `prices_commands.rs` | `saved_prices_status`, `saved_prices_set` (off deletes the file), `saved_prices_delete`; `clear_provider_config`'s `deleteSavedPrices` deletes every series the broker supplied when its login is forgotten (`BarMemory::forget_source`; the brokers' terms ask for deletion when you stop using the API). |
+
+- **What it changes.** Charts open from the file and ask the broker only for the newest bars; the first screen, Study or script
+  after a launch reads the saved history and tops it up from one quote (`sync_daily`). A quote can't rebuild a missed session's
+  bar, so after one each stale symbol still costs one history call, once.
+- **What it doesn't.** The file is never written behind memory's back (no pruning, no repair in the writer), a failed write stops
+  writing (memory then keeps everything, as if nothing were saved) rather than leaving the file short of what memory thinks it has,
+  and a second copy of the app is locked out and runs memory-only.
 
 ## Screener
 
@@ -766,9 +832,10 @@ aggregation → result** — and every part of it is described by the **Study Sp
 ### AI providers
 
 Two providers, either with the user's **own API key**: Anthropic (Claude) and OpenAI (GPT). The Study Builder (drafts,
-revisions, explanations, research plans and syntheses) and Ask AI (below) both run on whichever is configured, or whichever the
-user prefers when both are. Neither ever runs anything by itself — the Study Builder proposes a spec for the user to review, and
-Ask AI proposes actions the user must approve one by one.
+revisions, explanations, research plans and syntheses), Ask AI and the Python assistant (below) all run on whichever is
+configured, or whichever the user prefers when both are. None ever runs anything by itself — the Study Builder proposes a spec
+for the user to review, Ask AI proposes actions the user must approve one by one, and the Python assistant proposes a script the
+user applies, saves and runs themselves.
 
 - **A provider-neutral core, two thin clients.** `src-tauri/src/ai/mod.rs` defines `AiRequest` (`system`, `messages`, and either
   a `schema` the answer's JSON text must follow, or `tools` it may call — never both), `Reply` (`text`, `tool_calls`, `model`)
@@ -779,8 +846,14 @@ Ask AI proposes actions the user must approve one by one.
   `server-side-fallback-2026-07-01` beta header re-running a declined request on Anthropic's own recommended fallback model);
   OpenAI speaks Chat Completions (`Authorization: Bearer`, `response_format: {type: "json_schema", json_schema: {strict: true,
   …}}` — chosen over the Responses API for being the simpler, closer-to-Anthropic single-request shape). `MODEL` is one constant
-  per file (`claude-opus-5`, `gpt-5.1`) — change either in one place. Both calls are plain HTTP (no Rust SDK for either), so the
-  CSP is unchanged.
+  per file (`claude-opus-5-5`, `gpt-5.1`) — change either in one place. Claude Opus 5.5's own default effort is `medium`, so
+  every Claude request sets `output_config.effort: "high"` explicitly (`EFFORT`); its thinking can't be switched off (it is
+  adaptive) and it refuses a forced `tool_choice`, which is never sent. A conversation's history travels as plain text, so no
+  thinking block is ever sent back. Both calls are plain HTTP (no Rust SDK for either), so the CSP is unchanged.
+- **A conversation's prefix is cached.** `AiRequest::cached()` (the Python assistant's requests) makes Claude's body carry a
+  top-level `cache_control: {type: "ephemeral"}`, so the next turn re-reads the system prompt (the `protrade` reference and the
+  setup description) and the history at a tenth of the price. A one-off request (a draft, an explanation) isn't cached: it would
+  pay the cache write for nothing. OpenAI caches long prefixes by itself, so its client ignores the flag.
 - **Keys are secrets like a broker's**, one per provider under its own id (`("anthropic", "apiKey")`, `("openai", "apiKey")`).
   `ai_set_key(provider, key)` checks it with that provider first (`GET /v1/models`, free on both) and only then saves it with
   `Secrets::set`; a key is read only in `ai_commands.rs`, never returned to the webview (`list_ai_providers` says only whether
@@ -846,6 +919,36 @@ question → plan → approval → runs → synthesis → follow-up questions.
   result entries — text only, labelled as association.
 - **A follow-up** is a new plan with the synthesis as context, and needs its own approval; its Studies join the same notebook.
 
+#### Python assistant
+
+The Python tab's assistant (`features/python/AssistantPane.tsx`, pure logic in `python/assistant.ts` and `python/lineDiff.ts`)
+writes, changes and fixes the open script. Like the Study Builder it only *proposes*: nothing it returns is saved, run or
+scheduled by the app.
+
+- **The request** (`ai_python_assist` → `prompts::python_body`) puts what changes rarely in the system prompt, which is cached:
+  the task and the rules (the whole file in `code`, keep what wasn't asked about, `protrade` as the only data source, no
+  credentials, no `input()`, no orders, nothing outside the reference invented), `pythonApiReference()` (`python/reference.ts`,
+  which a test requires to mention every name in `protrade.__all__`) and `describeSetup` — the broker in use and its intervals
+  (and FYERS Standard's limits), whether the market is kept loaded and prices are saved, whether email is set up, the names of
+  the watchlists (with counts), layouts, datasets and other scripts, the schedules this script is a step of, the Python version
+  and which of a fixed list of packages it has (`python_probe_packages`, `env::packages`: `importlib.metadata` under `-I`,
+  nothing imported, no user input on the command line). The last message carries the script fresh every time (unsaved edits
+  included), so earlier turns are text only (`assistHistory`), never an old copy of it.
+- **The last run goes only as the user chose.** `PythonPanel` keeps the last run's output (`captureLine`, a redrawn progress bar
+  counted once). Its stderr goes while the **Last run's error** chip is shown (Fix with AI sends it); its stdout — which can
+  hold broker prices — only when **Include output** is ticked, for that message. Each is tailed to 30 KB (`tailText`).
+- **The answer is `{reply, code, name}`**, with `code` the complete file or empty. `parseAssistAnswer` checks the shape and
+  sizes, unwraps a stray Markdown fence, treats code identical to the script as no change, and keeps `name` only if it looks
+  like a script name (the backend still validates it on save). The reply is drawn as text; the code as a line diff
+  (`lineDiff`: common ends trimmed, then an LCS table, falling back to removed-then-added past four million cells) — a script of
+  its own (named, or nothing was open) is shown whole.
+- **Apply** replaces the editor's text through `CodeEditorHandle.replaceAll`: one CodeMirror transaction with
+  `isolateHistory`, so one `Ctrl+Z` puts the old text back, reported through `onChange` like typing (the script shows Unsaved
+  changes). If the editor changed since the question was sent, it asks first. **Save as new script…** saves a file under a name
+  the user confirms, refusing one that exists. Neither runs anything; a schedule runs the saved file only.
+- **One conversation per script**, in memory while the app is open; the pane stays mounted while hidden. **Copy prompt** gives
+  the same reference and setup description as text for an outside AI (`AiPromptDialog`), which the app itself sends nowhere.
+
 #### Ask AI
 
 The rail's own assistant (`features/ai/AskAiPanel.tsx`, its allowlist and executors in `actions.ts`) answers questions about
@@ -898,7 +1001,10 @@ properties on `<html>` and persists the choice. To add a theme, append one entry
 - Broker credentials live in the OS keychain and are read only by the Rust backend; the web view never receives an access
   token, and the settings screen can't read one back.
 - An AI provider's API key (Claude, GPT) is kept and read the same way, one per provider. Its answers are untrusted: a proposed
-  spec is re-validated and shown for review, an explanation is drawn as text, and neither can start a run.
+  spec is re-validated and shown for review, an explanation is drawn as text, and neither can start a run. A script the Python
+  assistant writes is shown as changes, drawn as text, and reaches the editor only through the user's Apply (unsaved) or a new
+  file through Save as new script; the app never saves over the open script, runs it or schedules it. What a script printed
+  (which can hold broker prices) goes to the AI only when the user ticks Include output.
 - **Ask AI never touches app state — it only proposes.** A tool call names an action and its arguments; `ai_commands.rs` hands
   it to the webview exactly as received, and `features/ai/actions.ts` turns it into a card only after re-validating those
   arguments itself (never trusting that the model followed its schema). The action runs — through the very function a click on
@@ -910,8 +1016,9 @@ properties on `<html>` and persists the choice. To add a theme, append one entry
 - **A script runs without a press only on a schedule the user made** (see "Scheduled scripts"): never on startup (a run due
   then is missed, not made up), never on opening a layout or importing a file, and nothing but the user's form creates a schedule.
 - The Python data API (see "Python") listens on the loopback interface only, refuses any request without the per-launch token, a
-  matching `Host`, and no `Origin`, and serves read-only market data. The webview never talks to it (Rust does), so the CSP is
-  unchanged. Python itself is *not* sandboxed: a script runs with the user's own privileges and only when they press Run.
+  matching `Host`, and no `Origin`, and serves read-only market data — besides what the user's own script asks for: a result
+  shown, a watchlist written (`pt.set_watchlist`, `pt.sql` within its authorizer), an email to the user's own address, a chart
+  drawn (see "pt.sql, pt.send_email, pt.screenshot"). The webview never talks to it (Rust does), so the CSP is unchanged. Python itself is *not* sandboxed: a script runs with the user's own privileges and only when they press Run.
 - **The webview can now run code.** The Python commands let the webview save a script and run it, so an injection into the webview
   would mean code execution on the machine, where before it could only change what a chart shows. Keep the CSP strict, render
   nothing from a broker, a file or a script's output as HTML (the console draws text), and treat any new way for outside content to

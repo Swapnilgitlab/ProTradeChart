@@ -2,7 +2,8 @@ import { Database, RefreshCw, Square } from 'lucide-react';
 import { describeHoldings, describeProgress, describeWhen } from '../../lib/marketData';
 import { useMarketData } from './useMarketData';
 
-/** "Keep the market loaded": every NSE stock's daily history, read into memory while the app is open. */
+/** "Keep the market loaded": every NSE stock's daily history, read into memory while the app is open
+ *  (and kept on this computer too when prices are saved, `SavedPricesSection`). */
 export function MarketDataSection() {
   const { status, notice, loadNow, stop, setKeepLoaded } = useMarketData();
   if (!status) return null;
@@ -17,7 +18,7 @@ export function MarketDataSection() {
       <p className="secondary">
         Five years of daily prices for every NSE stock and index, read from your broker into memory while the app is open, so
         the Screener, Studies and Python scripts look at the whole market at once instead of asking the broker symbol by
-        symbol. Nothing is saved on this computer: it is cleared when you close the app and read again the next time.
+        symbol. Unless you save prices (below), it is cleared when you close the app and read again the next time.
       </p>
       <div className="prov-status">
         <label className="prov-status-row market-data-auto">

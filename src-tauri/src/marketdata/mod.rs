@@ -2,10 +2,11 @@
 //! memory while the app is open and kept current by a daily update, so the Screener, Studies and
 //! Python scripts read the whole market at once instead of a broker request per symbol.
 //!
-//! Nothing here is written to disk: broker price history lives in `store::bar_memory` and is gone
-//! when the app closes (Kite Connect's terms restrict permanent copies of its data). The only
-//! things kept are the user's choice to keep the market loaded and the list of symbols
-//! (`market_symbols`, names, not prices).
+//! The bars go to `store::bar_memory`. They are gone when the app closes unless the user has
+//! switched on "Save prices on this computer" (`crate::prices`), in which case memory saves them and
+//! a relaunch reads them back instead of fetching the market again. Besides that, the only things
+//! kept are the user's choice to keep the market loaded and the list of symbols (`market_symbols`,
+//! names, not prices).
 //!
 //! These are Rust jobs, not scripts: nothing here starts Python. Loading is opt-in. Once on, it
 //! starts by itself a couple of minutes after launch (never during startup) and then once per
@@ -80,8 +81,8 @@ pub struct Finished {
     pub error: Option<String>,
 }
 
-/// How this session's loads went. Kept in memory only, like the bars: after a relaunch nothing is
-/// loaded, so the first look loads everything again.
+/// How this session's loads went, kept in memory only: after a relaunch the first look goes over
+/// everything again (reading from the broker only what memory and the saved prices lack).
 #[derive(Debug, Clone, Default)]
 pub struct Record {
     pub last_update: Option<i64>,
@@ -147,7 +148,7 @@ pub fn set_keep_loaded(conn: &rusqlite::Connection, on: bool) -> rusqlite::Resul
 
 /// Starts a load unless one is running.
 pub fn start(app: &AppHandle, trigger: Trigger) -> Result<(), String> {
-    let broker = {
+    {
         let db = app.state::<Database>();
         let secrets = app.state::<Secrets>();
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -161,8 +162,7 @@ pub fn start(app: &AppHandle, trigger: Trigger) -> Result<(), String> {
         if broker == Broker::Fyers && app.state::<FyersClient>().plan() == Plan::Standard {
             return Err(FYERS_STANDARD_REFUSAL.to_string());
         }
-        broker
-    };
+    }
 
     let state = app.state::<MarketData>();
     {
@@ -181,16 +181,9 @@ pub fn start(app: &AppHandle, trigger: Trigger) -> Result<(), String> {
     let app = app.clone();
     tauri::async_runtime::spawn(in_background(async move {
         let outcome = run_once(&app).await;
-        // Another broker started serving `india:` while this ran: what it wrote came from the old
-        // one, and two brokers' bars are never mixed, so it goes (`market_commands` dropped the rest).
-        let now_serving = {
-            let db = app.state::<Database>();
-            let conn = db.conn.lock().ok();
-            conn.and_then(|c| india_broker(&c, &app.state::<Secrets>()).ok())
-        };
-        if now_serving.is_some_and(|b| b != broker) {
-            app.state::<BarMemory>().forget_provider(INDIA);
-        }
+        // Another broker may have started serving `india:` while this ran: make sure the change has
+        // been acted on (its quotes cleared, the windows told).
+        crate::market_commands::sync_market(&app);
         let state = app.state::<MarketData>();
         state.remember(&outcome, now_ms());
         match &outcome {
@@ -306,37 +299,7 @@ fn due(app: &AppHandle) -> bool {
     plan::due(now_ms(), r.last_update, r.last_failure)
 }
 
-/// A daily chart's bars, when memory holds the symbol: what it has, plus any stretch it lacks
-/// (older history the chart scrolled back to, or the latest session) read from the broker and kept
-/// for the session. `None` for a symbol memory doesn't hold, which the chart fetches as it always
-/// has; `Some(Err)` with the held bars when the broker couldn't be reached, so the chart still draws.
-pub async fn chart_daily(
-    app: &AppHandle,
-    symbol: &str,
-    from_ms: i64,
-    to_ms: Option<i64>,
-) -> Option<Result<Vec<crate::models::Bar>, (String, Vec<crate::models::Bar>)>> {
-    use crate::pyapi::data::{load_bars, BarsRequest};
-
-    let memory = app.state::<BarMemory>();
-    memory.coverage(symbol, "D")?;
-    let request = BarsRequest {
-        symbol: symbol.to_string(),
-        interval: "D".to_string(),
-        from_ms: Some(from_ms),
-        to_ms,
-        limit: None,
-    };
-    match load_bars(&memory, &AppBackend::new(app.clone()), &request, now_ms()).await {
-        Ok(data) => Some(Ok(data.bars)),
-        Err(e) => Some(Err((
-            e.message,
-            memory.get(symbol, "D", from_ms, to_ms.unwrap_or(i64::MAX), None),
-        ))),
-    }
-}
-
-/// What is loaded, for the status line.
+// What is loaded, for the status line.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Holdings {

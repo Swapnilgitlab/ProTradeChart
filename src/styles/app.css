@@ -173,10 +173,49 @@ a {
   flex-direction: column;
 }
 
+.chart-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .single-chart-canvas {
   position: relative;
   flex: 1;
   min-height: 0;
+}
+
+/* Bar replay's controls, a strip under the chart (features/replay/ReplayBar.tsx). */
+.replay-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.replay-title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.replay-play {
+  min-width: 84px;
+}
+.replay-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.replay-status {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.replay-spacer {
+  flex: 1;
 }
 
 /* ---- Tab bar ------------------------------------------------------------ */
@@ -1530,6 +1569,10 @@ code {
 }
 .market-data-auto {
   cursor: pointer;
+}
+/* Saved prices sits right under Market data: one rule between them is enough. */
+.market-data + .saved-prices {
+  margin-top: 14px;
 }
 .market-data-auto > span {
   display: flex;

@@ -145,7 +145,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Where your data is kept',
         blocks: [
           p(
-            'Everything you create — layouts, watchlists, alerts, scripts, Studies, screens and imported data — is stored in a single database file on your computer. Its location is shown under **About → Your data**. Broker prices are not saved: they are held in memory while the application is open. Broker credentials and AI keys are kept separately, in your operating system’s secure credential store. See **Privacy and security** for details.',
+            'Everything you create — layouts, watchlists, alerts, scripts, Studies, screens and imported data — is stored in a single database file on your computer. Its location is shown under **About → Your data**. Broker prices are held in memory while the application is open, and saved on your computer only if you switch on **Save prices on this computer**. Broker credentials and AI keys are kept separately, in your operating system’s secure credential store. See **Privacy and security** for details.',
           ),
         ],
       },
@@ -293,9 +293,20 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Indicators',
         blocks: [
           list(
-            '**Built-in indicators.** Open **Indicators** and choose from more than seventy. Each indicator’s legend row lets you open its settings, hide it or remove it.',
+            '**Built-in indicators.** Open **Indicators** and choose from more than seventy. Each indicator’s legend row lets you open its settings, hide it or remove it. Their colours, lines and levels can be changed in the settings; **Moving Average** offers thirteen kinds of average (SMA, EMA, WMA, RMA, HMA, ALMA, VWMA, DEMA, TEMA, KAMA, LSMA, McGinley and Hamming), the price it is calculated on, and a second average.',
             '**Bundled scripts.** Pine scripts that ship with the application appear in the Indicators dialog, grouped by folder (for example **Trend → Moving average ribbon**).',
             '**Your own scripts.** Write or paste a Pine Script in the Script Editor and add it to the chart. See **Script Editor (Pine Script)**.',
+          ),
+        ],
+      },
+      {
+        heading: 'Drawing tools',
+        blocks: [
+          list(
+            'Select a drawing to change it: **Settings** on its toolbar opens all of its options, including the timeframes it shows on. A look you like can be saved as a style and picked again for other drawings of that tool.',
+            'A new drawing starts from the settings you last gave that tool (colours, line style, Fibonacci levels and so on), in every tab and window and the next time you open the application. Saved styles are kept the same way.',
+            '**Fib Retracement** offers level sets (**Classic**, **Extension** and **OTE**) and can be reversed.',
+            'Price-action tools mark a **Fair Value Gap**, an **Order Block** or **Liquidity** (click near a candle’s high or low).',
           ),
         ],
       },
@@ -317,7 +328,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'History',
         blocks: [
           p(
-            'A chart opens with about 500 bars — roughly two years of daily candles. As you scroll or zoom towards the oldest bar, the application loads older history in the background, for as long as the source has any. There is nothing to click. Broker bars you have loaded are held in memory while the application is open, so a chart can still be drawn if the connection drops; they are never saved on your computer.',
+            'A chart opens with about 500 bars — roughly two years of daily candles. As you scroll or zoom towards the oldest bar, the application loads older history in the background, for as long as the source has any. There is nothing to click. Broker bars you have loaded are held in memory while the application is open, so a chart can still be drawn if the connection drops. With **Save prices on this computer** on (see **Save prices on this computer**) they are kept in a file too: a chart opens from it and asks your broker only for the newest bars.',
           ),
         ],
       },
@@ -328,6 +339,25 @@ export const HELP_TOPICS: HelpTopic[] = [
             'Each chart uses your computer’s time zone. Daily, weekly and monthly bars are stamped with the exchange’s calendar date; intraday bars keep their exact time.',
             'Broker timeframes the broker does not serve directly (such as 2 hours, 4 hours, weekly and monthly) are built from finer bars, with each intraday bucket starting at the session open.',
             'Prices are shown as the data source supplies them. Broker history is adjusted for corporate actions by the broker.',
+            '**Scale price chart only** (right-click the price axis) fits the price axis to the candles, leaving out indicators and drawings. The space kept above the highest and below the lowest price is set under **Margins** in the chart settings.',
+          ),
+        ],
+      },
+      {
+        heading: 'Bar replay',
+        blocks: [
+          p(
+            'Replay rewinds a chart to a past bar and shows the bars after it one at a time, as if the market were moving again: a way to practise reading a chart without knowing what comes next.',
+          ),
+          steps(
+            'Right-click a bar and choose **Replay from this bar**, or press **Replay** in the chart’s toolbar, pick a date and press **Start**.',
+            'Press **Play** to reveal one bar after another (choose the **Speed**), or **Next bar** to step by hand. **Restart here** jumps to another date.',
+            'Press **Exit replay** to go back to the latest bars.',
+          ),
+          list(
+            'Indicators and strategies on the chart recalculate on the bars shown, so the Strategy Tester follows the replay. Scripts’ own alerts stay quiet during a replay; your price alerts keep watching the real market.',
+            'In a grid, every chart replays together on one clock. Changing the timeframe keeps the replay at the same point in time; changing the symbol ends it.',
+            'Replay uses the bars already loaded. A start date older than them loads more history first.',
           ),
         ],
       },
@@ -483,10 +513,21 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Indicators and strategies',
         blocks: [
           p(
-            'The editor detects whether a script is an **Indicator** (`indicator(...)`) or a **Strategy** (`strategy(...)`) from its declaration. Adding a strategy opens the **Strategy Tester** under its chart.',
+            'The editor detects whether a script is an **Indicator** (`indicator(...)`), a **Strategy** (`strategy(...)`) or a **Library** (`library(...)`) from its declaration. Adding a strategy opens the **Strategy Tester** under its chart.',
           ),
           note(
             'Scripts run on PineTS, an open-source Pine Script engine. Most scripts behave as they do on TradingView, but some functions and behaviours differ. Pine Script is a trademark of TradingView, Inc.; ProTradeChart is not affiliated with TradingView.',
+          ),
+        ],
+      },
+      {
+        heading: 'Libraries',
+        blocks: [
+          p(
+            'A library holds functions other scripts can use. Write one starting with `library("Name")`, mark the functions to share with `export`, and **Save** it; a library can’t be added to a chart itself.',
+          ),
+          p(
+            'A script uses it with `import <user>/<Name>/<version> as lib`, then calls `lib.functionName(...)`. The library is found among **My scripts** by the name in its `library(...)` declaration; the user and version in the import can be anything, so a script copied from TradingView works once you have saved the libraries it imports. Nothing is downloaded.',
           ),
         ],
       },
@@ -505,6 +546,9 @@ export const HELP_TOPICS: HelpTopic[] = [
           p(
             'The Strategy Tester sits in a panel under the chart. **Strategy Tester** on the right rail (`Ctrl+Shift+E`) shows or hides it, and adding a strategy from the Script Editor opens it. When a strategy is on the active chart, it shows its equity curve, a performance summary (net profit, maximum drawdown, run-up, percent profitable, profit factor and more) and the list of trades with their entry and exit, size, signal and profit. With several strategies on the chart, choose which one to show.',
           ),
+          p(
+            'Buy & hold, as on TradingView, puts the whole starting capital in at the first trade’s entry price and holds it to the last bar. The engine also reports **CAGR** (yearly growth), the **Sharpe ratio** and **Sortino ratio** (measured on monthly returns) and **Outperformance vs buy & hold**; each appears only when the backtest is long enough to measure it.',
+          ),
         ],
       },
       {
@@ -512,7 +556,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         blocks: [
           list(
             '**The backtest covers only the bars the chart has loaded.** To test a longer period, scroll the chart back so that more history loads; the tester updates.',
-            '**Results are approximate.** PineTS simulates orders differently from TradingView in some details, and equity, run-up and drawdown are measured on bar closes.',
+            '**Results are approximate.** PineTS simulates orders the way TradingView does (fills on the price grid, checking each bar’s open, high, low and close in order), but it is not TradingView, and equity, run-up and drawdown are measured on bar closes.',
             '**Margin calls.** A strategy that orders 100% of its equity and also pays commission can be closed immediately by a margin call. The tester detects this and explains it; reduce the order size to fix it.',
           ),
         ],
@@ -627,10 +671,11 @@ export const HELP_TOPICS: HelpTopic[] = [
       {
         heading: 'The list menu',
         blocks: [
-          p('The **More** (⋯) menu beside the list selector renames or deletes the list, adds a section, adds it to or removes it from quick access, and imports symbols.'),
+          p('The **More** (⋯) menu beside the list selector renames or deletes the list, adds a section, adds it to or removes it from quick access, imports symbols and exports the list.'),
           list(
-            '**Import from file…** reads a TradingView watchlist export or a CSV file with a `Symbol` column. Crypto exchanges are mapped automatically, NSE and BSE symbols are mapped when a broker is set up, and anything that cannot be mapped is reported.',
-            'Lists can also be filled from the Screener, from a Python script’s results, from a Study’s results, or kept up to date by a scheduled script (see **Scheduled scripts**).',
+            '**Import from file…** reads a TradingView watchlist export or a CSV file with a `Symbol` column. NSE and BSE symbols are mapped when a broker is set up (TradingView’s index names, such as `NSE:CNXIT`, included), and anything that cannot be mapped is reported.',
+            '**Export for TradingView…** saves the list in TradingView’s format — `NSE:RELIANCE,NSE:TCS,…` on one line, with each section as a `###` heading — for TradingView’s **Import list…**. TradingView asks for a `.txt` file, so that is offered first; choose **CSV** in the save dialog for a `.csv` with the same contents. Futures and options contracts and symbols from your own data files have no TradingView equivalent: they are left out, and the message says how many. A colour’s list can be exported too.',
+            'Lists can also be filled from the Screener, from a Python script’s results, from a Study’s results, or kept up to date by a scheduled script (see **Scheduler: scripts that run by themselves**).',
           ),
         ],
       },
@@ -746,7 +791,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           list(
             '**Save** keeps the screen under **My screens**. A saved screen keeps its last result, which reappears when you open it.',
             'Filters on today’s prices alone (close, open, high, low, volume, gap, and the day’s change or return) are judged first on one quick quote of the whole universe, so only the stocks that pass have their history read. A screen made only of such filters and columns finishes in seconds.',
-            'With **Keep the market loaded** on (Data providers → **Market data**), every NSE stock’s history is in memory and a screen reads it in one go, in a couple of seconds. Without it, the first screen that needs history over a whole exchange fetches it at the broker’s rate limit — about 15 minutes for NSE through Zerodha, and longer through FYERS (on its Standard plan, most of a day’s requests). What it fetched is held until the application closes, so later runs only top up each stock with a quick quote check.',
+            'With **Keep the market loaded** on (Data providers → **Market data**), every NSE stock’s history is in memory and a screen reads it in one go, in a couple of seconds. Without it, the first screen that needs history over a whole exchange fetches it at the broker’s rate limit — about 15 minutes for NSE through Zerodha, and longer through FYERS (on its Standard plan, most of a day’s requests). What it fetched is held until the application closes (or kept, with **Save prices on this computer** on), so later runs only top up each stock with a quick quote check.',
             '**Before it runs** estimates how many broker requests, and quick quote checks, the run needs and how long they take. Use **Try it on the first 100 symbols first** for a quick trial.',
           ),
         ],
@@ -769,7 +814,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             'Press **Set up Python**. The application creates a private environment in its data folder and installs pandas and numpy into it.',
           ),
           p(
-            'To use an environment of your own instead (for example conda or uv), open the gear icon (**Python settings**) and choose its interpreter. The settings also show how much market data the application holds in memory for scripts, the Screener and Studies (it is cleared when the application closes), and **Clear it** empties it now.',
+            'To use an environment of your own instead (for example conda or uv), open the gear icon (**Python settings**) and choose its interpreter. The settings also show how much market data the application holds in memory for scripts, the Screener and Studies (it is cleared when the application closes), and **Clear it** empties it now. Prices saved on this computer stay; they are deleted under **Data providers → Saved prices**.',
           ),
         ],
       },
@@ -784,10 +829,34 @@ export const HELP_TOPICS: HelpTopic[] = [
               ['**Run** / **Stop**', 'Runs the script; Stop ends it and anything it started.'],
               ['**Console**', 'Everything the script prints, with errors highlighted.'],
               ['**Results**', 'Tables, backtest reports and figures the script shows (see below).'],
-              ['**Schedules**', 'Runs scripts automatically at set times. See **Scheduled scripts**.'],
+              ['**Schedule**', 'Opens the Scheduler with a new schedule for this script: it runs by itself at set times, alone or in a sequence with others. See **Scheduler: scripts that run by themselves**.'],
+              ['**AI assistant** (the sparkle icon)', 'Opens an assistant beside the editor that writes, changes or fixes the open script. See **Writing scripts with AI** below.'],
             ],
           ),
           p('Example scripts are provided to start from: a greeting, four screens (above the 200-day average, RSI oversold, 52-week highs, and six-month momentum read with `pt.panel`) and a moving-average crossover backtest.'),
+        ],
+      },
+      {
+        heading: 'Writing scripts with AI',
+        blocks: [
+          p(
+            'The assistant writes and changes scripts for this application. It is told the `protrade` package and a description of your setup, so what it writes uses your broker’s data, your watchlists and your settings rather than a library it guessed at.',
+          ),
+          steps(
+            'Add an Anthropic (Claude) or OpenAI (GPT) API key under **AI providers**, if you have not already.',
+            'Press **AI assistant** (the sparkle icon) in the Python toolbar.',
+            'Ask for what you want: a new screen, a change to the open script, or an explanation. With no script open it writes a new one.',
+            'Review the answer. A change is shown line by line, added lines in green and removed ones in red. **Apply** puts it in the editor as unsaved changes (`Ctrl+Z` undoes it); **Save as new script…** saves it as a file of its own; **Discard** leaves everything as it was.',
+            'Save and run the script yourself. The assistant never saves the open script, runs a script or schedules one.',
+          ),
+          list(
+            '**Fix with AI.** After a run fails, **Fix with AI** appears beside the Console and Results tabs. It sends the run’s error (the traceback) and asks for a fix.',
+            '**The last run.** While the **Last run’s error** chip is shown, the error goes with your message (press its × to leave it out). What the script printed goes only when you tick **Include output**, for that message only, because it can contain your broker’s prices.',
+            '**What is sent.** Your question, the open script (unsaved edits included), the package reference, and a description of your setup: which broker serves your data, whether the market is kept loaded and prices are saved, whether email is set up, the Python version and its packages, and the names of your watchlists, layouts, imported datasets and scripts. Their contents, your credentials and your email address are never sent. **What’s sent** under the message box shows the setup description exactly.',
+            '**One conversation per script**, kept while the application is open. **New conversation** starts again.',
+            '**No API key?** **Copy prompt** (or **Copy a prompt for an outside AI instead**) gives the same reference and setup description as text to paste into any AI.',
+          ),
+          note('Read what the assistant wrote before you run it. Scripts are not sandboxed, and an AI can be wrong.'),
         ],
       },
       {
@@ -810,7 +879,11 @@ export const HELP_TOPICS: HelpTopic[] = [
               ['`pt.show(df, title)`', 'Shows a sortable table in **Results**. A `symbol` column becomes clickable, and the list can be added to a watchlist.'],
               ['`pt.report(trades=…, equity=…)`', 'Shows a backtest report: return, drawdown, CAGR, Sharpe ratio, win rate, an equity curve and the trades.'],
               ['`pt.plot()`', 'Shows the current matplotlib figure.'],
-              ['`pt.set_watchlist(name, symbols, mode)`', 'Creates or refreshes one of your watchlists. See **Scheduled scripts**.'],
+              ['`pt.set_watchlist(name, symbols, mode)`', 'Creates or refreshes one of your watchlists. See **Scheduler: scripts that run by themselves**.'],
+              ['`pt.sql(query, params)`', 'Runs SQL on your watchlists (it may change them), the symbol lists, imported data and saved prices; returns a DataFrame.'],
+              ['`pt.screenshot(symbol, …, path)`', 'A chart drawn by the application, as a PNG (saved to `path` when given).'],
+              ['`pt.send_email(subject, body, attachments)`', 'Emails you, through the account in the Scheduler tab’s **Email settings**.'],
+              ['`pt.run_folder()` / `pt.schedule()`', 'The folder a scheduled run’s scripts share, and which schedule and step this is.'],
             ],
           ),
         ],
@@ -821,28 +894,38 @@ export const HELP_TOPICS: HelpTopic[] = [
           list(
             '**Data sources.** Scripts can read Indian market data (`india:…`, through whichever broker serves it) and your imported CSV data, only for reading. `pt.providers()` says which broker that is (its `id` is `india`, so a script from an earlier version that looks for `zerodha` there needs updating; `zerodha:` symbols themselves still work). Crypto data is not available to scripts.',
             '**Timeframes.** Zerodha serves 1, 3, 5, 10, 15, 30 and 60 minutes and daily; FYERS also 2, 20, 120 and 240 minutes. Use `pt.resample` for others.',
-            '**Speed.** With **Keep the market loaded** on, `pt.panel` and `pt.bars_many` read daily bars for every NSE stock from memory in one request. Anything else is fetched from your broker at its pace (Zerodha allows about three a second; FYERS fifty a minute on its Standard plan) and held until the application closes, so later runs are fast. `pt.snapshot` quotes a whole market in a few seconds.',
+            '**Speed.** With **Keep the market loaded** on, `pt.panel` and `pt.bars_many` read daily bars for every NSE stock from memory in one request. Anything else is fetched from your broker at its pace (Zerodha allows about three a second; FYERS fifty a minute on its Standard plan) and held until the application closes (or kept, with **Save prices on this computer** on), so later runs are fast. `pt.snapshot` quotes a whole market in a few seconds.',
             '**Your credentials stay in the application.** A script never receives a broker key or token; it asks the application for data over a private local connection.',
           ),
           note('Python is not a sandbox. A script runs with your own permissions, exactly as if you ran it from a terminal. Run only code you trust. Nothing in the Python tab places orders.'),
         ],
       },
     ],
-    related: ['schedules', 'screener', 'studies'],
+    related: ['schedules', 'screener', 'studies', 'ai-providers'],
   },
   {
     id: 'schedules',
-    title: 'Scheduled scripts and watchlist refresh',
+    title: 'Scheduler: scripts that run by themselves',
     group: 'Research',
-    summary: 'Run a Python script automatically at set times, for example to refresh a watchlist every evening.',
+    summary: 'Run a sequence of your Python scripts at set times: screen, update a watchlist, save charts, email yourself.',
     sections: [
+      {
+        heading: 'What a schedule is',
+        blocks: [
+          p(
+            'A schedule runs one or more of your Python scripts (from the Python tab) by themselves, **one after another**, at the times you choose. Each script does one job — screen the market, change a watchlist, save chart pictures, email you the result — and they run in the order you put them in. The next script starts only when the one before it finished well; if a script fails or is stopped, the run ends there and the scripts after it are marked **Not run**.',
+          ),
+          p('Open the Scheduler from the **Scheduler** button on the right rail, the Home tab, or **Schedule** in the Python tab’s toolbar (which starts a new schedule with the script that is open).'),
+        ],
+      },
       {
         heading: 'Creating a schedule',
         blocks: [
           steps(
-            'In the Python tab, open the script you want to run and press **Schedule** in the toolbar. The **Schedules** tab opens with a new schedule for that script.',
-            'Choose the **Days** (or press **Weekdays** or **Every day**).',
-            'Choose **Once, at** a time, or **Repeatedly** every so many minutes between two times — for example every 15 minutes from 09:15 to 15:30.',
+            'Press **New schedule** and give it a **Name**.',
+            'Under **Scripts, in the order they run**, pick the first script. **Add script** adds another below it; the arrows move a script up or down, and **×** removes it from the sequence (the script itself stays in the Python tab). A schedule can run up to 20 scripts.',
+            'Choose the **Days** (or press **Weekdays** or **Every day**), then **Once, at** a time, or **Repeatedly** every so many minutes between two times — for example every 15 minutes from 09:15 to 15:30.',
+            'Tick **Email me if a run fails** to get a note with what went wrong (set up email first; see below).',
             'Leave **Switched on** ticked and press **Create schedule**.',
           ),
           p('All times are Indian Standard Time (IST), the same clock as the markets the application reads.'),
@@ -852,9 +935,9 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'Managing schedules',
         blocks: [
           list(
-            'Each schedule shows its rule, when it runs next, and how its last run ended.',
-            'The checkbox switches a schedule on or off. **Run now** runs it immediately; **Stop** ends a run in progress; the pencil edits it; the bin deletes it with its history.',
-            'The arrow beside a schedule shows its history. Click a run to read what the script printed; a failed run shows the reason, and the main window also tells you when a scheduled run fails.',
+            'Each schedule shows its scripts, its rule, when it runs next and how its last run ended.',
+            'The checkbox switches a schedule on or off. **Run now** runs its scripts immediately; **Stop** ends the script that is running, and with it the run; the pencil edits it; the bin deletes it with its history.',
+            'The arrow beside a schedule shows its history: each run, and each script in it with how it ended. Click a script to read what it printed. The main window also tells you when a scheduled run fails.',
           ),
         ],
       },
@@ -864,15 +947,65 @@ export const HELP_TOPICS: HelpTopic[] = [
           list(
             'Schedules run only while the application is open. A run that came due while it was closed, or while the computer was asleep, is recorded as **Missed** and is not made up. Starting the application never runs a script.',
             'If a run is still going when the next one comes due, the next one is **Skipped**.',
-            'A scheduled run is exactly like pressing Run: the same Python, the same data access and the same permissions.',
+            'Each script runs exactly as if you had pressed Run: the same Python, the same data access and the same permissions.',
           ),
-          note('Only you can create a schedule, using this form. The AI assistant, scripts and layouts cannot create one.'),
+          note('Only you can create a schedule, here. The AI assistant, scripts and layouts cannot create one.'),
+        ],
+      },
+      {
+        heading: 'Passing data from one script to the next',
+        blocks: [
+          p('The scripts of one run share a folder, `pt.run_folder()`. Write a file there and the next script can read it; the folder is emptied when the run ends.'),
+          code(
+            '# 1. screen.py: Nifty 50 stocks at a 52-week high\nimport pandas as pd, protrade as pt\ncloses = pt.panel(pt.universe("Nifty 50"), bars=260).wide("close")\nhighs = closes.columns[closes.iloc[-1] >= closes.max()]\npd.DataFrame({"symbol": highs}).to_csv(pt.run_folder() / "matches.csv", index=False)\n\n# 2. update.py\nimport pandas as pd, protrade as pt\nmatches = pd.read_csv(pt.run_folder() / "matches.csv")\npt.set_watchlist("Breakouts", matches)',
+          ),
+          p('`pt.schedule()` says which schedule a script is running for and which step it is (`None` when you press Run yourself).'),
+        ],
+      },
+      {
+        heading: 'SQL on your watchlists: pt.sql',
+        blocks: [
+          p('`pt.sql(query, params=None, dry_run=False)` runs SQL on the application’s own database and returns the rows of the last statement that returned any, as a DataFrame.'),
+          list(
+            'It can **read** `watchlists`, `watchlist_items`, `watchlist_sections`, `symbol_flags`, `market_symbols` (the symbol lists), `datasets` and `dataset_bars` (your imported files), the instrument tables, and — when **Save prices on this computer** is on — your saved prices, `prices.price_series` and `prices.price_bars`.',
+            'It can **add, change and delete** rows only in `watchlists`, `watchlist_items`, `watchlist_sections` and `symbol_flags`. Settings, passwords, layouts and schedules are out of its reach.',
+            'Write symbols like `india:NSE:RELIANCE`; a bare `RELIANCE` is read as that. Rows you add go to the end of their list, and the list is renumbered.',
+            'Each call is all or nothing: if anything fails, or a change would leave a list in a state the application can’t show (an unknown flag colour, a symbol it can’t read, a list without a name), nothing is changed and the script gets the reason.',
+            '`dry_run=True` runs it and undoes it, to see what it would do. Use `?` with a list or `:name` with a dict for values.',
+          ),
+          code(
+            'import protrade as pt\nlists = pt.sql("SELECT id, name FROM watchlists")\npt.sql("INSERT INTO watchlist_items (watchlist_id, symbol) VALUES (:id, :s)", {"id": 3, "s": "RELIANCE"})\npt.sql("DELETE FROM watchlist_items WHERE watchlist_id = 3 AND symbol = ?", ["india:NSE:TCS"])',
+          ),
+        ],
+      },
+      {
+        heading: 'Chart pictures: pt.screenshot',
+        blocks: [
+          p('`pt.screenshot(symbol, timeframe="D", layout=None, width=1280, height=720, path=None)` has the application draw a chart and gives back the picture (PNG); with `path` it is saved there too. `layout` names one of your saved layouts: the chart then has that layout’s first chart’s indicators and style. Your drawings on the symbol appear, as on every chart.'),
+          code('import protrade as pt\nfor symbol in ["RELIANCE", "TCS"]:\n    pt.screenshot(symbol, layout="Swing", path=pt.run_folder() / f"{symbol}.png")'),
+          note('The chart is drawn by the application’s main window, so that window must be open (it can be minimised).'),
+        ],
+      },
+      {
+        heading: 'Emailing yourself: pt.send_email',
+        blocks: [
+          p('`pt.send_email(subject, body="", attachments=())` emails **you**: it goes from and to the address in **Email settings** (in the Scheduler tab), through your own mail account. There is no way to send to anyone else — the brokers’ terms say their prices are for your own use. Attachments can be file paths, DataFrames (sent as CSV) or `(name, contents)` pairs, up to 10 MB together.'),
+          steps(
+            'In the Scheduler tab press **Email settings**.',
+            'Type your email address; the server is filled in for Gmail, Outlook and Yahoo (otherwise type your provider’s SMTP server, security and port).',
+            'Type the password. Gmail and Outlook need an **app password**, made in your account’s security settings, not your usual password.',
+            'Press **Save**: the application logs in to check it before keeping it. **Send test email** sends one to you.',
+          ),
+          code(
+            'import pandas as pd, protrade as pt\nfolder = pt.run_folder()\nmatches = pd.read_csv(folder / "matches.csv")\npt.send_email("Breakouts today", f"{len(matches)} names", attachments=[matches, *folder.glob("*.png")])',
+          ),
+          note('The password is kept in Windows’ credential store and is never shown again or given to a script.'),
         ],
       },
       {
         heading: 'Keeping a watchlist up to date',
         blocks: [
-          p('A script can create or refresh one of your watchlists with `pt.set_watchlist`:'),
+          p('Besides `pt.sql`, a script can create or refresh one of your watchlists with `pt.set_watchlist`:'),
           code(
             'import protrade as pt\n\nbars = pt.bars_many(pt.universe("Nifty 50"), "D", limit=260, errors="skip")\nabove = [s for s, df in bars.items()\n         if len(df) > 200 and df.close.iloc[-1] > df.close.rolling(200).mean().iloc[-1]]\npt.set_watchlist("Above the 200-day", above)',
           ),
@@ -937,7 +1070,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             'The readiness panel shows what is available: prices and volume from your broker, index data for relative strength, and how many stocks will be loaded, how many are already loaded and roughly how long the rest will take.',
             '**Market cap, sectors and historical index membership are not available** from these data sources. A Study that needs market cap cannot run; the builder offers a floor on average traded value instead, applied only if you choose it.',
             'Results carry a survivorship-bias warning: today’s instrument list does not include companies delisted in the past.',
-            'With **Keep the market loaded** on (Data providers → **Market data**), a Study reads NSE stocks’ history from memory in batches instead of asking the broker. Anything it doesn’t hold (BSE listings, history older than five years) is fetched at the broker’s rate limit — about 15 minutes for all of NSE through Zerodha (longer through FYERS), several times longer with BSE — and held until the application closes, so reruns that day take seconds.',
+            'With **Keep the market loaded** on (Data providers → **Market data**), a Study reads NSE stocks’ history from memory in batches instead of asking the broker. Anything it doesn’t hold (BSE listings, history older than five years) is fetched at the broker’s rate limit — about 15 minutes for all of NSE through Zerodha (longer through FYERS), several times longer with BSE — and held until the application closes (or kept, with **Save prices on this computer** on), so reruns take seconds.',
           ),
         ],
       },
@@ -1096,7 +1229,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             ],
           ),
           p(
-            'Indian market symbols are the same whichever broker you use (`india:NSE:RELIANCE`), so watchlists, alerts, drawings and layouts carry over if you change broker. With both set up, pick the one that serves them under **Indian market data from** at the top of **Data providers**; open charts reload through it, and the two brokers’ prices are never mixed. With only one set up, it is used.',
+            'Indian market symbols are the same whichever broker you use (`india:NSE:RELIANCE`), so watchlists, alerts, drawings and layouts carry over if you change broker. With both set up, pick the one that serves them under **Indian market data from** at the top of **Data providers**; open charts reload through it. The prices already held carry over too: the broker you pick fills in only what is new, and a stock whose prices from the two brokers don’t agree is read again from it. With only one set up, it is used.',
           ),
           note('Binance, Coinbase and Hyperliquid were removed as data sources — see **Symbols that can no longer load**.'),
         ],
@@ -1113,7 +1246,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             'See the state of its **Instrument list** (used for symbol search), which is refreshed weekly.',
             'With more than one broker set up, choose under **Indian market data from** which one serves Indian market symbols.',
           ),
-          p('Below the sources, **Market data** keeps every NSE stock’s daily history loaded in memory while the application is open. See **Keep the market loaded**.'),
+          p('Below the sources, **Market data** keeps every NSE stock’s daily history loaded in memory while the application is open, and **Saved prices** keeps your broker’s prices on this computer if you choose. See **Keep the market loaded** and **Save prices on this computer**.'),
           note('Market data from your broker account is licensed for your own use. Do not rebroadcast it, for example on a public stream or website. See **Market data terms and storage**.'),
         ],
       },
@@ -1133,7 +1266,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             'The Screener, Studies and Python scripts look at hundreds or thousands of stocks at once. Asking your broker for each one is slow — Zerodha allows about three history requests a second, and FYERS’s free Standard plan fifty a minute. With **Keep the market loaded** on, the application reads five years of daily prices for every NSE stock (regular EQ series) and every NSE index into memory, so a whole-market screen reads them in a second or two.',
           ),
           p('Daily, weekly and monthly charts of those stocks draw from it too, fetching only the latest bar. Intraday charts (1 minute, 5 minutes…) still come from your broker as before.'),
-          note('Nothing is saved on this computer: the brokers’ terms restrict copies of their data. What is loaded is cleared when you close the application and read again the next time. It needs about 200 MB of memory.'),
+          note('What is loaded is cleared when you close the application and read again the next time, unless you also switch on **Save prices on this computer**: then a relaunch reads the market from the saved file in seconds and asks your broker only for what is new. It needs about 200 MB of memory.'),
         ],
       },
       {
@@ -1165,13 +1298,68 @@ export const HELP_TOPICS: HelpTopic[] = [
         blocks: [
           list(
             'Screens on today’s prices alone (the day’s change, gap, close or volume) are still quick: they are judged on one quote of the whole market.',
-            'Anything that needs history is read from your broker at its pace the first time, and held until the application closes.',
+            'Anything that needs history is read from your broker at its pace the first time, and held until the application closes (or kept, with **Save prices on this computer** on).',
             'Switch it off to stop loading. What is already loaded stays until you close the application, or **Clear it** in the Python tab’s settings.',
           ),
         ],
       },
     ],
-    related: ['data-terms', 'data-providers', 'screener', 'studies', 'python'],
+    related: ['saved-prices', 'data-terms', 'data-providers', 'screener', 'studies', 'python'],
+  },
+  {
+    id: 'saved-prices',
+    title: 'Save prices on this computer',
+    group: 'Data and settings',
+    summary: 'An opt-in copy of your broker’s prices on this computer, so charts and research start quickly after a launch.',
+    sections: [
+      {
+        heading: 'What it does',
+        blocks: [
+          p(
+            'Normally the prices your broker sends are held in memory only, so every launch starts empty: the first chart of a symbol, and the first screen, Study or script over many symbols, reads everything from your broker again. With **Save prices on this computer** on, they are also kept in a file on this computer and read back from there.',
+          ),
+          list(
+            'Charts draw the history the file holds and ask your broker only for the newest bars — none at all for a daily chart once the day’s session has settled. Scrolling back reads from the file too.',
+            'The Screener, Studies and Python scripts find the history already there, and bring each stock up to date from one quick quote of the whole market instead of a history request per stock.',
+            'With **Keep the market loaded** on as well, a relaunch reads the whole market from the file in seconds instead of fetching it again.',
+            'If your broker can’t be reached, charts show the saved prices (marked offline).',
+          ),
+          note('A quote can stand in for one missing session only. If the saved prices stop more than a session back — the application was closed at 3 PM and opened the next day, say — each stock that is behind is read from your broker once, as without saving.'),
+        ],
+      },
+      {
+        heading: 'Turning it on',
+        blocks: [
+          steps(
+            'Open **Data providers** and find **Saved prices** below the sources (or use the Home tab’s **Market data** section).',
+            'Tick **Save prices on this computer** and read the notice: your broker’s terms may restrict keeping copies of its data, and keeping to them is your responsibility. **Save prices** accepts it.',
+            'What is already in memory is saved at once, and everything your broker sends from then on as it arrives.',
+          ),
+        ],
+      },
+      {
+        heading: 'What is kept',
+        blocks: [
+          list(
+            'One file (`prices.db`) in the application’s data folder (shown in **About**). Prices are kept by symbol, not by broker, so they carry over when you change broker: the new one fills in only what is new, after checking that its own copy of the last saved bar is the same. A stock where it isn’t (prices, or volume) is read again whole from the broker in use, so one stock’s history never has two brokers’ differing prices in it.',
+            'Daily prices are kept. Intraday prices (1 minute, 5 minutes…) are kept for a year, and only for what charts and scripts read; one nobody has looked at for three months is dropped. Past about 2 GB in all, the prices used least recently go first, intraday before daily.',
+            'If a stock’s saved history no longer matches your broker’s (a split or bonus since it was saved), it is read again whole, so old and adjusted prices are never mixed.',
+          ),
+        ],
+      },
+      {
+        heading: 'Deleting them',
+        blocks: [
+          list(
+            '**Delete saved prices** (under **Saved prices**) deletes the file and starts an empty one; what memory holds goes too, and is read again when needed.',
+            'Switching **Save prices on this computer** off deletes the file. What is in memory stays until you close the application.',
+            '**Forget credentials** for a broker under **Data providers** offers to delete the saved prices of every stock that broker supplied (the application remembers which broker supplied each stock’s prices): the brokers’ terms ask for their data to be deleted once you stop using their APIs.',
+          ),
+          note('Only one copy of the application can use the saved prices at a time; a second copy keeps prices in memory only, and says so, until the first is closed.'),
+        ],
+      },
+    ],
+    related: ['data-terms', 'market-data', 'data-providers', 'privacy'],
   },
   {
     id: 'zerodha',
@@ -1237,7 +1425,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           p(
             'You need a FYERS trading account and an API app, created at myapi.fyers.in. Note its **App ID** (like `XXXXXXXXXX-100`) and **Secret ID**, and set the app’s **redirect URL** to `http://127.0.0.1:47822/` exactly. The application shows this address with a copy button beside the login button.',
           ),
-          note('FYERS’s API terms govern how its data may be used, and they restrict using it for charting tools and making copies of it. The application keeps FYERS’s prices in memory only, but whether your use is allowed is between you and FYERS.'),
+          note('FYERS’s API terms govern how its data may be used, and they restrict using it for charting tools and making copies of it. The application keeps FYERS’s prices in memory unless you switch on **Save prices on this computer**, but whether your use is allowed is between you and FYERS.'),
         ],
       },
       {
@@ -1333,7 +1521,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     id: 'ai-providers',
     title: 'AI providers',
     group: 'Data and settings',
-    summary: 'Add your own Claude or GPT API key for Ask AI and the AI features in Studies.',
+    summary: 'Add your own Claude or GPT API key for Ask AI, the Python assistant and the AI features in Studies.',
     sections: [
       {
         heading: 'Adding a key',
@@ -1351,12 +1539,12 @@ export const HELP_TOPICS: HelpTopic[] = [
           list(
             'Keys are kept in your operating system’s credential store, used only by the application’s backend, and never shown again or written to logs.',
             'Requests are sent to the provider you chose under your own account and are billed to it.',
-            'Each feature says what it sends. Ask AI sends your conversation and a small description of your workspace; Studies send the question, the specification and summary figures — never individual prices or events.',
+            'Each feature says what it sends. Ask AI sends your conversation and a small description of your workspace; Studies send the question, the specification and summary figures — never individual prices or events; the Python assistant sends your question, the open script and a description of your setup, and a run’s error or output only when you choose.',
           ),
         ],
       },
     ],
-    related: ['ask-ai', 'ai-studies'],
+    related: ['ask-ai', 'ai-studies', 'python'],
   },
   {
     id: 'appearance',
@@ -1466,7 +1654,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'What stays on your computer',
         blocks: [
           list(
-            'There is no account and no telemetry. Layouts, watchlists, alerts, scripts, Studies, screens and imported data are kept in one database file on your computer. Broker prices are never saved there: they are held in memory while the application is open.',
+            'There is no account and no telemetry. Layouts, watchlists, alerts, scripts, Studies, screens and imported data are kept in one database file on your computer. Broker prices are held in memory while the application is open, and kept on your computer only if you switch on **Save prices on this computer**, in a file of their own beside it.',
             'Broker credentials and AI keys are kept in your operating system’s credential store (Windows Credential Manager, macOS Keychain or the Linux Secret Service). If none is available, the application stores them in its database and clearly warns that they are unencrypted.',
             'Credentials are read only by the application’s backend. The user interface, Python scripts and the AI assistant never receive them.',
           ),
@@ -1478,7 +1666,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           list(
             'The data sources you switch on, for market data.',
             'GitHub, to check for updates (the daily check can be switched off).',
-            'The AI provider you configured, only when you use an AI feature. It receives your question, symbols, watchlist names and a Study’s summary statistics, never price history.',
+            'The AI provider you configured, only when you use an AI feature. It receives what that feature needs: your question, symbols, watchlist names, a Study’s summary statistics, or the Python script you are working on and a description of your setup. Price history is never sent, except what one of your scripts printed when you tick **Include output** in the Python assistant.',
           ),
           p('What you may do with your broker’s market data, and what the application keeps, is in **Market data terms and storage**.'),
         ],
@@ -1523,7 +1711,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'What the application keeps',
         blocks: [
           p(
-            'Kite Connect’s and FYERS’s terms restrict building databases or copies of the content their APIs return, unless the broker permits it, and ask you to delete stored content when you stop using the APIs. So broker prices are never saved on this computer: the application holds them in memory while it is open (the bars charts show, what scripts, the Screener and Studies read, and the whole market if you keep it loaded) and they are gone when it closes.',
+            'Kite Connect’s and FYERS’s terms restrict building databases or copies of the content their APIs return, unless the broker permits it, and ask you to delete stored content when you stop using the APIs. So by default broker prices are never saved on this computer: the application holds them in memory while it is open (the bars charts show, what scripts, the Screener and Studies read, and the whole market if you keep it loaded) and they are gone when it closes. **Save prices on this computer** keeps a copy in a file instead; it is off until you switch it on and accept a notice that your broker’s terms may not allow it, and keeping to those terms is then your responsibility. Ask Zerodha (kiteconnect@zerodha.com) or FYERS if you are unsure.',
           ),
           p('What the data folder keeps (its location is shown in **About**) is your own:'),
           list(
@@ -1531,9 +1719,10 @@ export const HELP_TOPICS: HelpTopic[] = [
             'Files you import, which are yours.',
             'The last result of each screen and Study you ran. These are your analysis; a result can include a few figures from that day, such as a matched stock’s closing price.',
             'Each broker’s instrument list (names and codes, public and needing no login), and the list of symbols the market covers (names, not prices).',
+            'Only if you switch on **Save prices on this computer**: your brokers’ prices, in one file. Switching it off deletes them, and forgetting a broker’s login offers to delete the ones it supplied.',
           ),
           p('None of it is sent to this project or to anyone else. AI features send the AI provider your question, symbols, watchlist names and a Study’s summary statistics (counts, medians and test results), never price history.'),
-          note('Earlier versions kept broker prices on disk. The first launch of this version deletes them and shrinks the data file.'),
+          note('Versions before 0.3 kept broker prices in the data file itself. The first launch of a newer version deletes them from it and shrinks the file.'),
           note('Symbols saved as `zerodha:…` by earlier versions are renamed `india:…` the first time this version opens, after it saves a copy of the old data file beside it (`charting.before-india.db`). Keep that copy if you might go back to an earlier version.'),
         ],
       },
@@ -1581,7 +1770,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         heading: 'A run takes a long time',
         blocks: [
           p(
-            'The first run over many symbols is limited by your broker’s rate limit. The estimate before a run shows how long it will take; use a trial on 100 symbols or a watchlist universe to try an idea quickly. What it fetched is held until the application closes, so a second run that day is fast; **Keep the market loaded** (Data providers → **Market data**) makes even the first one fast.',
+            'The first run over many symbols is limited by your broker’s rate limit. The estimate before a run shows how long it will take; use a trial on 100 symbols or a watchlist universe to try an idea quickly. What it fetched is held until the application closes, so a second run that day is fast; **Keep the market loaded** (Data providers → **Market data**) makes even the first one fast, and **Save prices on this computer** keeps it fast after a relaunch.',
           ),
         ],
       },
@@ -1600,8 +1789,9 @@ export const HELP_TOPICS: HelpTopic[] = [
         blocks: [
           list(
             'Schedules run only while the application is open and the computer is awake; otherwise the run is recorded as **Missed**.',
-            'Check that the schedule is switched on, and read its history for the reason a run failed.',
+            'Check that the schedule is switched on, and read its history (in the Scheduler tab) for the reason a run failed: each script shows how it ended and what it printed. Scripts after one that failed are **Not run**.',
             'A run is **Skipped** if the previous run is still going.',
+            'A script that uses `pt.screenshot` needs the application’s main window open; one that uses `pt.send_email` needs **Email settings** saved in the Scheduler tab.',
           ),
         ],
       },

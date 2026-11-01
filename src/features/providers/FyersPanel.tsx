@@ -79,8 +79,8 @@ export function FyersPanel({ provider, onLoggedIn }: { provider: ProviderInfo; o
         </p>
         <p style={{ marginBottom: 0 }}>
           FYERS's API terms govern how its data may be used; they restrict using it for charting tools and making copies
-          of it. ProTradeChart keeps FYERS's prices in memory only, but whether your use is allowed is between you and
-          FYERS.
+          of it. ProTradeChart keeps FYERS's prices in memory unless you switch on Save prices on this computer, but
+          whether your use is allowed is between you and FYERS.
         </p>
       </div>
     );
@@ -313,7 +313,8 @@ export function FyersPanel({ provider, onLoggedIn }: { provider: ProviderInfo; o
 
       <p className="small muted prov-status-note">
         FYERS's API terms govern how its data may be used; they restrict using it for charting tools and making copies of
-        it. ProTradeChart keeps FYERS's prices in memory only, but whether your use is allowed is between you and FYERS.
+        it. ProTradeChart keeps FYERS's prices in memory unless you switch on Save prices on this computer, but whether
+        your use is allowed is between you and FYERS.
       </p>
     </div>
   );

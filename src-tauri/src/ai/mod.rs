@@ -43,6 +43,10 @@ pub struct AiRequest {
     pub messages: Vec<Msg>,
     pub schema: Option<Value>,
     pub tools: Vec<ToolSpec>,
+    /// Ask the provider to cache the request's prefix (system prompt and history). Worth it only
+    /// for a conversation, where the next turn starts with the same text; a one-off request would
+    /// pay the cache write for nothing. OpenAI caches prefixes by itself, so only Claude reads it.
+    pub cache: bool,
 }
 
 impl AiRequest {
@@ -53,6 +57,7 @@ impl AiRequest {
             messages,
             schema: Some(schema),
             tools: Vec::new(),
+            cache: false,
         }
     }
 
@@ -64,7 +69,13 @@ impl AiRequest {
             messages,
             schema: None,
             tools,
+            cache: false,
         }
+    }
+
+    /// The same request, with its prefix cached (see [`AiRequest::cache`]).
+    pub fn cached(self) -> Self {
+        AiRequest { cache: true, ..self }
     }
 }
 

@@ -1,4 +1,5 @@
-import { canonicalProvider, INDIA, isSupportedProvider, joinSymbol, resolveTypedSymbol, type ProviderId } from './symbols';
+import { canonicalProvider, isSupportedProvider, joinSymbol, resolveTypedSymbol, type ProviderId } from './symbols';
+import { fromTradingView } from './tradingViewSymbols';
 
 export interface ImportedWatchlistItem {
   symbol: string;
@@ -18,14 +19,6 @@ export interface MapOptions {
   /** Where an entry with no exchange goes (default: the app's default provider). */
   defaultProvider?: ProviderId;
 }
-
-/** TradingView's NSE index shorthands → the app's ticker for the index (index names have
- *  spaces, which tickers write as underscores). */
-const INDIA_INDEX: Record<string, string> = {
-  NIFTY: 'NIFTY_50',
-  NIFTY50: 'NIFTY_50',
-  BANKNIFTY: 'NIFTY_BANK',
-};
 
 /** Maps one `EXCHANGE:TICKER` (TradingView) or bare `TICKER` entry to this
  *  app's `provider:TICKER`, or `null` if it can't be charted — an exchange none
@@ -52,9 +45,7 @@ export function mapSymbol(entry: string, options: MapOptions = {}): string | nul
     return joinSymbol(ours as ProviderId, ours === 'csv' ? upper : ticker);
   }
 
-  if ((exchange === 'NSE' || exchange === 'BSE') && options.indian) {
-    return joinSymbol(INDIA, `${exchange}:${(exchange === 'NSE' && INDIA_INDEX[upper]) || upper}`);
-  }
+  if ((exchange === 'NSE' || exchange === 'BSE') && options.indian) return fromTradingView(exchange, upper);
   return null;
 }
 

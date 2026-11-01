@@ -271,6 +271,52 @@ async fn a_script_refreshes_a_watchlist_through_the_real_api_and_is_told_what_ha
 }
 
 #[tokio::test]
+async fn a_script_runs_sql_emails_itself_and_saves_a_chart_through_the_real_api() {
+    let Some(h) = harness("helpers").await else { return };
+    let shot = h.lib.join("chart.png");
+    let code = format!(
+        "import protrade as pt\n\
+         pt.sql(\"INSERT INTO watchlists (id, name) VALUES (9, 'Breakouts')\")\n\
+         pt.sql('INSERT INTO watchlist_items (watchlist_id, symbol) VALUES (9, ?), (9, ?)', ['reliance', 'NSE:INFY'])\n\
+         picks = pt.sql('SELECT symbol, position FROM watchlist_items WHERE watchlist_id = :id ORDER BY position', {{'id': 9}})\n\
+         assert picks['symbol'].tolist() == ['india:NSE:RELIANCE', 'india:NSE:INFY'], picks\n\
+         assert picks['position'].tolist() == [1, 2], picks\n\
+         try:\n    pt.sql('SELECT * FROM ui_preferences')\n    raise SystemExit('read a setting')\n\
+         except pt.BadRequestError as e:\n    assert \"can't do that\" in str(e), e\n\
+         png = pt.screenshot('RELIANCE', path=r'{}')\n\
+         assert png[:4] == b'\\x89PNG'\n\
+         pt.send_email('Breakouts', 'Two names', attachments=[picks, r'{}'])\n",
+        shot.display(),
+        shot.display()
+    );
+    let ran = h.run(&code, None).await;
+    assert_eq!(ran.outcome, Outcome::Exited(Some(0)), "stderr: {}", ran.stderr);
+    assert!(
+        ran.stdout.contains("Changed 2 row(s) in watchlist_items."),
+        "{}",
+        ran.stdout
+    );
+    assert_eq!(std::fs::read(&shot).unwrap()[..4], [0x89, b'P', b'N', b'G']);
+    let shots = h.backend.screenshots.lock().unwrap().clone();
+    assert_eq!(
+        (shots[0].symbol.as_str(), shots[0].timeframe.as_str()),
+        ("india:NSE:RELIANCE", "D")
+    );
+    let emails = h.backend.emails.lock().unwrap().clone();
+    assert_eq!(emails.len(), 1);
+    let (subject, body, attachments) = &emails[0];
+    assert_eq!((subject.as_str(), body.as_str()), ("Breakouts", "Two names"));
+    assert_eq!(
+        attachments
+            .iter()
+            .map(|a| (a.name.as_str(), a.content_type.as_str()))
+            .collect::<Vec<_>>(),
+        [("table-1.csv", "text/csv"), ("chart.png", "image/png")]
+    );
+    h.cleanup();
+}
+
+#[tokio::test]
 async fn a_screen_runs_through_the_real_api_and_posts_its_matches() {
     let Some(h) = harness("screen").await else { return };
     *h.backend.bar_count.lock().unwrap() = 400;

@@ -1,5 +1,6 @@
 //! What a Study's universe will cost before it runs: which listings count as stocks, and how many of
-//! them memory already holds back far enough (this session's loads; nothing is kept on disk).
+//! them memory already holds back far enough (this session's loads, and the saved prices if the
+//! user keeps them).
 //!
 //! `listing_series` and `pick_listings` are the engine's own rules (`python/protrade/study.py`,
 //! same names): the estimate must count the symbols the run will fetch. Keep the two in step — the

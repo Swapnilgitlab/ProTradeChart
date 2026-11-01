@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   AppWindow,
   Bell,
+  CalendarClock,
   Check,
   CircleHelp,
   Code,
@@ -17,6 +18,7 @@ import {
   Plug,
   Plus,
   RefreshCw,
+  Rewind,
   Settings2,
   Sparkles,
   Square,
@@ -28,6 +30,7 @@ import { ThemeSelect } from '../../components/ThemeSelect';
 import { listDatasets, pythonEnvStatus, type AiProviders } from '../../lib/ipc';
 import { describeHoldings, describeProgress, isLoaded } from '../../lib/marketData';
 import { useMarketData } from '../marketdata/useMarketData';
+import { useSavedPrices } from '../marketdata/useSavedPrices';
 import { useProviderState } from '../providers/useProviderState';
 import { BrokerHomeCard } from '../providers/BrokerLogin';
 import type { LayoutSummary } from '../layouts/LayoutMenu';
@@ -60,6 +63,7 @@ interface Props {
   onOpenPythonSetup: () => void;
   onOpenStudies: () => void;
   onOpenScreener: () => void;
+  onOpenScheduler: () => void;
   onOpenDataProviders: () => void;
   onOpenAiProviders: () => void;
   onOpenImportData: () => void;
@@ -125,6 +129,7 @@ export function HomePage({
   onOpenPythonSetup,
   onOpenStudies,
   onOpenScreener,
+  onOpenScheduler,
   onOpenDataProviders,
   onOpenAiProviders,
   onOpenImportData,
@@ -148,6 +153,7 @@ export function HomePage({
   }, []);
   const marketData = useMarketData();
   const market = marketData.status;
+  const savedPrices = useSavedPrices();
   // `undefined` while still loading: no card is marked pending on a guess before its answer is in.
   const statusOf = (known: boolean | null): CardStatus | undefined => (known == null ? undefined : known ? 'done' : 'pending');
 
@@ -168,6 +174,12 @@ export function HomePage({
         cards={[
           { icon: Plus, title: 'New chart tab', description: 'Start a chart on a fresh tab (Ctrl+T).', onClick: onNewChart },
           { icon: AppWindow, title: 'New window', description: 'Open another window (Ctrl+Shift+N).', onClick: onNewWindow },
+          {
+            icon: Rewind,
+            title: 'Bar replay',
+            description: 'Replay a chart bar by bar: Replay on its toolbar, or right-click a bar.',
+            onClick: () => onOpenHelp('charts'),
+          },
         ]}
       />
       <section className="home-section">
@@ -203,9 +215,20 @@ export function HomePage({
         cards={[
           { icon: Sparkles, title: 'Ask AI', description: 'Ask questions and approve actions on the active chart.', onClick: onOpenAskAi },
           { icon: Code, title: 'Script Editor', description: 'Write Pine Script indicators and strategies, and backtest them (Ctrl+E).', onClick: onOpenScriptEditor },
-          { icon: SquareTerminal, title: 'Python', description: "Screen and backtest with your broker's data (Ctrl+Shift+Y).", onClick: onOpenPython },
+          {
+            icon: SquareTerminal,
+            title: 'Python',
+            description: "Screen and backtest with your broker's data, with an AI assistant that writes and fixes scripts (Ctrl+Shift+Y).",
+            onClick: onOpenPython,
+          },
           { icon: FlaskConical, title: 'Studies', description: 'What stocks looked like around historical events.', onClick: onOpenStudies },
           { icon: ListFilter, title: 'Screener', description: 'Which stocks match your conditions today.', onClick: onOpenScreener },
+          {
+            icon: CalendarClock,
+            title: 'Scheduler',
+            description: 'Run your Python scripts by themselves, in a sequence, at set times.',
+            onClick: onOpenScheduler,
+          },
         ]}
       />
 
@@ -243,7 +266,8 @@ export function HomePage({
             status: statusOf(pythonReady),
           },
           {
-            // No Done badge: the market is held in memory, so whatever is loaded goes when the app closes.
+            // No Done badge: keeping the market loaded is ongoing, and unless prices are saved whatever
+            // is loaded goes when the app closes.
             icon: Database,
             title: 'Market data',
             description:
@@ -279,7 +303,22 @@ export function HomePage({
             </span>
             <span className="home-card-description">
               Five years of every NSE stock&rsquo;s daily prices in memory while the app is open, updated after each trading day.
-              Never saved on this computer.
+              Kept on this computer only if you save prices.
+            </span>
+          </label>
+          <label className="home-card home-card-control home-card-toggle">
+            <span className="home-card-title">
+              <input
+                type="checkbox"
+                checked={savedPrices.status?.on ?? false}
+                disabled={!savedPrices.status || savedPrices.busy}
+                onChange={(e) => void savedPrices.setOn(e.target.checked)}
+              />{' '}
+              Save prices on this computer
+            </span>
+            <span className="home-card-description">
+              Keep your broker&rsquo;s prices in a file here, so charts open from it and the first screen after a launch is
+              quick. Off by default: your broker&rsquo;s terms may restrict it.
             </span>
           </label>
           {market?.running ? (

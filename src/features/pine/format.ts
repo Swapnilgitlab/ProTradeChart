@@ -28,7 +28,8 @@ export function formatPct(v: number | null | undefined, signed = false): string 
 
 /** A ratio such as profit factor or win/loss, two decimals. */
 export function formatRatio(v: number | null | undefined): string {
-  return finite(v) ? v.toFixed(2) : DASH;
+  if (!finite(v)) return DASH;
+  return v < 0 ? `${MINUS}${Math.abs(v).toFixed(2)}` : v.toFixed(2);
 }
 
 /** A position size: trims noise (`111.509203` → `111.51`) but keeps small crypto sizes readable. */

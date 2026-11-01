@@ -52,10 +52,15 @@ export function providerNameFromModel(model: string): string {
   return 'the AI';
 }
 
+/** Who a request actually goes to, for a privacy line: "Anthropic", "OpenAI", or a neutral fallback. */
+export function aiCompany(providers: AiProviders | null): string {
+  return providers?.active ? COMPANY[providers.active] : 'your chosen AI provider';
+}
+
 /** What a request sends and to whom, naming whichever provider will actually receive it — a
  *  factual, provider-dependent statement, not just branding. */
 export function privacyNote(providers: AiProviders | null): string {
-  const company = providers?.active ? COMPANY[providers.active] : 'your chosen AI provider';
+  const company = aiCompany(providers);
   return (
     'Your question, the Study Specification and, when you ask for an explanation, a summary of the result (counts, medians and tests — not the ' +
     `events or prices) are sent to ${company} under your account, and each request is billed to it.`

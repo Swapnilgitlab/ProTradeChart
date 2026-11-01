@@ -7,7 +7,7 @@ import { getPreference, setPreference, type PineScriptRow } from '../../lib/ipc'
 import { BUNDLED_SCRIPTS, type BundledScript } from '../../pine/bundled';
 import type { DockRequest } from '../../pine/dockBus';
 import { makeIndicatorId, scriptIdOf } from '../../pine/engine';
-import { BLANKS, TEMPLATES, declaredTitle, detectKind, type ScriptTemplate } from '../../pine/source';
+import { BLANKS, TEMPLATES, declaredTitle, detectKind, kindLabel, type ScriptTemplate } from '../../pine/source';
 import { CodeEditor } from './CodeEditor';
 import { useActiveChart, useIndicatorTick } from './useActiveChart';
 import { usePineScripts } from './usePineScripts';
@@ -225,29 +225,19 @@ export function PineEditor({ workspace, chartLabel, editRequest, onStrategyAdded
       return;
     }
     if (!kind) {
-      log(
-        'error',
-        /^\s*library\s*\(/m.test(buffer.source) ? "A library() script can't be added to a chart." : 'Start the script with indicator(…) or strategy(…).',
-      );
+      log('error', 'Start the script with indicator(…) or strategy(…).');
+      return;
+    }
+    if (kind === 'library') {
+      log('error', "A library can't be added to a chart. Save it, then use it from a script with import <user>/<library title>/<version>.");
       return;
     }
     if (linked) {
-      // Replaces the code in place: same legend row, pane and settings. A script that
-      // doesn't compile leaves the running one untouched; the error listener above logs it.
-      // Success is the script's next run, tagged `code` (the handle's own `ready` fires once).
-      const id = linked.id;
-      const stops: (() => void)[] = [];
-      const done = () => stops.forEach((stop) => stop());
-      stops.push(
-        chart.on('script:run', (run) => {
-          if (run.id !== id || run.cause !== 'code') return;
-          log('info', `Updated "${run.title}" on the chart.`);
-          done();
-        }),
-      );
-      stops.push(chart.on('indicator:error', (e) => e.id === id && done()));
-      window.setTimeout(done, 15_000);
-      linked.updateCode(buffer.source);
+      // Replaces the code in place: same legend row, pane and settings. Vela resolves once the
+      // new code has run; code that fails to compile or to run puts the old code back and is
+      // reported as an `indicator:error`, which the listener above logs.
+      const result = await linked.updateCode(buffer.source);
+      if (result.ok) log('info', `Updated "${declaredTitle(buffer.source) ?? buffer.name}" on the chart.`);
       return;
     }
     const id = makeIndicatorId(buffer.id);
@@ -289,7 +279,7 @@ export function PineEditor({ workspace, chartLabel, editRequest, onStrategyAdded
         {scripts.length === 0 && <div className="pine-library-empty small muted">Nothing saved yet. Write a script and press Ctrl+S.</div>}
         {scripts.map((s) => (
           <div key={s.id} className={`pine-library-row${s.id === buffer.id ? ' active' : ''}`}>
-            <button type="button" className="pine-library-item" onClick={() => void openSaved(s)} title={s.kind === 'strategy' ? 'Strategy' : 'Indicator'}>
+            <button type="button" className="pine-library-item" onClick={() => void openSaved(s)} title={kindLabel(s.kind)}>
               <span className={`pine-kind-dot ${s.kind}`} aria-hidden="true" />
               <span className="grow">{s.name}</span>
             </button>
@@ -330,7 +320,7 @@ export function PineEditor({ workspace, chartLabel, editRequest, onStrategyAdded
             setBuffer((b) => ({ ...b, name: e.currentTarget.value }));
           }}
         />
-        {kind && <span className={`pine-kind ${kind}`}>{kind === 'strategy' ? 'Strategy' : 'Indicator'}</span>}
+        {kind && <span className={`pine-kind ${kind}`}>{kindLabel(kind)}</span>}
         <span className={`pine-status${dirty ? ' dirty' : ''}`}>{dirty ? 'Unsaved changes' : 'Saved'}</span>
 
         <div className="pine-toolbar-spacer" />

@@ -102,6 +102,15 @@ impl Broker {
     pub fn parse(id: &str) -> Option<Broker> {
         Broker::ALL.into_iter().find(|b| b.id().eq_ignore_ascii_case(id.trim()))
     }
+
+    /// Its bit in a set of brokers (which brokers supplied a saved series' bars). Stored in the
+    /// saved prices, so a broker's bit never changes.
+    pub fn bit(self) -> u8 {
+        match self {
+            Broker::Zerodha => 1,
+            Broker::Fyers => 2,
+        }
+    }
 }
 
 /// The preference naming the broker the user picked to serve `india:` symbols.
@@ -114,8 +123,8 @@ pub fn chosen_broker(conn: &Connection) -> rusqlite::Result<Option<Broker>> {
 
 /// Which broker serves `india:` symbols: the one the user picked; otherwise the one that is set up
 /// and switched on (the first in [`Broker::ALL`] when several are); otherwise the first. Never more
-/// than one, and never a quiet switch to another when the picked one stops working: two brokers'
-/// bars are never mixed in one series.
+/// than one, and never a quiet switch to another when the picked one stops working: which broker
+/// answers is the user's to say. The prices themselves don't depend on it (`store::bar_memory`).
 pub fn india_broker(conn: &Connection, secrets: &Secrets) -> rusqlite::Result<Broker> {
     if let Some(chosen) = chosen_broker(conn)? {
         return Ok(chosen);

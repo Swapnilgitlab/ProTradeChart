@@ -14,7 +14,10 @@ const API_VERSION: &str = "2023-06-01";
 /// model's safety classifiers decline a request, Anthropic re-runs it on its recommended fallback
 /// model within the same call instead of returning the refusal.
 pub const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
-pub const MODEL: &str = "claude-opus-5";
+pub const MODEL: &str = "claude-opus-5-5";
+/// Opus 5.5 defaults to `medium`, a level below Opus 5's `high`; every request here is a spec, a
+/// plan, an explanation or a script, where thoroughness matters more than a few seconds.
+const EFFORT: &str = "high";
 /// Room for adaptive thinking plus a full answer. Answers are streamed, so a long one can't time out.
 const MAX_TOKENS: u32 = 32_000;
 /// How long a streamed answer may go quiet before it is given up on. Anthropic sends a `ping` every
@@ -74,7 +77,9 @@ impl ClaudeClient {
     }
 
     /// Builds the Messages API body for a request: `output_config.format.json_schema` when it
-    /// asks for structured JSON text, or `tools` when it offers tool calls instead.
+    /// asks for structured JSON text, or `tools` when it offers tool calls instead. No
+    /// `tool_choice` is ever sent (Opus 5.5 refuses a forced one), and no thinking block is sent
+    /// back: a conversation's history travels as plain text.
     fn body(&self, req: &AiRequest) -> Value {
         let messages: Vec<Value> = req
             .messages
@@ -90,11 +95,14 @@ impl ClaudeClient {
             "messages": messages,
         });
         let map = body.as_object_mut().unwrap();
+        let mut output = json!({"effort": EFFORT});
         if let Some(schema) = &req.schema {
-            map.insert(
-                "output_config".into(),
-                json!({"format": {"type": "json_schema", "schema": schema}}),
-            );
+            output["format"] = json!({"type": "json_schema", "schema": schema});
+        }
+        map.insert("output_config".into(), output);
+        if req.cache {
+            // Caches everything up to the last block, so the next turn re-reads it at a tenth of the price.
+            map.insert("cache_control".into(), json!({"type": "ephemeral"}));
         }
         if !req.tools.is_empty() {
             let tools: Vec<Value> = req
@@ -501,7 +509,7 @@ mod tests {
     #[test]
     fn a_finished_answer_is_its_text_blocks() {
         let body = json!({
-            "model": "claude-opus-5",
+            "model": "claude-opus-5-5",
             "stop_reason": "end_turn",
             "content": [
                 {"type": "thinking", "thinking": "…", "signature": "x"},
@@ -511,14 +519,14 @@ mod tests {
         });
         let reply = parse_reply(200, &body.to_string()).unwrap();
         assert_eq!(reply.text, "{\"a\":1}");
-        assert_eq!(reply.model, "claude-opus-5");
+        assert_eq!(reply.model, "claude-opus-5-5");
         assert!(reply.tool_calls.is_empty());
     }
 
     #[test]
     fn a_tool_call_is_read_from_a_whole_response() {
         let body = json!({
-            "model": "claude-opus-5",
+            "model": "claude-opus-5-5",
             "stop_reason": "tool_use",
             "content": [
                 {"type": "text", "text": "Sure, adding it."},
@@ -542,7 +550,7 @@ mod tests {
             "model": "claude-opus-4-8",
             "stop_reason": "end_turn",
             "content": [
-                {"type": "fallback", "from": {"model": "claude-opus-5"}, "to": {"model": "claude-opus-4-8"}},
+                {"type": "fallback", "from": {"model": "claude-opus-5-5"}, "to": {"model": "claude-opus-4-8"}},
                 {"type": "text", "text": "ok"}
             ]
         });
@@ -660,7 +668,7 @@ mod tests {
     async fn a_message_carries_the_key_version_and_fallback_opt_in() {
         let (base, seen) = serve_once(
             200,
-            json!({"model": "claude-opus-5", "stop_reason": "end_turn", "content": [{"type": "text", "text": "hi"}]}),
+            json!({"model": "claude-opus-5-5", "stop_reason": "end_turn", "content": [{"type": "text", "text": "hi"}]}),
         )
         .await;
         let client = ClaudeClient::with_base(reqwest::Client::new(), &base);
@@ -679,13 +687,32 @@ mod tests {
         assert_eq!(sent["model"], MODEL);
         assert_eq!(sent["stream"], true);
         assert_eq!(sent["output_config"]["format"]["schema"]["type"], "object");
+        assert_eq!(sent["output_config"]["effort"], "high");
+        assert!(sent.get("cache_control").is_none(), "a one-off request isn't cached");
+    }
+
+    #[tokio::test]
+    async fn a_conversation_asks_for_its_prefix_to_be_cached() {
+        let (base, seen) = serve_once(
+            200,
+            json!({"model": MODEL, "stop_reason": "end_turn", "content": [{"type": "text", "text": "hi"}]}),
+        )
+        .await;
+        let client = ClaudeClient::with_base(reqwest::Client::new(), &base);
+        client
+            .message("sk-ant-test", &req(json!({"type": "object"})).cached(), &mut |_| {})
+            .await
+            .unwrap();
+        let (_, body) = seen.lock().unwrap().clone().unwrap();
+        let sent: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(sent["cache_control"], json!({"type": "ephemeral"}));
     }
 
     #[tokio::test]
     async fn a_request_with_tools_sends_them_and_no_schema() {
         let (base, seen) = serve_once(
             200,
-            json!({"model": "claude-opus-5", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t1", "name": "f", "input": {}}]}),
+            json!({"model": "claude-opus-5-5", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t1", "name": "f", "input": {}}]}),
         )
         .await;
         let client = ClaudeClient::with_base(reqwest::Client::new(), &base);
@@ -704,7 +731,9 @@ mod tests {
         client.message("sk-ant-test", &req, &mut |_| {}).await.unwrap();
         let (_, body) = seen.lock().unwrap().clone().unwrap();
         let sent: Value = serde_json::from_str(&body).unwrap();
-        assert!(sent.get("output_config").is_none());
+        assert!(sent["output_config"].get("format").is_none());
+        assert_eq!(sent["output_config"]["effort"], "high");
+        assert!(sent.get("tool_choice").is_none());
         assert_eq!(sent["tools"][0]["name"], "f");
         assert_eq!(sent["tools"][0]["input_schema"]["type"], "object");
     }
@@ -738,7 +767,7 @@ mod tests {
 
     fn answer_stream(text_parts: &[&str], stop_reason: &str) -> Vec<Value> {
         let mut events = vec![
-            json!({"type": "message_start", "message": {"model": "claude-opus-5", "content": []}}),
+            json!({"type": "message_start", "message": {"model": "claude-opus-5-5", "content": []}}),
             json!({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}}),
             json!({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "hmm"}}),
             json!({"type": "ping"}),
@@ -770,7 +799,7 @@ mod tests {
         for piece in [1, 2, 3, 5, 64, stream.len()] {
             let reply = accumulate(&stream, piece).unwrap();
             assert_eq!(reply.text, "{\"a\": \"₹1 Cr\"}", "split every {piece} bytes");
-            assert_eq!(reply.model, "claude-opus-5");
+            assert_eq!(reply.model, "claude-opus-5-5");
         }
         let crlf = stream.replace('\n', "\r\n");
         assert_eq!(accumulate(&crlf, 4).unwrap().text, "{\"a\": \"₹1 Cr\"}");
@@ -779,7 +808,7 @@ mod tests {
     #[test]
     fn a_streamed_tool_call_reassembles_its_json_from_partial_deltas() {
         let events = vec![
-            json!({"type": "message_start", "message": {"model": "claude-opus-5"}}),
+            json!({"type": "message_start", "message": {"model": "claude-opus-5-5"}}),
             json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
             json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Adding it."}}),
             json!({"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "t1", "name": "add_watchlist_item", "input": {}}}),
@@ -802,7 +831,7 @@ mod tests {
     #[test]
     fn a_tool_only_answer_with_no_text_is_not_an_empty_answer() {
         let events = vec![
-            json!({"type": "message_start", "message": {"model": "claude-opus-5"}}),
+            json!({"type": "message_start", "message": {"model": "claude-opus-5-5"}}),
             json!({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "t1", "name": "f", "input": {}}}),
             json!({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}}),
             json!({"type": "message_delta", "delta": {"stop_reason": "tool_use"}}),
@@ -858,10 +887,10 @@ mod tests {
     #[test]
     fn a_fallback_discards_what_the_declining_model_wrote() {
         let events = vec![
-            json!({"type": "message_start", "message": {"model": "claude-opus-5"}}),
+            json!({"type": "message_start", "message": {"model": "claude-opus-5-5"}}),
             json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
             json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "{\"half"}}),
-            json!({"type": "content_block_start", "index": 1, "content_block": {"type": "fallback", "from": {"model": "claude-opus-5"}, "to": {"model": "claude-opus-4-8"}}}),
+            json!({"type": "content_block_start", "index": 1, "content_block": {"type": "fallback", "from": {"model": "claude-opus-5-5"}, "to": {"model": "claude-opus-4-8"}}}),
             json!({"type": "content_block_start", "index": 2, "content_block": {"type": "text", "text": ""}}),
             json!({"type": "content_block_delta", "index": 2, "delta": {"type": "text_delta", "text": "{}"}}),
             json!({"type": "message_delta", "delta": {"stop_reason": "end_turn"}}),
@@ -872,7 +901,7 @@ mod tests {
 
         let whole = json!({"model": "claude-opus-4-8", "stop_reason": "end_turn", "content": [
             {"type": "text", "text": "{\"half"},
-            {"type": "fallback", "from": {"model": "claude-opus-5"}, "to": {"model": "claude-opus-4-8"}},
+            {"type": "fallback", "from": {"model": "claude-opus-5-5"}, "to": {"model": "claude-opus-4-8"}},
             {"type": "text", "text": "{}"}
         ]});
         assert_eq!(parse_reply(200, &whole.to_string()).unwrap().text, "{}");

@@ -16,7 +16,8 @@
 //!
 //! FYERS's API terms (fyers.in/terms-and-conditions-api) restrict using its data for charting tools
 //! and copies of it; the owner's decision is to not release this until FYERS has agreed in writing.
-//! Like Zerodha's, its prices stay in memory only.
+//! Like Zerodha's, its prices stay in memory unless the user switches on "Save prices on this
+//! computer" (`crate::prices`), which keeps them by symbol beside Zerodha's.
 
 pub mod budget;
 pub mod callback;

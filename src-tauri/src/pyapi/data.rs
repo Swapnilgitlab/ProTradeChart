@@ -1,5 +1,6 @@
-//! "Bars for this symbol and range", answered from the session's bar memory and topped up
-//! from the broker only where it is missing or out of date. Nothing here touches the disk.
+//! "Bars for this symbol and range", answered from the bar memory (and the saved prices behind
+//! it, when the user keeps them) and topped up from the broker only where it is missing or out of
+//! date.
 //!
 //! No HTTP and no Tauri here: the broker sits behind [`Fetcher`], so the whole policy is
 //! tested with a fake one. The memory's lock is never held across an await.
@@ -12,8 +13,9 @@ use super::{split_symbol, ApiError};
 use crate::market::{ist_day_start, quote_session_day, SESSION_MINUTES};
 use crate::models::{Bar, DaySnapshot};
 use crate::store::bar_memory::BarMemory;
-use crate::store::day_topup::{candidate, snapshot_bar, Candidate};
-use crate::store::research_bars::{self as store, interval_ms, Range};
+use crate::store::day_topup::{candidate, same_price, snapshot_bar, Candidate};
+use crate::store::research_bars::{self as store, interval_ms, Coverage, Range};
+use crate::symbols::Broker;
 
 const MINUTE_MS: i64 = 60_000;
 const DAY_MS: i64 = 86_400_000;
@@ -30,6 +32,9 @@ pub struct Fetched {
     /// clients answer an over-long range with only its newest part, so this can be later
     /// than the start that was asked for. The store records what it got, not what it hoped.
     pub from_ms: i64,
+    /// The broker that answered: recorded as a source of the series, and the check at a seam
+    /// between brokers is stricter (`agrees_with_held`).
+    pub served_by: Option<Broker>,
 }
 
 /// Asks a broker for bars. Errors are already in the client's terms.
@@ -43,15 +48,17 @@ pub trait Fetcher: Send + Sync {
     ) -> BoxFuture<'a, Result<Fetched, ApiError>>;
 }
 
+/// A batch of day snapshots, one per ticker asked about, and the broker that served them.
+pub struct Quoted {
+    pub served_by: Option<Broker>,
+    pub days: Vec<Option<DaySnapshot>>,
+}
+
 /// Asks a broker for a batch of quote-based day snapshots, one per `tickers` entry, in order —
 /// `None` for one it had nothing for. `tickers` are the broker's own form (`split_symbol`'s
 /// second half), not the full `provider:TICKER` symbol.
 pub trait Snapshots: Send + Sync {
-    fn snapshots<'a>(
-        &'a self,
-        provider: &'a str,
-        tickers: &'a [String],
-    ) -> BoxFuture<'a, Result<Vec<Option<DaySnapshot>>, ApiError>>;
+    fn snapshots<'a>(&'a self, provider: &'a str, tickers: &'a [String]) -> BoxFuture<'a, Result<Quoted, ApiError>>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,31 +136,129 @@ pub fn span(interval: &str, from_ms: Option<i64>, to_ms: Option<i64>, limit: Opt
     (from, to)
 }
 
+/// Whether a refresh that overlaps what is held agrees with it, judged on the oldest held bar in
+/// the overlap that was already final when it was read. A split or a bonus rewrites every earlier
+/// bar, so one bar is enough to tell; a bar still forming when it was read proves nothing, and one
+/// the broker didn't send this time isn't held against it.
+///
+/// The prices held are broker-agnostic, so the bars may be another broker's. At such a seam
+/// (`seam`: the broker answering supplied none of the series) the whole bar must agree, volume
+/// included, so that two brokers' bars only ever sit in one series where they are the same.
+fn agrees_with_held(
+    mem: &BarMemory,
+    req: &BarsRequest,
+    c: Coverage,
+    fetched: &[Bar],
+    from_ms: i64,
+    seam: bool,
+) -> bool {
+    let final_when_read = |b: &Bar| match interval_ms(&req.interval) {
+        Some(bar) if req.interval != "D" => b.time + bar <= c.synced_at,
+        _ => crate::market::last_settled_ms(c.synced_at) >= b.time,
+    };
+    let Some(anchor) = mem
+        .get(&req.symbol, &req.interval, from_ms, c.to_ms, None)
+        .into_iter()
+        .find(final_when_read)
+    else {
+        return true;
+    };
+    fetched.iter().find(|b| b.time == anchor.time).is_none_or(|b| {
+        same_price(b.close, anchor.close)
+            && (!seam
+                || (same_price(b.open, anchor.open)
+                    && same_price(b.high, anchor.high)
+                    && same_price(b.low, anchor.low)
+                    && same_volume(b.volume, anchor.volume)))
+    })
+}
+
+/// Two brokers' volumes for one bar: the exchange's count, so equal but for rounding.
+fn same_volume(fetched: Option<f64>, held: Option<f64>) -> bool {
+    match (fetched, held) {
+        (Some(a), Some(b)) => (a - b).abs() <= (b.abs() * 1e-3).max(1.0),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
 /// Bars for a request. Reads the memory, asks `fetcher` for the ranges it lacks, records
-/// what it got, and answers from the memory.
+/// what it got, and answers from the memory. A refresh that no longer agrees with what is held
+/// (a corporate action since it was read) replaces the series with the whole request, read again.
 pub async fn load_bars(
     mem: &BarMemory,
     fetcher: &dyn Fetcher,
     req: &BarsRequest,
     now_ms: i64,
 ) -> Result<BarsData, ApiError> {
+    load(mem, fetcher, req, now_ms, false).await
+}
+
+/// [`load_bars`] for a chart. With `fresh` the newest end is read again whatever its age: the
+/// session is running, and the chart's live bar is built on the last bar it gets.
+pub async fn load_chart_bars(
+    mem: &BarMemory,
+    fetcher: &dyn Fetcher,
+    req: &BarsRequest,
+    now_ms: i64,
+    fresh: bool,
+) -> Result<BarsData, ApiError> {
+    load(mem, fetcher, req, now_ms, fresh).await
+}
+
+async fn load(
+    mem: &BarMemory,
+    fetcher: &dyn Fetcher,
+    req: &BarsRequest,
+    now_ms: i64,
+    fresh: bool,
+) -> Result<BarsData, ApiError> {
     let daily = req.interval == "D";
     let (from, to) = span(&req.interval, req.from_ms, req.to_ms, req.limit, now_ms);
 
     let coverage = mem.coverage(&req.symbol, &req.interval);
-    for range in store::plan(coverage, &req.interval, from, to, now_ms) {
-        let fetched = fetcher
+    for range in store::plan_with(coverage, &req.interval, from, to, now_ms, fresh) {
+        let mut fetched = fetcher
             .fetch(&req.symbol, &req.interval, range.from_ms, range.to_ms)
             .await?;
-        let mut bars = fetched.bars;
         if daily {
-            normalise_daily(&mut bars);
+            normalise_daily(&mut fetched.bars);
+        }
+        let overlaps = coverage.filter(|c| range.from_ms >= c.from_ms && range.from_ms <= c.to_ms);
+        if let Some(c) = overlaps {
+            let seam = fetched
+                .served_by
+                .is_some_and(|b| mem.sources(&req.symbol, &req.interval) & b.bit() == 0);
+            if !agrees_with_held(mem, req, c, &fetched.bars, range.from_ms, seam) {
+                log::info!(
+                    "{} {}: held bars don't match the broker's; reading it again",
+                    req.symbol,
+                    req.interval
+                );
+                let mut whole = fetcher.fetch(&req.symbol, &req.interval, from, to).await?;
+                if daily {
+                    normalise_daily(&mut whole.bars);
+                }
+                let done = Range {
+                    from_ms: whole.from_ms.max(from),
+                    to_ms: to,
+                };
+                mem.replace_covered(&req.symbol, &req.interval, &whole.bars, done, now_ms, whole.served_by);
+                break;
+            }
         }
         let done = Range {
             from_ms: fetched.from_ms.max(range.from_ms),
             to_ms: range.to_ms,
         };
-        mem.put_covered(&req.symbol, &req.interval, &bars, done, now_ms);
+        mem.put_covered(
+            &req.symbol,
+            &req.interval,
+            &fetched.bars,
+            done,
+            now_ms,
+            fetched.served_by,
+        );
     }
 
     let coverage = mem.coverage(&req.symbol, &req.interval);
@@ -205,7 +310,8 @@ pub struct PanelSeries {
     pub current: bool,
 }
 
-/// Each symbol's held bars for the request, from memory alone — the broker is never asked.
+/// Each symbol's held bars for the request, from memory (and the saved prices behind it) alone —
+/// the broker is never asked.
 /// A series that isn't `current` is the caller's to read through `/v1/bars`, which tops it up.
 pub fn read_panel(mem: &BarMemory, req: &PanelRequest, now_ms: i64) -> Vec<PanelSeries> {
     let (from, to) = span(&req.interval, req.from_ms, req.to_ms, req.limit, now_ms);
@@ -325,9 +431,17 @@ pub async fn sync_daily(mem: &BarMemory, snaps: &dyn Snapshots, req: &SyncReques
     for (provider, group) in by_provider {
         let tickers: Vec<String> = group.iter().map(|(_, ticker, _)| ticker.clone()).collect();
         match snaps.snapshots(provider, &tickers).await {
-            Ok(snapshots) => {
-                for ((symbol, _ticker, cand), snapshot) in group.into_iter().zip(snapshots) {
-                    results.push(apply_snapshot(mem, &symbol, &req.interval, &cand, snapshot, now_ms));
+            Ok(quoted) => {
+                for ((symbol, _ticker, cand), snapshot) in group.into_iter().zip(quoted.days) {
+                    results.push(apply_snapshot(
+                        mem,
+                        &symbol,
+                        &req.interval,
+                        &cand,
+                        snapshot,
+                        now_ms,
+                        quoted.served_by,
+                    ));
                 }
             }
             Err(e) => {
@@ -354,6 +468,7 @@ fn apply_snapshot(
     candidate: &Candidate,
     snapshot: Option<DaySnapshot>,
     now_ms: i64,
+    served_by: Option<Broker>,
 ) -> SyncResult {
     let fetch = |reason: String| SyncResult {
         symbol: symbol.to_string(),
@@ -371,15 +486,19 @@ fn apply_snapshot(
         Ok(bar) => bar,
         Err(reject) => return fetch(format!("{reject:?}")),
     };
+    // From the end of what is held: `candidate` found no session between it and the quote's day,
+    // so the night (or weekend) between them is covered too. Starting at the quote's own day
+    // would leave a range that doesn't touch the coverage, which replaces it.
+    let from_ms = mem
+        .coverage(symbol, interval)
+        .map_or(candidate.session_day, |c| c.to_ms.min(candidate.session_day));
     mem.put_covered(
         symbol,
         interval,
         std::slice::from_ref(&bar),
-        Range {
-            from_ms: candidate.session_day,
-            to_ms: now_ms,
-        },
+        Range { from_ms, to_ms: now_ms },
         now_ms,
+        served_by,
     );
     SyncResult {
         symbol: symbol.to_string(),
@@ -427,6 +546,7 @@ pub async fn snapshot(
         })
         .collect();
     let mut by_provider: HashMap<&'static str, Vec<(usize, String)>> = HashMap::new();
+    let mut served_by = None;
     for (i, symbol) in symbols.iter().enumerate() {
         let resolved =
             split_symbol(symbol).and_then(|(p, t)| TOPUP_PROVIDERS.iter().find(|&&tp| tp == p).map(|&tp| (tp, t)));
@@ -436,8 +556,9 @@ pub async fn snapshot(
     }
     for (provider, group) in by_provider {
         let tickers: Vec<String> = group.iter().map(|(_, t)| t.clone()).collect();
-        let snapshots = snaps.snapshots(provider, &tickers).await?;
-        for ((i, _), snap) in group.into_iter().zip(snapshots) {
+        let quoted = snaps.snapshots(provider, &tickers).await?;
+        served_by = quoted.served_by;
+        for ((i, _), snap) in group.into_iter().zip(quoted.days) {
             rows[i].snapshot = snap;
         }
     }
@@ -446,7 +567,7 @@ pub async fn snapshot(
             continue;
         };
         if let Some(cand) = candidate(Some(c), "D", c.from_ms, now_ms, now_ms) {
-            apply_snapshot(mem, &row.symbol, "D", &cand, Some(snap), now_ms);
+            apply_snapshot(mem, &row.symbol, "D", &cand, Some(snap), now_ms, served_by);
         }
     }
     Ok(Snapshot {
@@ -474,6 +595,8 @@ mod tests {
         fail: AtomicBool,
         /// Simulates a broker cap: no fetch reaches back further than this.
         earliest: Option<i64>,
+        /// Which broker it plays.
+        served_by: Option<Broker>,
     }
 
     fn day_bar(day: i64) -> Bar {
@@ -493,6 +616,7 @@ mod tests {
             calls: Mutex::new(Vec::new()),
             fail: AtomicBool::new(false),
             earliest: None,
+            served_by: None,
         }
     }
 
@@ -522,7 +646,11 @@ mod tests {
                     .filter(|b| b.time >= from && b.time <= to_ms)
                     .cloned()
                     .collect();
-                Ok(Fetched { bars, from_ms: from })
+                Ok(Fetched {
+                    bars,
+                    from_ms: from,
+                    served_by: self.served_by,
+                })
             })
         }
     }
@@ -749,6 +877,117 @@ mod tests {
         assert_eq!(out.bars[0].time, ist_day_start(NOW) - 10 * DAY_MS);
     }
 
+    #[tokio::test]
+    async fn a_corporate_action_since_the_series_was_read_replaces_it_whole() {
+        let db = BarMemory::default();
+        let f = fake();
+        // Read mid-session on Friday, so Thursday's was the last bar final when read.
+        load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
+        let from = db.coverage(SYM, "D").unwrap().from_ms;
+
+        // A 1:2 split: the broker's whole history is halved.
+        let mut split = fake();
+        for b in &mut split.bars {
+            b.open /= 2.0;
+            b.close /= 2.0;
+        }
+        let evening = NOW + 4 * 60 * MINUTE_MS;
+        let out = load(&db, &split, &request(Some(30), None), evening).await.unwrap();
+        assert_eq!(split.calls().len(), 2, "the refresh, then the whole span again");
+        assert_eq!(split.calls()[1].0, from);
+        assert!(out.bars.iter().all(|b| b.close < 100.0), "no unadjusted price is left");
+        assert_eq!(db.coverage(SYM, "D").unwrap().from_ms, from);
+    }
+
+    #[tokio::test]
+    async fn another_brokers_bars_are_built_on_where_the_two_agree() {
+        let db = BarMemory::default();
+        let zerodha = Fake {
+            served_by: Some(Broker::Zerodha),
+            ..fake()
+        };
+        load(&db, &zerodha, &request(Some(30), None), NOW).await.unwrap();
+
+        // FYERS serves now, and its copy of the same days is the same.
+        let fyers = Fake {
+            served_by: Some(Broker::Fyers),
+            ..fake()
+        };
+        let evening = NOW + 4 * 60 * MINUTE_MS;
+        load(&db, &fyers, &request(Some(30), None), evening).await.unwrap();
+        assert_eq!(fyers.calls().len(), 1, "only what is new");
+        assert_eq!(db.sources(SYM, "D"), Broker::Zerodha.bit() | Broker::Fyers.bit());
+    }
+
+    #[tokio::test]
+    async fn another_brokers_bars_that_differ_at_all_are_read_again_whole() {
+        let db = BarMemory::default();
+        let zerodha = Fake {
+            served_by: Some(Broker::Zerodha),
+            ..fake()
+        };
+        load(&db, &zerodha, &request(Some(30), None), NOW).await.unwrap();
+
+        // FYERS counts volume differently: the closes agree, the bars don't.
+        let mut fyers = Fake {
+            served_by: Some(Broker::Fyers),
+            ..fake()
+        };
+        for b in &mut fyers.bars {
+            b.volume = b.volume.map(|v| v * 2.0);
+        }
+        let evening = NOW + 4 * 60 * MINUTE_MS;
+        let out = load(&db, &fyers, &request(Some(30), None), evening).await.unwrap();
+        assert_eq!(fyers.calls().len(), 2, "the refresh, then the whole span again");
+        assert!(out.bars.iter().all(|b| b.volume == Some(2000.0)), "FYERS's alone");
+        assert_eq!(db.sources(SYM, "D"), Broker::Fyers.bit());
+
+        // From the broker that supplied the series, a revised volume is no seam: the close
+        // agreeing is enough, and only what is new is read.
+        let mut fyers_again = Fake {
+            served_by: Some(Broker::Fyers),
+            ..fake()
+        };
+        for b in &mut fyers_again.bars {
+            b.volume = b.volume.map(|v| v * 2.0 + 1.0);
+        }
+        let later = evening + 3 * DAY_MS;
+        load(&db, &fyers_again, &request(Some(30), None), later).await.unwrap();
+        assert_eq!(fyers_again.calls().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_refresh_that_agrees_with_what_is_held_reads_only_the_tail() {
+        let db = BarMemory::default();
+        let f = fake();
+        load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
+        let evening = NOW + 4 * 60 * MINUTE_MS;
+        load(&db, &f, &request(Some(30), None), evening).await.unwrap();
+        let calls = f.calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(
+            calls[1].0,
+            ist_day_start(NOW) - DAY_MS,
+            "from Thursday's bar, final when it was read"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_fresh_chart_request_reads_the_newest_bars_again_however_recent() {
+        let db = BarMemory::default();
+        let f = fake();
+        load(&db, &f, &request(Some(30), None), NOW).await.unwrap();
+        load_chart_bars(&db, &f, &request(Some(30), None), NOW + 1_000, false)
+            .await
+            .unwrap();
+        assert_eq!(f.calls().len(), 1);
+        load_chart_bars(&db, &f, &request(Some(30), None), NOW + 2_000, true)
+            .await
+            .unwrap();
+        assert_eq!(f.calls().len(), 2);
+        assert!(f.calls()[1].0 > f.calls()[0].0, "only the newest end");
+    }
+
     // ---- sync_daily (the quote top-up) -----------------------------------------------------
 
     #[derive(Default)]
@@ -780,7 +1019,7 @@ mod tests {
             &'a self,
             provider: &'a str,
             tickers: &'a [String],
-        ) -> BoxFuture<'a, Result<Vec<Option<DaySnapshot>>, ApiError>> {
+        ) -> BoxFuture<'a, Result<Quoted, ApiError>> {
             Box::pin(async move {
                 self.calls
                     .lock()
@@ -790,10 +1029,13 @@ mod tests {
                     return Err(e.clone());
                 }
                 let map = self.by_ticker.lock().unwrap();
-                Ok(tickers
-                    .iter()
-                    .map(|t| map.get(&(provider.to_string(), t.clone())).copied())
-                    .collect())
+                Ok(Quoted {
+                    served_by: None,
+                    days: tickers
+                        .iter()
+                        .map(|t| map.get(&(provider.to_string(), t.clone())).copied())
+                        .collect(),
+                })
             })
         }
     }
@@ -853,6 +1095,27 @@ mod tests {
         assert_eq!(f.calls().len(), 1, "the historical fetcher was never asked again");
         assert_eq!(out.bars.last().unwrap().time, ist_day_start(NOW));
         assert_eq!(out.bars.last().unwrap().close, 203.0, "today's bar came from the quote");
+    }
+
+    #[tokio::test]
+    async fn the_next_sessions_quote_extends_the_history_held_rather_than_replacing_it() {
+        let db = BarMemory::default();
+        let f = fake();
+        // Read on Friday evening, after the session settled.
+        load(&db, &f, &request(Some(30), None), evening()).await.unwrap();
+        let from = db.coverage(SYM, "D").unwrap().from_ms;
+
+        // Monday morning, the session running: Monday's quote is the one bar missing.
+        let monday = ist_day_start(NOW) + 3 * DAY_MS + 10 * 60 * MINUTE_MS;
+        let snaps = FakeSnapshots::default();
+        snaps.set("india", "NSE:RELIANCE", good_quote(monday - 1_000));
+        let report = sync_daily(&db, &snaps, &sync_request(vec![SYM.to_string()]), monday).await;
+        assert_eq!(report.results[0].status, SyncStatus::Updated);
+        let c = db.coverage(SYM, "D").unwrap();
+        assert_eq!((c.from_ms, c.to_ms), (from, monday));
+        let out = load(&db, &f, &request(Some(30), None), monday + 1_000).await.unwrap();
+        assert_eq!(f.calls().len(), 1, "no history read after the quote");
+        assert_eq!(out.bars.last().unwrap().time, ist_day_start(monday));
     }
 
     #[tokio::test]

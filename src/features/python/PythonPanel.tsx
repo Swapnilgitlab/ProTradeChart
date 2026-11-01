@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CalendarClock, CirclePlay, FilePlus2, FolderOpen, Save, Settings2, Sparkles, Square, Trash2 } from 'lucide-react';
+import { useToast } from '../../components/Toasts';
 import { useDismiss } from '../../components/useDismiss';
 import { confirmDelete, confirmDiscard } from '../../lib/dialogs';
 import {
@@ -18,6 +19,7 @@ import {
   type PythonEnvStatus,
   type PythonScript,
 } from '../../lib/ipc';
+import { captureLine, newCapture, type LastRun, type RunCapture } from '../../python/assistant';
 import { appendLines, emptyConsole, type ConsoleEntry, type ConsoleState } from '../../python/console';
 import { onPythonExit, onPythonOutput, onPythonResult, onPythonSetupDone, onPythonSetupOutput } from '../../python/events';
 import { exitSummary, formatElapsed } from '../../python/format';
@@ -25,16 +27,17 @@ import { parseResult, type PythonResult } from '../../python/results';
 import { STARTER_SCRIPT, withPyExtension } from '../../python/scriptNames';
 import { parseStudyResult } from '../../studies/result';
 import { storeStudyRun } from '../studies/storeRun';
-import { CodeEditor } from '../pine/CodeEditor';
+import { CodeEditor, type CodeEditorHandle } from '../pine/CodeEditor';
 import { AddToWatchlistDialog } from './AddToWatchlistDialog';
-import { AiPromptDialog } from './AiPromptDialog';
+import { AssistantPane } from './AssistantPane';
 import { PythonConsole } from './PythonConsole';
 import { pythonExtensions } from './pythonLanguage';
 import { PythonSettings } from './PythonSettings';
 import { ResultsPane } from './ResultsPane';
-import { SchedulesPane } from './SchedulesPane';
 
 const PREF_LAST_SCRIPT = 'python_last_script';
+/** Whether the AI assistant pane is open ("1") or closed. */
+const PREF_ASSISTANT_OPEN = 'python_assistant_open';
 /** Output arrives a line at a time; it is shown a batch at a time, so a script that prints
  *  in a loop doesn't re-render the console thousands of times a second. */
 const CONSOLE_BATCH_MS = 30;
@@ -53,11 +56,13 @@ interface Props {
   onOpenSymbol: (symbol: string) => void;
   /** Bumped to open Python settings (the Home tab's "Python setup" card asks for this). */
   openSettings?: number;
+  /** Opens the Scheduler with a new schedule that runs this script. */
+  onScheduleScript: (script: string) => void;
 }
 
 /** The Python workspace: the user's scripts, an editor, a console, and the state of the
  *  Python that runs them. A script runs only when the person presses Run. */
-export function PythonPanel({ visible, onOpenSymbol, openSettings }: Props) {
+export function PythonPanel({ visible, onOpenSymbol, openSettings, onScheduleScript }: Props) {
   const [env, setEnv] = useState<PythonEnvStatus | null>(null);
   const [scripts, setScripts] = useState<PythonScript[]>([]);
   const [current, setCurrent] = useState<string | null>(null);
@@ -71,13 +76,19 @@ export function PythonPanel({ visible, onOpenSymbol, openSettings }: Props) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [tab, setTab] = useState<'console' | 'results' | 'schedules'>('console');
+  const [tab, setTab] = useState<'console' | 'results'>('console');
   /** Bumped to open a new schedule for the open script. */
-  const [scheduleRequest, setScheduleRequest] = useState(0);
   const [results, setResults] = useState<PythonResult[]>([]);
   const [selectedResult, setSelectedResult] = useState<number | null>(null);
   const [adding, setAdding] = useState<string[] | null>(null);
-  const [aiPromptOpen, setAiPromptOpen] = useState(false);
+  const [assistOpen, setAssistOpen] = useState(false);
+  /** Bumped by Fix with AI. */
+  const [fixRequest, setFixRequest] = useState(0);
+  /** The last run's ending and output, for the assistant. */
+  const [lastRun, setLastRun] = useState<LastRun | null>(null);
+  const capture = useRef<RunCapture | null>(null);
+  const editor = useRef<CodeEditorHandle | null>(null);
+  const toast = useToast();
   const settingsRef = useRef<HTMLDivElement>(null);
   useDismiss(settingsRef, settingsOpen, () => setSettingsOpen(false));
   useEffect(() => {
@@ -153,6 +164,9 @@ export function PythonPanel({ visible, onOpenSymbol, openSettings }: Props) {
     if (!visible || loaded.current) return;
     loaded.current = true;
     void refreshEnv();
+    getPreference(PREF_ASSISTANT_OPEN)
+      .then((v) => setAssistOpen(v === '1'))
+      .catch(() => {});
     void (async () => {
       const list = await refreshScripts();
       const last = await getPreference(PREF_LAST_SCRIPT).catch(() => null);
@@ -177,7 +191,9 @@ export function PythonPanel({ visible, onOpenSymbol, openSettings }: Props) {
     const stops = [
       // Tauri sends these to every window; only this window's own run is shown here.
       onPythonOutput((e) => {
-        if (e.runId === runRef.current?.id) push([{ stream: e.stream, text: e.text, overwrite: e.overwrite }]);
+        if (e.runId !== runRef.current?.id) return;
+        push([{ stream: e.stream, text: e.text, overwrite: e.overwrite }]);
+        if (capture.current) captureLine(capture.current, e.stream, e.text, e.overwrite);
       }),
       onPythonExit((e) => {
         const active = runRef.current;
@@ -186,6 +202,17 @@ export function PythonPanel({ visible, onOpenSymbol, openSettings }: Props) {
         setRun(null);
         const summary = exitSummary(e, Date.now() - active.startedAt);
         push([{ stream: summary.level, text: summary.text }]);
+        const c = capture.current;
+        capture.current = null;
+        if (c) {
+          setLastRun({
+            script: c.script,
+            failed: summary.level === 'error',
+            summary: summary.text.replace(/^[✓✗■]\s*/, ''),
+            stdout: c.stdout,
+            stderr: c.stderr,
+          });
+        }
       }),
       onPythonResult((e) => {
         if (e.runId !== runRef.current?.id) return;
@@ -278,10 +305,13 @@ export function PythonPanel({ visible, onOpenSymbol, openSettings }: Props) {
     setSelectedResult(null);
     setTab('console');
     push([{ stream: 'info', text: `▶ ${current}` }]);
+    capture.current = newCapture(current);
+    setLastRun(null);
     try {
       await runPythonScript(current, started.id);
     } catch (err) {
       runRef.current = null;
+      capture.current = null;
       setRun(null);
       say('error', errorMessage(err));
     }
@@ -343,11 +373,44 @@ export function PythonPanel({ visible, onOpenSymbol, openSettings }: Props) {
     [current, refreshScripts, say],
   );
 
+  const toggleAssistant = useCallback((open: boolean) => {
+    setAssistOpen(open);
+    setPreference(PREF_ASSISTANT_OPEN, open ? '1' : '0').catch(() => {});
+  }, []);
+
+  const fixWithAi = useCallback(() => {
+    toggleAssistant(true);
+    setFixRequest((n) => n + 1);
+  }, [toggleAssistant]);
+
+  /** Apply: the assistant's version goes into the editor as unsaved changes, undoable — never saved or run. */
+  const applyProposal = useCallback((code: string) => editor.current?.replaceAll(code), []);
+
+  /** Save as new script: the user's press, with the name they confirmed. */
+  const saveAsNew = useCallback(
+    async (name: string, code: string): Promise<boolean> => {
+      if (scripts.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
+        toast(`There is already a script called ${name}.`, 'error');
+        return false;
+      }
+      try {
+        await savePythonScript(name, code);
+      } catch (err) {
+        toast(errorMessage(err), 'error');
+        return false;
+      }
+      await refreshScripts();
+      if (await canLeave()) await openScript(name);
+      return true;
+    },
+    [scripts, toast, refreshScripts, canLeave, openScript],
+  );
+
   const ready = env?.state === 'ready';
   const running = run !== null;
 
   return (
-    <div className="python-panel">
+    <div className={`python-panel${assistOpen ? ' assist-open' : ''}`}>
       <aside className="python-side" aria-label="Scripts">
         <div className="python-side-header">
           <span>Scripts</span>
@@ -407,10 +470,11 @@ export function PythonPanel({ visible, onOpenSymbol, openSettings }: Props) {
 
           <button
             type="button"
-            className="icon-button"
-            aria-label="AI prompt"
-            title="Copy a prompt describing this app's Python API, to paste into an outside AI before asking it for a script"
-            onClick={() => setAiPromptOpen(true)}
+            className={`icon-button${assistOpen ? ' active' : ''}`}
+            aria-label="AI assistant"
+            aria-pressed={assistOpen}
+            title="AI assistant: write, change or fix this script"
+            onClick={() => toggleAssistant(!assistOpen)}
           >
             <Sparkles size={15} />
           </button>
@@ -430,12 +494,9 @@ export function PythonPanel({ visible, onOpenSymbol, openSettings }: Props) {
           <button
             type="button"
             className="btn pine-btn"
-            onClick={() => {
-              setTab('schedules');
-              setScheduleRequest((n) => n + 1);
-            }}
+            onClick={() => current && onScheduleScript(current)}
             disabled={!current}
-            title="Run this script by itself at set times"
+            title="Run this script by itself at set times, alone or in a sequence (opens the Scheduler)"
           >
             <CalendarClock size={14} />
             Schedule
@@ -487,6 +548,7 @@ export function PythonPanel({ visible, onOpenSymbol, openSettings }: Props) {
             onSave={() => void save()}
             onRun={() => void runScript()}
             language={pythonExtensions}
+            handleRef={editor}
             placeholderText="Write Python here. import protrade as pt to reach your broker's data."
           />
         ) : (
@@ -520,15 +582,12 @@ export function PythonPanel({ visible, onOpenSymbol, openSettings }: Props) {
               Results
               {results.length > 0 && <span className="pine-tab-count">{results.length}</span>}
             </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === 'schedules'}
-              className={`pine-tab${tab === 'schedules' ? ' active' : ''}`}
-              onClick={() => setTab('schedules')}
-            >
-              Schedules
-            </button>
+            {lastRun?.failed && lastRun.script === current && !running && (
+              <button type="button" className="btn btn-tiny python-fix" onClick={fixWithAi} title="Send this run's error to the AI assistant and ask it to fix the script">
+                <Sparkles size={12} />
+                Fix with AI
+              </button>
+            )}
           </div>
           <div className="python-output-body">
             <div className="python-output-pane" hidden={tab !== 'console'}>
@@ -551,15 +610,25 @@ export function PythonPanel({ visible, onOpenSymbol, openSettings }: Props) {
                 onAddToWatchlist={setAdding}
               />
             </div>
-            <div className="python-output-pane" hidden={tab !== 'schedules'}>
-              <SchedulesPane scripts={scripts.map((s) => s.name)} currentScript={current} newRequest={scheduleRequest} />
-            </div>
           </div>
         </div>
       </div>
 
+      <AssistantPane
+        visible={assistOpen}
+        current={current}
+        source={source}
+        scriptNames={scripts.map((s) => s.name)}
+        env={env}
+        lastRun={lastRun}
+        fixRequest={fixRequest}
+        onApply={applyProposal}
+        onSaveAsNew={saveAsNew}
+        onClose={() => toggleAssistant(false)}
+        say={toast}
+      />
+
       {adding && <AddToWatchlistDialog symbols={adding} onClose={() => setAdding(null)} say={say} />}
-      {aiPromptOpen && <AiPromptDialog onClose={() => setAiPromptOpen(false)} />}
     </div>
   );
 }

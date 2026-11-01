@@ -4,6 +4,7 @@ import { attachConsole } from '@tauri-apps/plugin-log';
 import { App } from './App';
 import { installAlertActions } from './chart/alertActions';
 import { installWatchlistActions } from './chart/watchlistActions';
+import { installReplayActions } from './chart/replay';
 import { installExternalLinkHandler } from './lib/externalLinks';
 import { installPineEngine } from './pine/engine';
 import { installPineHostActions } from './pine/hostActions';
@@ -27,6 +28,7 @@ installPinePersistence();
 installPineHostActions();
 installAlertActions();
 installWatchlistActions();
+installReplayActions();
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

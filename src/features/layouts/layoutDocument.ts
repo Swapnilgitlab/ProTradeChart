@@ -146,3 +146,18 @@ export function withoutUnsupportedSymbols(doc: LayoutDocument, fallback: string)
   });
   return { doc: { ...doc, tabs }, replaced };
 }
+
+/** A saved layout's first chart, as a one-chart workspace showing `symbol` at `timeframe`: its
+ *  indicators and style on another market (what `pt.screenshot` draws with a layout). Null for a
+ *  layout that can't be read or has no chart. */
+export function firstChartOf(stateJson: string, symbol: string, timeframe: string): WorkspaceState | null {
+  const state = parseLayout(stateJson)?.tabs[0]?.state;
+  const first = state?.charts?.[0];
+  if (!state || !first) return null;
+  return withChartSymbols({
+    ...state,
+    layout: '1',
+    activeCellId: first.id,
+    charts: [{ ...first, symbol, timeframe }],
+  } as WorkspaceState);
+}

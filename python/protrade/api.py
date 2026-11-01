@@ -145,12 +145,13 @@ def bars(symbol: str, interval: str = "D", start=None, end=None, limit: int | No
 
 
 def panel(symbols, start=None, end=None, bars: int | None = None) -> _panel.Panel:
-    """Daily bars for many symbols at once, from what the app holds in memory.
+    """Daily bars for many symbols at once, from what the app holds (in memory, or saved).
 
     With "Keep the market loaded" on (Data providers → Market data), the app holds five years of
     every NSE stock and index while it is open, so this answers a whole market in about a second
-    and never waits on the broker. Nothing is kept on disk: after the app restarts, the market is
-    read again. ``start``/``end`` limit the dates; ``bars`` keeps the newest that many per symbol.
+    and never waits on the broker. After the app restarts the market is read again, from the
+    broker, or from this computer if the user saves prices ("Save prices on this computer").
+    ``start``/``end`` limit the dates; ``bars`` keeps the newest that many per symbol.
     A symbol the app doesn't hold up to the latest session is listed in ``result.missing`` (read
     those with :func:`bars`); :func:`bars_many` does that for you.
 

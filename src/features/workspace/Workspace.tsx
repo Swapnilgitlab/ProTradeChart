@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AppWindow, Bell, ChartNoAxesCombined, ChevronLeft, ChevronRight, CircleHelp, Code, Database, FlaskConical, Home, Info, KeyRound, List, ListFilter, Plug, Plus, Sparkles, SquareTerminal, X } from 'lucide-react';
+import { AppWindow, Bell, CalendarClock, ChartNoAxesCombined, ChevronLeft, ChevronRight, CircleHelp, Code, Database, FlaskConical, Home, Info, KeyRound, List, ListFilter, Plug, Plus, Sparkles, SquareTerminal, X } from 'lucide-react';
 import type { VelaWorkspace, WorkspaceState } from '@luxalgo/vela/workspace';
 import { startAlertEngine } from '../../alerts/engine';
 import { onOpenAlerts, openAlerts } from '../../alerts/ui';
 import { ChartView, type ChartViewHandle } from '../../chart/ChartView';
+import { startScriptScreenshots } from '../../chart/scriptScreenshots';
 import { ThemeSelect } from '../../components/ThemeSelect';
 import { useToast } from '../../components/Toasts';
 import { ensureProvidersLoaded, refreshProviders, starterSymbol } from '../../data/providerStatus';
@@ -34,6 +35,8 @@ import { PineDock } from '../pine/PineDock';
 import { PineEditor } from '../pine/PineEditor';
 import { PythonPanel } from '../python/PythonPanel';
 import { ScreenerPanel } from '../screener/ScreenerPanel';
+import { SchedulerPanel } from '../scheduler/SchedulerPanel';
+import { useTheme } from '../../theme/ThemeProvider';
 import { StudiesPanel } from '../studies/StudiesPanel';
 import type { StudyEvent } from '../../chart/studyEvent';
 import { LayoutMenu, type LayoutSummary } from '../layouts/LayoutMenu';
@@ -70,6 +73,7 @@ import {
   isChartTab,
   pythonTab,
   pineTab,
+  schedulerTab,
   screenerTab,
   studiesTab,
   tabAfterClosing,
@@ -349,6 +353,24 @@ export function Workspace() {
     setActiveTabId(created.id);
   }, [tabs]);
 
+  /** A new schedule asked for from elsewhere (the Python tab's Schedule button): its first script. */
+  const [schedulerRequest, setSchedulerRequest] = useState<{ script: string | null; n: number }>({ script: null, n: 0 });
+  /** Opens the Scheduler, or shows it when it is already open; with a script, on a new schedule for it. */
+  const openScheduler = useCallback(
+    (script?: string) => {
+      if (script !== undefined) setSchedulerRequest((r) => ({ script, n: r.n + 1 }));
+      const existing = schedulerTab(tabs);
+      if (existing) {
+        setActiveTabId(existing.id);
+        return;
+      }
+      const created: Tab = { kind: 'scheduler', id: crypto.randomUUID() };
+      setTabs((prev) => [...prev, created]);
+      setActiveTabId(created.id);
+    },
+    [tabs],
+  );
+
   const closeTab = useCallback(
     (id: string) => {
       if (!canCloseTab(tabs, id)) return;
@@ -444,13 +466,21 @@ export function Workspace() {
     if (getCurrentWindow().label !== 'main') return;
     return startBackgroundUpdates();
   }, []);
-  // A scheduled script runs with no window watching; one that fails is said once, here.
+  // Charts drawn for scripts (pt.screenshot): the main window draws them, once.
+  const { theme } = useTheme();
+  const themeModeRef = useRef(theme.baseMode);
+  themeModeRef.current = theme.baseMode;
+  useEffect(() => {
+    if (getCurrentWindow().label !== 'main') return;
+    return startScriptScreenshots(() => themeModeRef.current);
+  }, []);
+  // A scheduled run has no window watching; one that fails is said once, here.
   useEffect(() => {
     if (getCurrentWindow().label !== 'main') return;
     let cancelled = false;
     let off: (() => void) | null = null;
-    void listen<{ script: string; status: string; message: string }>('schedule-run-finished', ({ payload }) => {
-      if (payload.status === 'failed') toast(`Scheduled run of ${payload.script} failed: ${payload.message}`, 'error');
+    void listen<{ name: string; status: string; message: string }>('schedule-run-finished', ({ payload }) => {
+      if (payload.status === 'failed') toast(`Scheduled run of "${payload.name}" failed: ${payload.message}`, 'error');
     }).then((stop) => {
       if (cancelled) stop();
       else off = stop;
@@ -635,6 +665,14 @@ export function Workspace() {
       pressed: activeTab?.kind === 'screener',
       onClick: openScreener,
     },
+    {
+      id: 'scheduler',
+      label: 'Scheduler',
+      title: 'Scheduler: run sequences of Python scripts by themselves, at set times',
+      icon: CalendarClock,
+      pressed: activeTab?.kind === 'scheduler',
+      onClick: () => openScheduler(),
+    },
   ];
   const railFooter: RailAction[] = [
     { id: 'import-data', label: 'Import data', title: 'Import your own data (CSV)', icon: Database, onClick: () => setImportOpen(true) },
@@ -700,6 +738,7 @@ export function Workspace() {
                 {tab.kind === 'python' && <SquareTerminal size={13} aria-hidden="true" />}
                 {tab.kind === 'studies' && <FlaskConical size={13} aria-hidden="true" />}
                 {tab.kind === 'screener' && <ListFilter size={13} aria-hidden="true" />}
+                {tab.kind === 'scheduler' && <CalendarClock size={13} aria-hidden="true" />}
                 <span className="tab-chip-label">{label}</span>
                 {isChartTab(tab) && <TabQuote symbol={tab.symbol} quote={tabQuotes.get(tab.symbol)} />}
                 {canCloseTab(tabs, tab.id) && (
@@ -792,6 +831,7 @@ export function Workspace() {
                     onOpenPythonSetup={openPythonSettings}
                     onOpenStudies={openStudies}
                     onOpenScreener={openScreener}
+                    onOpenScheduler={() => openScheduler()}
                     onOpenDataProviders={() => setProvidersOpen(true)}
                     onOpenAiProviders={() => setAiProvidersOpen(true)}
                     onOpenImportData={() => setImportOpen(true)}
@@ -807,6 +847,8 @@ export function Workspace() {
                     onStrategyAdded={() => publishDockRequest({ type: 'open-tester' })}
                     onShowChart={() => chartTab && showTab(chartTab.id)}
                   />
+                ) : tab.kind === 'scheduler' ? (
+                  <SchedulerPanel visible={tab.id === activeTabId} request={schedulerRequest} onOpenPython={openPython} />
                 ) : tab.kind === 'screener' ? (
                   // Stays mounted, like Studies, so a running screen keeps going while charts are looked at.
                   <ScreenerPanel visible={tab.id === activeTabId} onOpenSymbol={goToSymbol} />
@@ -816,7 +858,12 @@ export function Workspace() {
                 ) : (
                   // Stays mounted while another tab shows, so a run keeps going and its console
                   // and results are still there when you come back.
-                  <PythonPanel visible={tab.id === activeTabId} onOpenSymbol={goToSymbol} openSettings={pythonSettingsRequest} />
+                  <PythonPanel
+                    visible={tab.id === activeTabId}
+                    onOpenSymbol={goToSymbol}
+                    openSettings={pythonSettingsRequest}
+                    onScheduleScript={(script) => openScheduler(script)}
+                  />
                 )}
               </div>
             ))}

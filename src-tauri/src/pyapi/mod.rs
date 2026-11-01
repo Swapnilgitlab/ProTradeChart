@@ -13,13 +13,16 @@
 //! - [`server`]: the hyper glue and the per-launch token.
 //! - [`backend`]: the real `Backend`, bound to the app's managed state.
 //!
-//! Everything here is read-only market data. No route places an order, and no route
-//! ever returns a credential.
+//! Nearly everything here is read-only market data. The exceptions are the user's own script asking
+//! for what they set up — a result shown, a watchlist written, its SQL run (`sql`), an email to the
+//! user's own address, a chart drawn — each documented in [`routes`]. No route places an order, and
+//! no route ever returns a credential.
 
 pub mod backend;
 pub mod data;
 pub mod routes;
 pub mod server;
+pub mod sql;
 pub mod wire;
 
 /// A failure the client is told about: an HTTP status, a stable `code` the Python side

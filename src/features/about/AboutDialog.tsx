@@ -86,9 +86,9 @@ export function AboutDialog({ onClose }: Props) {
 
       <div className="section-title">Credits</div>
       <p className="secondary about-links" style={{ marginTop: 0 }}>
-        Charts are rendered by <a href="https://luxalgo.com/vela">Vela™</a>, an open-source charting library by LuxAlgo
-        (Apache-2.0). ProTradeChart ships Vela with small changes of its own, to the price scale&rsquo;s padding and the chart
-        menus, described in the third-party notices. The desktop shell is built with <a href="https://tauri.app">Tauri</a>.
+        Charts are rendered by <a href="https://velacharts.dev">Vela™</a>, an open-source charting library by LuxAlgo
+        (Apache-2.0). ProTradeChart ships Vela with small changes of its own, to the chart menus and
+        the dates of daily bars, described in the third-party notices. The desktop shell is built with <a href="https://tauri.app">Tauri</a>.
       </p>
       <p className="secondary about-links">
         Pine Script support is powered by <a href="https://github.com/LuxAlgo/PineTS">PineTS</a> and Vela PineTS, built by
@@ -158,13 +158,15 @@ export function AboutDialog({ onClose }: Props) {
             before connecting FYERS.
           </li>
           <li>
-            <strong>Never saved on this computer.</strong> The brokers&rsquo; terms restrict copies of their data, so
-            broker prices are held only in memory while the app is open (the charts&rsquo; recent bars, what scripts,
-            the Screener and Studies read, and the whole market if you keep it loaded) and are gone when it
-            closes. What the data folder above keeps is your own: layouts, watchlists, alerts, scripts, imported files,
-            and the results of the screens and Studies you ran. None of it is sent to this project or anyone else. AI
-            features send your question, symbols, watchlist names and a Study&rsquo;s summary statistics, never price
-            history.
+            <strong>Saved on this computer only if you choose.</strong> The brokers&rsquo; terms restrict copies of their
+            data, so by default broker prices are held only in memory while the app is open (the charts&rsquo; recent
+            bars, what scripts, the Screener and Studies read, and the whole market if you keep it loaded) and are gone
+            when it closes. <em>Save prices on this computer</em> (Data providers) keeps them in a file
+            instead; it is off until you switch it on and accept that your broker&rsquo;s terms may not allow it, and
+            switching it off deletes the files. The rest of the data folder above is your own: layouts, watchlists,
+            alerts, scripts, imported files, and the results of the screens and Studies you ran. None of it is sent to
+            this project or anyone else. AI features send your question, symbols, watchlist names and a Study&rsquo;s
+            summary statistics, never price history.
           </li>
           <li>
             <strong>No advice.</strong> Prices can be delayed, incomplete or wrong. ProTradeChart is not a broker or a

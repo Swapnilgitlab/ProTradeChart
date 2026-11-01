@@ -5,11 +5,12 @@ import { Dialog } from '../../components/Dialog';
 import { useToast } from '../../components/Toasts';
 import { onZerodhaStatus } from '../../data/zerodhaLive';
 import { activeBroker, getProviderState, namespaceOf, refreshProviders, setDefaultProvider } from '../../data/providerStatus';
-import { confirmDelete } from '../../lib/dialogs';
+import { confirmDelete, confirmDeleteSavedPrices } from '../../lib/dialogs';
 import { describeKiteTokenExpiry, formatDate } from '../../lib/format';
 import {
   clearProviderConfig,
   errorMessage,
+  savedPricesStatus,
   saveProviderConfig,
   setMarketSource,
   setProviderEnabled,
@@ -26,7 +27,9 @@ import {
   zerodhaUpdateInstruments,
 } from '../../lib/ipc';
 import { BROKER_LABELS, INDIA, type BrokerId, type ProviderId } from '../../lib/symbols';
+import { suppliedBy } from '../../lib/savedPrices';
 import { MarketDataSection } from '../marketdata/MarketDataSection';
+import { SavedPricesSection } from '../marketdata/SavedPricesSection';
 import { FyersPanel } from './FyersPanel';
 import { useProviderState } from './useProviderState';
 import { afterBrokerLogin, refreshInstruments } from './useBrokerSession';
@@ -127,13 +130,15 @@ export function DataProvidersDialog({ onClose, initialProvider }: Props) {
         {selected && <ProviderDetail key={selected.id} provider={selected} isDefault={isDefault(selected)} />}
       </div>
       <MarketDataSection />
+      <SavedPricesSection />
     </Dialog>
   );
 }
 
 /** Which broker serves Indian market data, when more than one is set up. Symbols never name a broker
- *  (`india:NSE:RELIANCE`), so watchlists, alerts, drawings and layouts are the same whichever is picked;
- *  open charts reload through the new one, and the two brokers' prices are never mixed. */
+ *  (`india:NSE:RELIANCE`), so watchlists, alerts, drawings, layouts and the prices held are the same
+ *  whichever is picked; open charts reload through the new one, which fills in only what is new, after
+ *  checking its own copy of the last bar held agrees (a stock where it doesn't is read again whole). */
 function MarketSourcePicker() {
   const toast = useToast();
   const { providers, indiaBroker } = useProviderState();
@@ -171,8 +176,9 @@ function MarketSourcePicker() {
         </label>
       ))}
       <span className="field-hint">
-        Your watchlists, alerts, drawings and layouts stay as they are; open charts reload through the broker you pick, and
-        the two brokers' prices are never mixed.
+        Your watchlists, alerts, drawings, layouts and the prices already held stay as they are; open charts reload through
+        the broker you pick, which fills in what is new. A stock whose prices from the two brokers don&rsquo;t agree is read
+        again from the one you pick.
       </span>
     </div>
   );
@@ -260,7 +266,11 @@ function ProviderDetail({ provider, isDefault }: { provider: ProviderInfo; isDef
   const onClear = () =>
     run('clear', async () => {
       if (!(await confirmDelete(`Forget the saved ${provider.label} credentials and switch it off?`))) return;
-      await clearProviderConfig(provider.id);
+      // A broker's terms ask for its data to go when you stop using it: offered whenever prices it
+      // supplied are saved.
+      const supplied = suppliedBy(await savedPricesStatus().catch(() => null), provider.id);
+      const deletePrices = supplied > 0 && (await confirmDeleteSavedPrices(provider.label, supplied));
+      await clearProviderConfig(provider.id, deletePrices);
       setEdits({});
       setTest(null);
       await refreshProviders();

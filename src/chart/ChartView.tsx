@@ -6,11 +6,15 @@ import { withChartSymbols } from '../features/layouts/layoutDocument';
 import { chartSymbol, normalizeSymbol } from '../lib/symbols';
 import { BUNDLED_MANIFEST } from '../pine/bundled';
 import { useTheme } from '../theme/ThemeProvider';
+import { ReplayBar } from '../features/replay/ReplayBar';
 import { trackCursorPrice } from './alertActions';
 import { attributionInk, chosenBackground } from './canvasBackground';
+import { installToolPrefs } from './drawingToolPrefs';
 import { watchHistory } from './historyBackfill';
+import { onReplayRequest } from './replay';
 import { setEventMark, showStudyEvent, type StudyEvent } from './studyEvent';
 import { installThinMovingAverages } from './thinMovingAverages';
+import { keepStatuslineReadable } from './statuslineInk';
 import { tidyStatusline } from './statuslineMeta';
 import { watchSymbolDrawings } from './symbolDrawings';
 import { showCompanyName } from './watermarkName';
@@ -105,6 +109,7 @@ function watchAllCells(ws: VelaWorkspace, watched: Map<object, () => void>) {
         trackCursorPrice(chart),
         showCompanyName(cell),
         tidyStatusline(cell),
+        keepStatuslineReadable(cell),
         watchSymbolDrawings(chart),
         // A background picked in the chart's settings re-inks the attribution mark.
         chart.renderer.onConfigChanged(() => tintAttribution(ws)),
@@ -193,6 +198,10 @@ export const ChartView = forwardRef<ChartViewHandle, Props>(function ChartView(
   /** A Study event's mark and the symbol it belongs to: re-applied when that symbol's load lands, and
    *  dropped when the chart moves to another. */
   const markRef = useRef<{ symbol: string; mark: TimelineMark } | null>(null);
+  /** Stops keeping the app-wide drawing-tool settings in step with this workspace. */
+  const stopToolPrefsRef = useRef<(() => void) | null>(null);
+  /** The replay controls, while open: with the bar a right-click asked to start from, if any. */
+  const [replay, setReplay] = useState<{ start: { from: number; cell: string } | null } | null>(null);
   const { theme } = useTheme();
   const modeRef = useRef(theme.baseMode);
   modeRef.current = theme.baseMode;
@@ -292,6 +301,8 @@ export const ChartView = forwardRef<ChartViewHandle, Props>(function ChartView(
           // meantime is the more recent intent.
           if (pendingSymbolRef.current) ws.chart.setMarket({ symbol: chartSymbol(pendingSymbolRef.current) });
         }
+        // After the layout's state, so the saved tool settings are laid over its own.
+        stopToolPrefsRef.current = installToolPrefs(ws);
         if (pendingEventRef.current) {
           const mark = showStudyEvent(ws.chart, pendingEventRef.current, chartSymbol);
           markRef.current = mark ? { symbol: pendingEventRef.current.symbol, mark } : null;
@@ -313,6 +324,8 @@ export const ChartView = forwardRef<ChartViewHandle, Props>(function ChartView(
       resizeObserver.disconnect();
       watched.forEach((stop) => stop());
       watched.clear();
+      stopToolPrefsRef.current?.();
+      stopToolPrefsRef.current = null;
       wsRef.current?.destroy();
       wsRef.current = null;
       onWorkspaceRef.current?.(null);
@@ -376,5 +389,19 @@ export const ChartView = forwardRef<ChartViewHandle, Props>(function ChartView(
     };
   }, [ready]);
 
-  return <div ref={containerRef} className="single-chart-canvas" />;
+  // A replay asked for on one of this tab's charts (the toolbar's Replay, or a right-click).
+  useEffect(() => {
+    if (!ready) return;
+    return onReplayRequest(({ chart, from }) => {
+      const cell = wsRef.current?.cells().find((c) => c.chart === chart);
+      if (cell) setReplay({ start: from === null ? null : { from, cell: cell.id } });
+    });
+  }, [ready]);
+
+  return (
+    <div className="chart-view">
+      <div ref={containerRef} className="single-chart-canvas" />
+      {replay && wsRef.current && <ReplayBar ws={wsRef.current} start={replay.start} onClose={() => setReplay(null)} />}
+    </div>
+  );
 });

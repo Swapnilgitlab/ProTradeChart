@@ -1,8 +1,8 @@
-"""Many symbols' daily bars in one read from what the app holds in memory (``POST /v1/panel``).
+"""Many symbols' daily bars in one read from what the app holds (``POST /v1/panel``).
 
 With "Keep the market loaded" on (Data providers → Market data), the app holds five years of daily
-bars for every NSE stock and index while it is open (never on disk). A panel reads them straight
-from memory, without asking the broker, so a whole market arrives in about a second instead of one
+bars for every NSE stock and index while it is open (and on disk too, if the user saves prices). A
+panel reads them straight from the app, without asking the broker, so a whole market arrives in about a second instead of one
 request per symbol. A symbol the app doesn't hold up to the latest session is listed in
 :attr:`Panel.missing`; read those with :func:`protrade.bars`, which fetches what is new.
 

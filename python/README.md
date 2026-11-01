@@ -60,8 +60,35 @@ above = [s for s, df in bars.items() if len(df) > 200 and df.close.iloc[-1] > df
 pt.set_watchlist("Above the 200-day", above)
 ```
 
-In the Python tab, **Schedule** runs a script like this by itself (every weekday at 16:00 IST, say) while the app is open. A run
-that came due while it was closed is recorded as missed, not made up.
+The app's **Scheduler** tab runs scripts like this by themselves (every weekday at 16:00 IST, say) while the app is open,
+alone or as a sequence: one script after another, the first that fails ending the run. A run that came due while it was
+closed is recorded as missed, not made up.
+
+## Scheduled sequences, SQL, screenshots and email
+
+- `pt.run_folder()` is a folder the scripts of one scheduled run share (write `matches.csv` in one, read it in the next); the app
+  empties it when the run ends. `pt.schedule()` is `{"name", "step", "steps"}` for a scheduled run, `None` otherwise.
+- `pt.sql(query, params=None, dry_run=False)` runs SQL on the app's database and returns the last result as a DataFrame
+  (`attrs["changes"]`, `attrs["tables"]` say what changed). It may read `watchlists`, `watchlist_items`,
+  `watchlist_sections`, `symbol_flags`, `market_symbols`, `datasets`, `dataset_bars`, the instrument tables and, with saved
+  prices on, `prices.price_series` and `prices.price_bars`; it may change only the four watchlist tables. One transaction per
+  call: a change that would break a list (an unknown flag, an unreadable symbol) is refused whole. Symbols are made
+  canonical (`RELIANCE` becomes `india:NSE:RELIANCE`) and rows renumbered. `params` is a list for `?` or a dict for `:name`.
+- `pt.screenshot(symbol, timeframe="D", layout=None, width=1280, height=720, path=None)` returns a PNG of a chart the app's
+  main window draws (styled like a saved layout's first chart when `layout` names one); `path` saves it too.
+- `pt.send_email(subject, body="", attachments=())` emails *you*, from and to the address in the Scheduler tab's Email
+  settings; attachments are paths, DataFrames (as CSV) or `(name, contents)` pairs, 10 MB at most. The password stays in the
+  app.
+
+```python
+import pandas as pd, protrade as pt
+
+folder = pt.run_folder()
+picks = pt.sql("SELECT symbol FROM watchlist_items i JOIN watchlists w ON w.id = i.watchlist_id WHERE w.name = ?", ["Breakouts"])
+for symbol in picks.symbol:
+    pt.screenshot(symbol, path=folder / f"{symbol.split(':')[-1]}.png")
+pt.send_email("Breakouts", f"{len(picks)} names", attachments=[picks, *folder.glob("*.png")])
+```
 
 ## Studies
 
@@ -133,7 +160,8 @@ The app starts each script with three environment variables: `PROTRADE_API` (`ht
 (a one-off token) and `PROTRADE_RUN_ID` (which run to show results in). Every request carries
 `Authorization: Bearer <token>`, and the app answers only to its own `Host` and refuses any request that has an `Origin`
 header (a browser's). Everything is read-only market data apart from posting a result, and there is no route that places an
-order or returns a credential. The app holds the bars it fetches in memory while it is open and never writes them to disk. The token is new on every launch of the app, so it is not something to keep.
+order or returns a credential. The app holds the bars it fetches in memory while it is open, and writes them to disk only if the user has switched
+on *Save prices on this computer* (then a relaunch reads them back instead of asking the broker). The token is new on every launch of the app, so it is not something to keep.
 
 | Route | |
 | --- | --- |
@@ -141,7 +169,7 @@ order or returns a credential. The app holds the bars it fetches in memory while
 | `GET /v1/instruments?provider=&exchange=&kind=&q=&limit=` | Rows of `symbol`, `name`, `exchange`, `kind`, `expiry`. |
 | `GET /v1/watchlists`, `GET /v1/watchlist?name=` or `?id=` | The lists, and the symbols on one. |
 | `GET /v1/providers`, `GET /v1/ping` | Sources and their state; the app's version. |
-| `POST /v1/panel` | `{symbols, from, to, bars}`: many symbols' daily bars from what the app holds in memory, in binary columns (`pt.panel`). A read, posted because the symbol list doesn't fit a URL. |
+| `POST /v1/panel` | `{symbols, from, to, bars}`: many symbols' daily bars from what the app holds (in memory, or saved), in binary columns (`pt.panel`). A read, posted because the symbol list doesn't fit a URL. |
 | `POST /v1/snapshot` | `{symbols}`: each symbol's day from one batched broker quote (`open`, `high`, `low`, `last`, `previousClose`, `volume`, `tradedAt`), and `sessionDay`, the session they speak for (`null` before 9:15 IST). A read (`pt.snapshot`). |
 | `POST /v1/results` | `{runId, kind, title, data}`, where `kind` is `table`, `report` or `figure`. The only route that isn't a read: it shows something in the panel of the run that posted it. At most 16 MB. |
 

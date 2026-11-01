@@ -26,8 +26,11 @@ tauri-plugin-updater = "2"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled", "hooks"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# SMTP for pt.send_email and failure notices: async on tokio, over the native TLS the WebSocket client already uses.
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "hostname", "tokio1-native-tls"] }
+base64 = "0.22"
 futures = "0.3"
 csv = "1.4.0"
 sha2 = "0.10"

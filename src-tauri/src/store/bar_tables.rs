@@ -1,7 +1,8 @@
 //! The one-time move off disk for broker price history. Older versions kept it in three tables
 //! (`bars_cache` for charts, `research_bars` and `research_coverage` for the Python API and the
 //! five-year market-data store). Kite Connect's terms restrict permanent copies of its data, so
-//! those bars now live only in memory (`store::bar_memory`) and the tables are dropped.
+//! those bars now live in memory (`store::bar_memory`), and on disk only if the user switches on
+//! "Save prices on this computer" (`crate::prices`, a file of its own); the tables are dropped.
 
 use rusqlite::{params, Connection};
 

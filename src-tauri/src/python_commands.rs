@@ -96,6 +96,14 @@ pub async fn python_env_status(app: AppHandle, db: State<'_, Database>) -> Resul
     Ok(env::status(&paths, custom.as_deref()).await)
 }
 
+/// Which of a fixed list of packages the scripts' Python has, for the AI assistant's context.
+#[tauri::command(async)]
+pub async fn python_probe_packages(app: AppHandle, db: State<'_, Database>) -> Result<Vec<env::Package>, String> {
+    let paths = paths(&app)?;
+    let custom = custom_interpreter(&db);
+    env::packages(&env::python_to_run(&paths, custom.as_deref())).await
+}
+
 /// Uses `path` as the interpreter, or the app's own environment again when it is `None`
 /// or empty. A path that doesn't start as a supported Python is refused, not saved.
 #[tauri::command]
@@ -238,6 +246,7 @@ pub async fn python_run(
             run_id,
             remove_after: None,
             on_exit: None,
+            env: Vec::new(),
         },
     )
     .await
@@ -252,6 +261,8 @@ pub(crate) struct StartRun {
     /// Told how the run ended, with the tail of its output: for a run no window is watching (a
     /// schedule's). The events are sent either way.
     pub on_exit: Option<OnExit>,
+    /// More environment for the script, set after the app's own (a schedule's run folder and step).
+    pub env: Vec<(String, String)>,
 }
 
 /// How a run ended, for [`StartRun::on_exit`].
@@ -281,6 +292,7 @@ pub(crate) async fn start_python(
         run_id,
         remove_after,
         on_exit,
+        env: extra_env,
     } = run;
     if !valid_run_id(&run_id) {
         return Err("That isn't a valid run id.".into());
@@ -314,7 +326,8 @@ pub(crate) async fn start_python(
         )
         .env("PROTRADE_API", &url)
         .env("PROTRADE_TOKEN", &token)
-        .env("PROTRADE_RUN_ID", &run_id);
+        .env("PROTRADE_RUN_ID", &run_id)
+        .envs(extra_env);
 
     let (stop_tx, stop_rx) = oneshot::channel();
     state
@@ -417,7 +430,8 @@ pub struct ResearchStats {
     pub bars: i64,
 }
 
-/// How much market data is held in memory this session, for scripts, the Screener and Studies.
+/// How much market data memory knows of, for scripts, the Screener and Studies: every series (saved
+/// ones included) and the bars it holds in memory now.
 #[tauri::command]
 pub fn python_research_stats(memory: State<'_, BarMemory>) -> ResearchStats {
     let stats = memory.stats();
@@ -427,7 +441,8 @@ pub fn python_research_stats(memory: State<'_, BarMemory>) -> ResearchStats {
     }
 }
 
-/// Forgets it all; the next script that asks fetches from the broker again.
+/// Frees memory. Without saved prices it forgets it all, and the next script that asks fetches from
+/// the broker again; with them, saved series are read back from the file instead.
 #[tauri::command]
 pub fn python_clear_research_data(memory: State<'_, BarMemory>) -> usize {
     memory.clear()

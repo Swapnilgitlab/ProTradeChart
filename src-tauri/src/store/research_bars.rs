@@ -1,6 +1,6 @@
-//! The sync policy for the bars the Python API, the Screener and Studies read: which ranges of a
-//! series to fetch from the broker, given what is already held. The bars themselves live in
-//! memory for the session (`store::bar_memory`), never on disk.
+//! The sync policy for the bars the charts, the Python API, the Screener and Studies read: which
+//! ranges of a series to fetch from the broker, given what is already held (`store::bar_memory`,
+//! and the saved prices behind it when the user keeps them).
 //!
 //! Every series carries a *coverage*: the span of time whose bars are complete. It has to be
 //! recorded, because "no bars" (a holiday, a stock not yet listed) and "not fetched yet" look
@@ -71,6 +71,8 @@ struct Tail {
     current: bool,
     /// Where a refresh starts, so the bar that was still forming is replaced.
     refresh_from: i64,
+    /// Where bars that may since have changed begin: a request ending before this needs no refresh.
+    changes_from: i64,
 }
 
 fn tail(interval: &str, c: &Coverage, now_ms: i64) -> Tail {
@@ -84,6 +86,7 @@ fn tail(interval: &str, c: &Coverage, now_ms: i64) -> Tail {
                 // still within its ttl, the series is as current as it is going to be.
                 current: !stale && c.synced_at - c.to_ms <= MINUTE_MS,
                 refresh_from: c.to_ms - 3 * bar,
+                changes_from: c.to_ms - 3 * bar,
             }
         }
         // A daily bar changes only while its session runs and is final once it has settled,
@@ -93,12 +96,21 @@ fn tail(interval: &str, c: &Coverage, now_ms: i64) -> Tail {
         _ => {
             let stale = market::last_settled_ms(now_ms) > c.to_ms
                 || (market::is_open(now_ms) && now_ms - c.synced_at >= DAILY_TTL_MS);
+            // The coverage's last day is the only one that can have been read while it was
+            // forming. A refresh starts on the last day that was already final when read, so it
+            // overlaps one bar that can't have changed: if the broker's copy of it differs, a
+            // corporate action has rewritten the history (`pyapi::data::load_bars` checks).
+            let last_day = market::ist_day_start(c.to_ms);
+            let refresh_from = if market::last_settled_ms(c.synced_at) >= last_day {
+                last_day
+            } else {
+                market::ist_day_start(market::last_settled_ms(last_day - 1))
+            };
             Tail {
                 stale,
                 current: !stale,
-                // One day back is enough: the coverage's last day is the only one that can
-                // have been read while it was forming.
-                refresh_from: market::ist_day_start(c.to_ms),
+                refresh_from,
+                changes_from: last_day,
             }
         }
     }
@@ -110,6 +122,19 @@ fn tail(interval: &str, c: &Coverage, now_ms: i64) -> Tail {
 /// means a request wholly before or after it fetches the gap too (a rare shape: requests
 /// are normally "from some date until now").
 pub fn plan(coverage: Option<Coverage>, interval: &str, from_ms: i64, to_ms: i64, now_ms: i64) -> Vec<Range> {
+    plan_with(coverage, interval, from_ms, to_ms, now_ms, false)
+}
+
+/// [`plan`], but with `fresh` the newest end is read again whatever its age: what a chart asks for
+/// while the session runs, since its live bar is built on the last bar it gets.
+pub fn plan_with(
+    coverage: Option<Coverage>,
+    interval: &str,
+    from_ms: i64,
+    to_ms: i64,
+    now_ms: i64,
+    fresh: bool,
+) -> Vec<Range> {
     let to = to_ms.min(now_ms);
     if from_ms >= to {
         return Vec::new();
@@ -118,7 +143,11 @@ pub fn plan(coverage: Option<Coverage>, interval: &str, from_ms: i64, to_ms: i64
         return vec![Range { from_ms, to_ms: to }];
     };
 
-    let t = tail(interval, &c, now_ms);
+    let mut t = tail(interval, &c, now_ms);
+    if fresh {
+        t.stale = true;
+        t.current = false;
+    }
     let mut ranges = Vec::new();
     if from_ms < c.from_ms {
         ranges.push(Range {
@@ -134,7 +163,7 @@ pub fn plan(coverage: Option<Coverage>, interval: &str, from_ms: i64, to_ms: i64
                 to_ms: to,
             });
         }
-    } else if t.stale && to > tail_start {
+    } else if t.stale && to > t.changes_from.max(c.from_ms) {
         // The request only reaches the recent past, but that is what may have changed:
         // bring the series up to date rather than up to what was asked.
         ranges.push(Range {
@@ -261,8 +290,9 @@ mod tests {
         let c = cov(at(-60, 0, 0), read, read);
         let asked = |now| plan(Some(c), "D", at(-60, 0, 0), now, now);
         assert!(asked(at(0, 10, 4)).is_empty());
-        // One day back is enough: today's is the only bar that was forming.
-        assert_eq!(asked(at(0, 10, 5)), [range(at(0, 0, 0), at(0, 10, 5))]);
+        // Today's is the only bar that was forming; the refresh starts on Friday's, which was
+        // final when read, so a corporate action since then shows.
+        assert_eq!(asked(at(0, 10, 5)), [range(at(-3, 0, 0), at(0, 10, 5))]);
     }
 
     #[test]
@@ -278,11 +308,11 @@ mod tests {
         let c = cov(from, at(0, 12, 0), at(0, 12, 0));
         // Between the bell and the settlement nothing new is known to exist...
         assert!(plan(Some(c), "D", from, at(0, 15, 45), at(0, 15, 45)).is_empty());
-        // ...and afterwards the day's final bar is fetched.
+        // ...and afterwards the day's final bar is fetched, from the last bar that was final.
         let settled = at(0, 16, 1);
         assert_eq!(
             plan(Some(c), "D", from, settled, settled),
-            [range(at(0, 0, 0), settled)]
+            [range(at(-3, 0, 0), settled)]
         );
         // That read reached past the settlement, so the day is done until the next open.
         let c = cov(from, settled, settled);
@@ -318,10 +348,11 @@ mod tests {
         let c = cov(at(-60, 0, 0), at(2, 12, 0), at(2, 12, 0));
         assert!(plan(Some(c), "D", at(-30, 0, 0), at(1, 12, 0), now).is_empty());
         // One that reaches that last day brings the series up to date rather than up to
-        // what was asked, since a session has settled since it was read.
+        // what was asked, since a session has settled since it was read (from Tuesday's bar,
+        // the last one final when read).
         assert_eq!(
             plan(Some(c), "D", at(-30, 0, 0), at(2, 12, 0), now),
-            [range(at(2, 0, 0), now)]
+            [range(at(1, 0, 0), now)]
         );
     }
 
@@ -331,15 +362,41 @@ mod tests {
         let c = cov(at(-40, 0, 0), at(-20, 12, 0), at(-20, 12, 0));
         assert_eq!(
             plan(Some(c), "D", at(-60, 0, 0), now, now),
-            [range(at(-60, 0, 0), at(-40, 0, 0)), range(at(-20, 0, 0), now)]
+            // The newer edge starts on Monday's bar, the last final when Tuesday was read.
+            [range(at(-60, 0, 0), at(-40, 0, 0)), range(at(-21, 0, 0), now)]
         );
     }
 
     #[test]
     fn a_request_wholly_after_the_coverage_fetches_the_gap_too_so_coverage_stays_whole() {
         let now = at(5, 12, 0);
+        // Read on a Sunday: the refresh starts on Friday's bar, the last session before it.
         let c = cov(at(-60, 0, 0), at(-50, 12, 0), at(-50, 12, 0));
-        assert_eq!(plan(Some(c), "D", at(-20, 0, 0), now, now), [range(at(-50, 0, 0), now)]);
+        assert_eq!(plan(Some(c), "D", at(-20, 0, 0), now, now), [range(at(-52, 0, 0), now)]);
+    }
+
+    #[test]
+    fn a_fresh_request_reads_the_newest_end_again_however_recent_the_sync() {
+        let read = at(0, 10, 0);
+        let c = cov(at(-60, 0, 0), read, read);
+        let now = read + MINUTE_MS;
+        assert!(plan(Some(c), "D", at(-60, 0, 0), now, now).is_empty());
+        assert_eq!(
+            plan_with(Some(c), "D", at(-60, 0, 0), now, now, true),
+            [range(at(-3, 0, 0), now)]
+        );
+        let five = 5 * MINUTE_MS;
+        assert_eq!(
+            plan_with(
+                Some(cov(read - 10 * five, read, read)),
+                "5",
+                read - 10 * five,
+                now,
+                now,
+                true
+            ),
+            [range(read - 3 * five, now)]
+        );
     }
 
     #[test]

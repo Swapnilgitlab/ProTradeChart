@@ -3,6 +3,8 @@ mod ai_commands;
 mod alert_commands;
 mod commands;
 mod db;
+mod email;
+mod email_commands;
 mod fyers;
 mod fyers_commands;
 mod login_callback;
@@ -11,6 +13,8 @@ mod market_commands;
 mod marketdata;
 mod marketdata_commands;
 mod models;
+mod prices;
+mod prices_commands;
 mod provider_commands;
 mod providers;
 mod pyapi;
@@ -20,6 +24,7 @@ mod schedule_commands;
 mod scheduler;
 mod schema;
 mod screener_commands;
+mod screenshot;
 mod secrets;
 mod store;
 mod study_commands;
@@ -85,10 +90,15 @@ pub fn run() {
 
             app.manage(db);
             app.manage(store::bar_memory::BarMemory::default());
+            // The saved prices' files sit beside the database; which one is open follows the broker
+            // (`market_commands::sync_market`, below, once everything it needs is managed).
+            app.manage(prices::SavedPrices::new(data_dir.clone()));
+            app.manage(market_commands::Serving::default());
             app.manage(marketdata::MarketData::default());
             app.manage(secrets);
             // The Python runs and the local data API they use, which starts with the first script.
             app.manage(python::PythonState::default());
+            app.manage(screenshot::Screenshots::default());
 
             let broker_http = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
@@ -101,6 +111,22 @@ pub fn run() {
             app.manage(fyers::session::FyersSession::default());
             app.manage(fyers::quotes::QuoteCache::default());
             app.manage(fyers::poller::Poller::default());
+            // Notes the broker serving `india:`, and opens the saved prices when saving is on: only
+            // their index is read now (a few thousand rows), never the bars.
+            market_commands::sync_market(app.handle());
+            // Keeps the saved prices from growing without end: intraday is trimmed, daily is kept.
+            let prune_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(5 * 60)).await;
+                loop {
+                    let memory = prune_handle.state::<store::bar_memory::BarMemory>();
+                    let pruned = memory.prune(db::now_ms(), &store::bar_memory::PrunePolicy::default());
+                    if pruned > 0 {
+                        log::info!("saved prices: {pruned} intraday series trimmed or dropped");
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(24 * 60 * 60)).await;
+                }
+            });
             // AI's own clients: their requests set their own, longer, timeouts.
             let ai_http = reqwest::Client::builder()
                 .user_agent(concat!("protradechart/", env!("CARGO_PKG_VERSION")))
@@ -223,11 +249,15 @@ pub fn run() {
             market_commands::market_fetch_bars,
             market_commands::market_quotes,
             market_commands::market_search_instruments,
+            prices_commands::saved_prices_status,
+            prices_commands::saved_prices_set,
+            prices_commands::saved_prices_delete,
             alert_commands::list_price_alerts,
             alert_commands::save_price_alert,
             alert_commands::delete_price_alert,
             alert_commands::clear_triggered_price_alerts,
             python_commands::python_env_status,
+            python_commands::python_probe_packages,
             python_commands::python_set_interpreter,
             python_commands::python_setup_env,
             python_commands::python_list_scripts,
@@ -273,6 +303,11 @@ pub fn run() {
             schedule_commands::list_schedule_runs,
             schedule_commands::run_schedule_now,
             schedule_commands::stop_schedule_run,
+            email_commands::email_status,
+            email_commands::email_save,
+            email_commands::email_send_test,
+            email_commands::email_forget,
+            screenshot::script_screenshot_result,
             ai_commands::list_ai_providers,
             ai_commands::ai_set_key,
             ai_commands::ai_delete_key,
@@ -281,7 +316,14 @@ pub fn run() {
             ai_commands::ai_plan_research,
             ai_commands::ai_synthesize_research,
             ai_commands::ai_ask_ai,
+            ai_commands::ai_python_assist,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running the application");
+        .build(tauri::generate_context!())
+        .expect("error while building the application")
+        .run(|app, event| {
+            // What memory has queued for the saved prices is written before the app goes.
+            if let tauri::RunEvent::Exit = event {
+                app.state::<prices::SavedPrices>().close();
+            }
+        });
 }

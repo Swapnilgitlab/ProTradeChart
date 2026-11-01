@@ -1,10 +1,13 @@
-/** Scheduled scripts, as the Python tab shows and edits them. The rules themselves are the backend's
- *  (`scheduler/plan.rs`); `ruleProblem` repeats its checks so the form can say what's wrong before
- *  saving. Times are IST, like the schedules. Pure. */
+/** Scheduled sequences of scripts, as the Scheduler tab shows and edits them. The rules themselves are
+ *  the backend's (`scheduler/plan.rs`, `store/schedules.rs`); `ruleProblem` and `scheduleProblem`
+ *  repeat its checks so the form can say what's wrong before saving. Times are IST, like the
+ *  schedules. Pure. */
 
 import type { ScheduleRule, ScheduleRunStatus } from '../lib/ipc';
 
 export const MIN_EVERY_MINUTES = 5;
+/** The most scripts one schedule runs (`store::schedules::MAX_SCRIPTS`). */
+export const MAX_SCRIPTS = 20;
 export const MAX_EVERY_MINUTES = 720;
 /** Monday first, as the backend counts. */
 export const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
@@ -78,4 +81,30 @@ export const STATUS_LABEL: Record<ScheduleRunStatus, string> = {
   stopped: 'Stopped',
   missed: 'Missed',
   skipped: 'Skipped',
+  'not-run': 'Not run',
 };
+
+/** The sequence with the script at `index` moved `delta` places (clamped to the ends). */
+export function moveScript(scripts: readonly string[], index: number, delta: number): string[] {
+  const next = [...scripts];
+  const to = Math.min(Math.max(index + delta, 0), next.length - 1);
+  if (index < 0 || index >= next.length || to === index) return next;
+  const [moved] = next.splice(index, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
+/** The sequence without the script at `index`. */
+export const removeScript = (scripts: readonly string[], index: number): string[] => scripts.filter((_, i) => i !== index);
+
+/** The problem with a schedule before it is saved, or null: a name, one to `MAX_SCRIPTS` scripts that
+ *  all exist, and a rule that fires. The backend's checks, in the same words. */
+export function scheduleProblem(name: string, scripts: readonly string[], available: readonly string[], rule: ScheduleRule): string | null {
+  const trimmed = name.trim();
+  if (!trimmed || [...trimmed].length > 100) return 'A schedule needs a name of 1 to 100 characters.';
+  if (scripts.length === 0) return 'Add at least one script to run.';
+  if (scripts.length > MAX_SCRIPTS) return `A schedule can run at most ${MAX_SCRIPTS} scripts.`;
+  const missing = scripts.find((s) => !available.includes(s));
+  if (missing) return `There is no script called ${missing}.`;
+  return ruleProblem(rule);
+}

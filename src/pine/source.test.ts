@@ -8,8 +8,8 @@ describe('detectKind', () => {
     expect(detectKind('indicator ( "spaced" )')).toBe('indicator');
   });
 
-  it('returns null for libraries and undeclared scripts', () => {
-    expect(detectKind('library("lib")')).toBeNull();
+  it('reads a library, and returns null for an undeclared script', () => {
+    expect(detectKind('//@version=6\nlibrary("lib")')).toBe('library');
     expect(detectKind('plot(close)')).toBeNull();
     expect(detectKind('')).toBeNull();
   });

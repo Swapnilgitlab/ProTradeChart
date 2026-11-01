@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type MutableRefObject } from 'react';
 import { EditorState, type Extension } from '@codemirror/state';
 import {
   EditorView,
@@ -9,7 +9,7 @@ import {
   lineNumbers,
   placeholder,
 } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentWithTab, isolateHistory } from '@codemirror/commands';
 import { bracketMatching, indentOnInput } from '@codemirror/language';
 import { closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
@@ -46,6 +46,13 @@ const editorTheme = EditorView.theme({
   '.cm-panels input, .cm-panels button': { font: 'inherit' },
 });
 
+/** What a parent can do to a mounted editor besides remounting it. */
+export interface CodeEditorHandle {
+  /** Replaces the whole text as one undo step of its own (a single Ctrl+Z puts the old text back),
+   *  reported through `onChange` like typing. */
+  replaceAll: (text: string) => void;
+}
+
 interface Props {
   value: string;
   onChange: (value: string) => void;
@@ -56,6 +63,8 @@ interface Props {
   /** Syntax colouring and completion. Pine's, unless another language is given. */
   language?: Extension;
   placeholderText?: string;
+  /** Filled while the editor is mounted. */
+  handleRef?: MutableRefObject<CodeEditorHandle | null>;
 }
 
 const PINE_PLACEHOLDER = 'Write a Pine Script indicator() or strategy() here…';
@@ -63,7 +72,7 @@ const PINE_PLACEHOLDER = 'Write a Pine Script indicator() or strategy() here…'
 /** A source editor, for Pine Script unless given another language. Uncontrolled after
  *  mount: the parent remounts it (via `key`) to load a different script, which also gives
  *  that script a fresh undo history. */
-export function CodeEditor({ value, onChange, onSave, onRun, language = pineExtensions, placeholderText = PINE_PLACEHOLDER }: Props) {
+export function CodeEditor({ value, onChange, onSave, onRun, language = pineExtensions, placeholderText = PINE_PLACEHOLDER, handleRef }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   // The editor is built once, so the callbacks it holds are read through a ref.
   const callbacks = useRef({ onChange, onSave, onRun });
@@ -118,7 +127,21 @@ export function CodeEditor({ value, onChange, onSave, onRun, language = pineExte
         ],
       }),
     });
-    return () => view.destroy();
+    if (handleRef) {
+      handleRef.current = {
+        replaceAll: (text) =>
+          view.dispatch({
+            changes: { from: 0, to: view.state.doc.length, insert: text },
+            selection: { anchor: 0 },
+            scrollIntoView: true,
+            annotations: isolateHistory.of('full'),
+          }),
+      };
+    }
+    return () => {
+      if (handleRef) handleRef.current = null;
+      view.destroy();
+    };
     // Built once per mount; `value` only seeds the document.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

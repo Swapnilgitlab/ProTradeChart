@@ -8,6 +8,7 @@ import {
   type ScriptingEngine,
 } from '@luxalgo/vela/plugin';
 import { PineWorkerEngine } from '@luxalgo/vela-pinets';
+import { resolveLibrary } from './libraries';
 
 /** Pine runs in a Worker, never in-process: PineTS compiles a script to JavaScript
  *  (`new Function`), which is why the CSP allows `unsafe-eval`. A worker has no DOM and
@@ -73,5 +74,6 @@ export function installPineEngine(): void {
   installed = true;
   // `props: 'strategy'` gives strategies a Properties tab (initial capital, commission,
   // slippage, sizing…) like TradingView, while plain indicators keep Inputs / Style.
-  registerDefaultEngine('pine', () => new BarsTap(new PineWorkerEngine({ props: 'strategy' })));
+  // `import` statements find their libraries among the user's saved scripts (libraries.ts).
+  registerDefaultEngine('pine', () => new BarsTap(new PineWorkerEngine({ props: 'strategy', importResolver: resolveLibrary })));
 }

@@ -15,9 +15,10 @@ use super::data::{
     DEFAULT_LIMIT, MAX_LIMIT,
 };
 use super::routes::{Backend, InstrumentQuery, WatchlistSel};
+use super::sql::{self, SqlAnswer, SqlRequest};
 use super::wire::{
-    InstrumentRow, ProviderStatus, ResultPost, WatchlistContent, WatchlistInfo, WatchlistSymbol, WatchlistSync,
-    WatchlistUpdate,
+    InstrumentRow, ProviderStatus, ResultPost, ScreenshotPost, WatchlistContent, WatchlistInfo, WatchlistSymbol,
+    WatchlistSync, WatchlistUpdate,
 };
 use super::{split_symbol, ApiError};
 use crate::db::{now_ms, Database};
@@ -39,8 +40,24 @@ use crate::zerodha::protocol::{
 };
 use crate::zerodha_commands::zerodha_credentials;
 
-/// Tells every window a watchlist was written from outside its panel; the payload is its id.
+/// Tells every window a watchlist was written from outside its panel; the payload is its id (or
+/// null when a script's SQL may have changed several).
 pub const WATCHLISTS_CHANGED: &str = "watchlists-changed";
+
+/// The longest a script's SQL may run before it is stopped.
+const SQL_TIME_LIMIT: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// Interrupts a SQL call when it is dropped while armed: when the time limit passes, or when the
+/// script went away and its request with it.
+struct Interrupter(Option<rusqlite::InterruptHandle>);
+
+impl Drop for Interrupter {
+    fn drop(&mut self) {
+        if let Some(handle) = self.0.take() {
+            handle.interrupt();
+        }
+    }
+}
 
 /// The `python-result` event: something a script asked the app to show. `data` is passed on
 /// untouched; the webview validates its shape before drawing.
@@ -80,9 +97,19 @@ pub fn zerodha_error(e: ZerodhaError) -> ApiError {
         ZerodhaErrorKind::Permission => (403, "no_access"),
         ZerodhaErrorKind::RateLimited => (429, "rate_limited"),
         ZerodhaErrorKind::BadRequest => (400, "bad_request"),
-        ZerodhaErrorKind::Network | ZerodhaErrorKind::Server | ZerodhaErrorKind::Other => (502, "upstream"),
+        // Unreachable is told apart by its status: a chart then draws what is held.
+        ZerodhaErrorKind::Network => (UNREACHABLE, "upstream"),
+        ZerodhaErrorKind::Server | ZerodhaErrorKind::Other => (502, "upstream"),
     };
     ApiError::new(status, code, e.message())
+}
+
+/// The status of an error that never reached the broker (no connection, a timeout).
+pub const UNREACHABLE: u16 = 503;
+
+/// Whether the broker couldn't be reached at all, as opposed to answering with a refusal.
+pub fn unreachable(e: &ApiError) -> bool {
+    e.status == UNREACHABLE && e.code == "upstream"
 }
 
 /// Maps a FYERS failure onto the API's codes, as [`zerodha_error`] does Kite's.
@@ -92,7 +119,8 @@ pub fn fyers_error(e: FyersError) -> ApiError {
         FyersErrorKind::Token => (401, "auth"),
         FyersErrorKind::RateLimited => (429, "rate_limited"),
         FyersErrorKind::BadRequest => (400, "bad_request"),
-        FyersErrorKind::Network | FyersErrorKind::Server | FyersErrorKind::Other => (502, "upstream"),
+        FyersErrorKind::Network => (UNREACHABLE, "upstream"),
+        FyersErrorKind::Server | FyersErrorKind::Other => (502, "upstream"),
     };
     ApiError::new(status, code, e.message())
 }
@@ -286,6 +314,77 @@ impl Backend for AppBackend {
         })
     }
 
+    fn sql<'a>(&'a self, request: SqlRequest) -> BoxFuture<'a, Result<SqlAnswer, ApiError>> {
+        Box::pin(async move {
+            let data_dir = self
+                .app
+                .path()
+                .app_local_data_dir()
+                .map_err(|e| ApiError::internal(e.to_string()))?;
+            // The saved prices, when they are kept (the file is deleted when saving is switched off).
+            let saving = self.with_conn(|conn| Ok(crate::prices::saving(conn)))?;
+            let prices = Some(data_dir.join(crate::prices::FILE)).filter(|p| saving && p.exists());
+            let conn = sql::open(&data_dir.join(crate::db::FILE), prices.as_deref())
+                .map_err(|e| ApiError::internal(format!("couldn't open the database: {e}")))?;
+            let mut interrupter = Interrupter(Some(conn.get_interrupt_handle()));
+            let task = tauri::async_runtime::spawn_blocking(move || sql::run(&conn, &request));
+            let answer = match tokio::time::timeout(SQL_TIME_LIMIT, task).await {
+                Err(_) => {
+                    return Err(ApiError::new(
+                        504,
+                        "timeout",
+                        "The SQL ran for 10 minutes and was stopped; nothing was changed.",
+                    ))
+                }
+                Ok(Err(e)) => return Err(ApiError::internal(e.to_string())),
+                Ok(Ok(result)) => {
+                    interrupter.0 = None;
+                    result.map_err(ApiError::bad_request)?
+                }
+            };
+            if !answer.dry_run && !answer.tables.is_empty() {
+                let _ = self.app.emit(WATCHLISTS_CHANGED, Option::<i64>::None);
+            }
+            Ok(answer)
+        })
+    }
+
+    fn send_email<'a>(
+        &'a self,
+        subject: String,
+        body: String,
+        attachments: Vec<crate::email::Attachment>,
+    ) -> BoxFuture<'a, Result<(), ApiError>> {
+        Box::pin(async move {
+            let (settings, password) =
+                crate::email::load(&self.app).map_err(|e| ApiError::new(409, "not_configured", e))?;
+            let message =
+                crate::email::message(&settings, &subject, &body, attachments).map_err(ApiError::bad_request)?;
+            crate::email::send(&settings, &password, message)
+                .await
+                .map_err(|e| ApiError::new(502, "upstream", e))
+        })
+    }
+
+    fn screenshot<'a>(&'a self, request: ScreenshotPost) -> BoxFuture<'a, Result<Vec<u8>, ApiError>> {
+        Box::pin(async move {
+            use crate::screenshot::Failure;
+            crate::screenshot::take(&self.app, request)
+                .await
+                .map_err(|failure| match failure {
+                    Failure::NoWindow => ApiError::new(
+                        503,
+                        "unavailable",
+                        "Screenshots need the app's main window open (the first window; it draws the chart).",
+                    ),
+                    Failure::TimedOut => ApiError::new(504, "timeout", "The chart wasn't drawn within 2 minutes."),
+                    Failure::Failed(why) => {
+                        ApiError::new(502, "upstream", format!("The chart couldn't be drawn: {why}"))
+                    }
+                })
+        })
+    }
+
     fn bars<'a>(&'a self, request: BarsRequest) -> BoxFuture<'a, Result<BarsData, ApiError>> {
         Box::pin(async move {
             let (provider, ticker) = split_symbol(&request.symbol)
@@ -311,8 +410,9 @@ impl Backend for AppBackend {
     fn panel<'a>(&'a self, request: PanelRequest) -> BoxFuture<'a, Result<Vec<PanelSeries>, ApiError>> {
         let app = self.app.clone();
         Box::pin(async move {
-            // Copying a whole market's history out of memory is a fraction of a second, but not
-            // one to spend on the async threads.
+            // Copying a whole market's history out of memory is a fraction of a second (a second or
+            // so the first time, when it is read from the saved prices), but not one to spend on the
+            // async threads.
             tauri::async_runtime::spawn_blocking(move || {
                 data::read_panel(&app.state::<BarMemory>(), &request, now_ms())
             })
@@ -334,15 +434,20 @@ impl data::Snapshots for AppBackend {
         &'a self,
         provider: &'a str,
         tickers: &'a [String],
-    ) -> BoxFuture<'a, Result<Vec<Option<DaySnapshot>>, ApiError>> {
+    ) -> BoxFuture<'a, Result<data::Quoted, ApiError>> {
         Box::pin(async move {
-            match (provider, self.broker()?) {
-                (INDIA, Broker::Zerodha) => self.zerodha_day_snapshots(tickers).await,
+            let broker = self.broker()?;
+            let days = match (provider, broker) {
+                (INDIA, Broker::Zerodha) => self.zerodha_day_snapshots(tickers).await?,
                 (INDIA, Broker::Fyers) => fyers_commands::day_snapshots(&self.app, tickers)
                     .await
-                    .map_err(fyers_error),
-                (other, _) => Err(unsupported_provider(other)),
-            }
+                    .map_err(fyers_error)?,
+                (other, _) => return Err(unsupported_provider(other)),
+            };
+            Ok(data::Quoted {
+                served_by: Some(broker),
+                days,
+            })
         })
     }
 }
@@ -404,7 +509,11 @@ impl AppBackend {
             .fetch_history(&creds, &inst, kind, Some(from_ms), Some(to_ms), now)
             .await
             .map_err(zerodha_error)?;
-        Ok(Fetched { bars, from_ms: began })
+        Ok(Fetched {
+            bars,
+            from_ms: began,
+            served_by: Some(Broker::Zerodha),
+        })
     }
 
     async fn fetch_fyers(&self, ticker: &str, interval: &str, from_ms: i64, to_ms: i64) -> Result<Fetched, ApiError> {
@@ -428,7 +537,11 @@ impl AppBackend {
         let (bars, began) = fyers_commands::fetch_history(&self.app, &inst, kind, Some(from_ms), Some(to_ms))
             .await
             .map_err(fyers_error)?;
-        Ok(Fetched { bars, from_ms: began })
+        Ok(Fetched {
+            bars,
+            from_ms: began,
+            served_by: Some(Broker::Fyers),
+        })
     }
 
     /// `tickers` not in the instrument list come back `None`, same as a ticker the broker itself
@@ -485,12 +598,11 @@ mod tests {
         );
         err(429, "rate_limited", map(ZerodhaErrorKind::RateLimited, ""));
         err(400, "bad_request", map(ZerodhaErrorKind::BadRequest, "bad dates"));
-        for kind in [
-            ZerodhaErrorKind::Network,
-            ZerodhaErrorKind::Server,
-            ZerodhaErrorKind::Other,
-        ] {
+        err(503, "upstream", map(ZerodhaErrorKind::Network, "boom"));
+        assert!(unreachable(&map(ZerodhaErrorKind::Network, "boom")));
+        for kind in [ZerodhaErrorKind::Server, ZerodhaErrorKind::Other] {
             err(502, "upstream", map(kind, "boom"));
+            assert!(!unreachable(&map(kind, "boom")));
         }
     }
 

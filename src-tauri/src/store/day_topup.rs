@@ -69,6 +69,12 @@ pub fn candidate(
     Some(Candidate { session_day })
 }
 
+/// Whether two prices of one bar are the same as far as a broker's rounding goes: within a tick,
+/// or a hundredth of a percent of the held one. A corporate action moves a price far more.
+pub fn same_price(fetched: f64, held: f64) -> bool {
+    (fetched - held).abs() <= (held * 1e-4).max(0.011)
+}
+
 /// Checks a fetched snapshot before trusting it as `candidate`'s day's bar. `prior` is the bar
 /// strictly before that day, already in the store — absent only if the series has no history at
 /// all yet, which `candidate` already rules out, so that case is rejected rather than guessed at.
@@ -86,8 +92,7 @@ pub fn snapshot_bar(candidate: &Candidate, snapshot: &DaySnapshot, prior: Option
 
     let prior = prior.ok_or(Reject::PreviousCloseMismatch)?;
     let previous_close = snapshot.previous_close.ok_or(Reject::PreviousCloseMismatch)?;
-    let tolerance = (prior.close * 1e-4).max(0.011);
-    if (previous_close - prior.close).abs() > tolerance {
+    if !same_price(previous_close, prior.close) {
         return Err(Reject::PreviousCloseMismatch);
     }
     if snapshot.volume.is_none() && prior.volume.is_some() {

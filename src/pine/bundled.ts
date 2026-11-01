@@ -15,7 +15,7 @@ export interface BundledScript {
   name: string;
   /** The picker group: the folder it sits in, `A / B` for nested folders. */
   category: string;
-  kind: PineScriptKind;
+  kind: Exclude<PineScriptKind, 'library'>;
   source: string;
   /** Path under `pine/indicators/`, for messages. */
   file: string;
@@ -36,7 +36,8 @@ export function loadBundled(files: Record<string, string>, warn: (message: strin
     const filename = parts.pop() ?? file;
 
     const kind = detectKind(source);
-    if (!kind) {
+    // A library can't be put on a chart, so it has no place in the Indicators dialog.
+    if (!kind || kind === 'library') {
       warn(`Bundled script "${file}" skipped: it has no indicator() or strategy() declaration.`);
       continue;
     }

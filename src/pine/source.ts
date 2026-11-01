@@ -11,13 +11,18 @@ function codeLines(source: string): string[] {
   return source.split(/\r?\n/).filter((line) => !line.trimStart().startsWith('//'));
 }
 
-/** `null` for a `library()` script (which can't be added to a chart) or no declaration. */
+/** What the script declares itself to be; null with no declaration. */
 export function detectKind(source: string): PineScriptKind | null {
   for (const line of codeLines(source)) {
     const m = DECLARATION.exec(line);
-    if (m) return m[1] === 'library' ? null : (m[1] as PineScriptKind);
+    if (m) return m[1] as PineScriptKind;
   }
   return null;
+}
+
+/** How a kind is named in the editor. */
+export function kindLabel(kind: PineScriptKind): string {
+  return kind === 'strategy' ? 'Strategy' : kind === 'library' ? 'Library' : 'Indicator';
 }
 
 /** The title the script declares, e.g. `My MA` for `indicator("My MA", overlay=true)`. */

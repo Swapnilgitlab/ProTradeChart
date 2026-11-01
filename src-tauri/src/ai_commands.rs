@@ -1,5 +1,6 @@
 //! Tauri commands for AI in ProTradeChart: the user's own API keys (Anthropic, OpenAI), and what
-//! they're used for — the Study Builder's drafts/explanations/plans/syntheses, and Ask AI.
+//! they're used for — the Study Builder's drafts/explanations/plans/syntheses, Ask AI, and the
+//! Python tab's assistant.
 //!
 //! A key is a secret like a broker's: it is saved through [`Secrets::set`], read only here, and
 //! never returned to the webview or logged. The commands send only what the caller passed in (a
@@ -14,7 +15,9 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::ai::claude::ClaudeClient;
 use crate::ai::openai::OpenAiClient;
-use crate::ai::prompts::{self, AskAiRequest, DraftRequest, ExplainRequest, PlanRequest, SynthesisRequest};
+use crate::ai::prompts::{
+    self, AskAiRequest, DraftRequest, ExplainRequest, PlanRequest, PythonAssistRequest, SynthesisRequest,
+};
 use crate::ai::{AiError, AiRequest, Progress, Reply};
 use crate::db::Database;
 use crate::pyapi::valid_run_id;
@@ -314,6 +317,23 @@ pub async fn ai_synthesize_research(
     ask_with_progress(&app, &request_id, &db, &secrets, &claude, &openai, &req).await
 }
 
+/// A request about the open Python script → a new version of it (or none) and a reply. The script
+/// comes back as a proposal: the frontend shows it as changes, and only the user's Apply puts it in
+/// the editor. Nothing here saves or runs it.
+#[tauri::command]
+pub async fn ai_python_assist(
+    request: PythonAssistRequest,
+    request_id: String,
+    app: AppHandle,
+    db: State<'_, Database>,
+    secrets: State<'_, Secrets>,
+    claude: State<'_, ClaudeClient>,
+    openai: State<'_, OpenAiClient>,
+) -> Result<AiAnswer, String> {
+    let req = prompts::python_body(&request)?;
+    ask_with_progress(&app, &request_id, &db, &secrets, &claude, &openai, &req).await
+}
+
 /// One action Ask AI proposed. Never run here: the frontend shows it for approval and, only then,
 /// calls the real function it names. See "Ask AI" in `docs/ARCHITECTURE.md`.
 #[derive(Debug, Serialize)]
@@ -545,7 +565,7 @@ mod tests {
         }
         let (base, _) = fake_server(
             200,
-            json!({"model": "claude-opus-5", "stop_reason": "end_turn",
+            json!({"model": "claude-opus-5-5", "stop_reason": "end_turn",
                    "content": [{"type": "text", "text": "{\"reply\":\"Done.\",\"spec\":null,\"assumptions\":[],\"unavailable\":[]}"}]}),
         )
         .await;
@@ -554,7 +574,7 @@ mod tests {
         let req = AiRequest::structured("s".into(), vec![], json!({"type": "object"}));
         let got = ask(&db, &secrets, &claude, &openai, &req, &mut |_| {}).await.unwrap();
         assert_eq!(got.answer["reply"], "Done.");
-        assert_eq!(got.model, "claude-opus-5");
+        assert_eq!(got.model, "claude-opus-5-5");
 
         let (base, _) = fake_server(
             200,
@@ -574,7 +594,7 @@ mod tests {
         }
         let (base, _) = fake_server(
             200,
-            json!({"model": "claude-opus-5", "stop_reason": "tool_use", "content": [
+            json!({"model": "claude-opus-5-5", "stop_reason": "tool_use", "content": [
                 {"type": "text", "text": "Sure, adding it."},
                 {"type": "tool_use", "id": "t1", "name": "add_watchlist_item", "input": {"watchlist": "Getting started", "symbol": "binance:ETHUSDT"}}
             ]}),

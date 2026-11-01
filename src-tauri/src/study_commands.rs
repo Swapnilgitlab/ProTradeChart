@@ -22,7 +22,22 @@ const MAX_SPEC_BYTES: usize = 1024 * 1024;
 /// An export is built from a stored result, so it is no bigger than one — plus CSV's overhead.
 const MAX_EXPORT_BYTES: usize = 64 * 1024 * 1024;
 /// What an export may be saved as. The webview names the kind; it never names a path.
-const EXPORT_KINDS: [(&str, &str); 4] = [("csv", "CSV"), ("json", "JSON"), ("py", "Python"), ("md", "Markdown")];
+const EXPORT_KINDS: [(&str, &str); 5] = [
+    ("csv", "CSV"),
+    ("json", "JSON"),
+    ("py", "Python"),
+    ("md", "Markdown"),
+    ("txt", "Text"),
+];
+
+/// A kind's extension and the name the save dialog shows for it.
+fn export_kind(kind: &str) -> Result<(&'static str, &'static str), String> {
+    EXPORT_KINDS
+        .iter()
+        .find(|(ext, _)| *ext == kind)
+        .copied()
+        .ok_or_else(|| format!("Can't export as {kind}."))
+}
 
 fn sql<T>(result: rusqlite::Result<T>) -> Result<T, String> {
     result.map_err(|e| e.to_string())
@@ -272,6 +287,7 @@ pub async fn study_run(
             run_id,
             remove_after: Some(file.clone()),
             on_exit: None,
+            env: Vec::new(),
         },
     )
     .await;
@@ -301,31 +317,38 @@ pub fn export_file_name(suggested: &str, extension: &str) -> String {
 }
 
 /// Asks where to save an export and writes it there. The user picks the place in the system's
-/// own dialog; the webview supplies only the contents, a name to suggest and the kind. `None`
-/// when the dialog was cancelled.
+/// own dialog; the webview supplies only the contents, a name to suggest and the kind, plus any
+/// other kinds the same contents may be saved as (`also`: a TradingView list is a `.txt` that
+/// people also keep as `.csv`). `None` when the dialog was cancelled.
 #[tauri::command]
 pub async fn export_study_file(
     suggested_name: String,
     kind: String,
     contents: String,
+    also: Option<Vec<String>>,
     app: AppHandle,
 ) -> Result<Option<String>, String> {
-    let (extension, label) = EXPORT_KINDS
+    let (extension, label) = export_kind(&kind)?;
+    let others = also
+        .unwrap_or_default()
         .iter()
-        .find(|(ext, _)| *ext == kind)
-        .copied()
-        .ok_or_else(|| format!("Can't export as {kind}."))?;
+        .map(|k| export_kind(k))
+        .collect::<Result<Vec<_>, _>>()?;
     if contents.len() > MAX_EXPORT_BYTES {
         return Err("That export is too large.".into());
     }
     let (tx, rx) = oneshot::channel();
-    app.dialog()
+    let mut dialog = app
+        .dialog()
         .file()
         .set_file_name(export_file_name(&suggested_name, extension))
-        .add_filter(label, &[extension])
-        .save_file(move |chosen| {
-            let _ = tx.send(chosen);
-        });
+        .add_filter(label, &[extension]);
+    for (other, other_label) in others {
+        dialog = dialog.add_filter(other_label, &[other]);
+    }
+    dialog.save_file(move |chosen| {
+        let _ = tx.send(chosen);
+    });
     let Some(chosen) = rx
         .await
         .map_err(|_| "The save dialog closed unexpectedly.".to_string())?
@@ -348,6 +371,14 @@ mod tests {
         assert_eq!(export_file_name("a\\b:c", "py"), "a_b_c.py");
         assert_eq!(export_file_name("   ", "md"), "study.md");
         assert_eq!(export_file_name(&"x".repeat(500), "csv").len(), 104);
+    }
+
+    #[test]
+    fn an_export_is_only_ever_one_of_the_known_kinds() {
+        assert_eq!(export_kind("txt").unwrap(), ("txt", "Text"));
+        assert_eq!(export_kind("csv").unwrap(), ("csv", "CSV"));
+        assert!(export_kind("exe").is_err());
+        assert!(export_kind("").is_err());
     }
 
     #[test]

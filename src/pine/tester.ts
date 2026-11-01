@@ -4,8 +4,9 @@ import type { StrategyState, StrategyTrade } from '@luxalgo/vela/plugin';
  *  round trips — into what TradingView's Strategy Tester shows: a trade list with net
  *  P&L, run-up and drawdown, an equity curve, and the performance summary.
  *
- *  The engine reports fills, not P&L, commission or an equity history, so those are
- *  derived here from the trades and the chart's bars. Everything is computed from the
+ *  The engine reports fills, not an equity history, so trade P&L, commission, run-up and
+ *  drawdown are derived here from the trades and the chart's bars (and held to the
+ *  engine's own per-trade totals by `tester.engine.test.ts`). Everything is computed from the
  *  trade rows so the summary always adds up to the list beneath it. Equity, run-up and
  *  drawdown are measured on bar closes (TradingView also looks inside bars), so they can
  *  differ slightly from TradingView — the tester says results are approximate. */
@@ -26,7 +27,7 @@ export interface Commission {
 }
 
 export interface TesterInput {
-  state: Pick<StrategyState, 'initialCapital' | 'equity'>;
+  state: Pick<StrategyState, 'initialCapital' | 'equity' | 'cagr' | 'sharpe' | 'sortino' | 'outperformance'>;
   trades: readonly StrategyTrade[];
   bars: readonly TesterBar[];
   commission: Commission;
@@ -102,12 +103,25 @@ export interface Summary extends TradeStats {
   /** Net profit plus open P&L: TradingView's headline "Total P&L". */
   totalPnl: number;
   totalPnlPct: number;
-  buyHold: number;
-  buyHoldPct: number;
+  /** Null with no trades: buy & hold starts at the first entry. */
+  buyHold: number | null;
+  buyHoldPct: number | null;
   maxRunup: number;
   maxRunupPct: number;
   maxDrawdown: number;
   maxDrawdownPct: number;
+}
+
+/** Figures only the engine computes, over every bar of the backtest. Each is null when the engine
+ *  didn't report it (a span too short to annualize, an account wiped out, an older engine). */
+export interface EngineFigures {
+  /** Compound annual growth of the account, in percent. */
+  cagr: number | null;
+  /** On monthly equity returns. */
+  sharpe: number | null;
+  sortino: number | null;
+  /** Net profit beyond buy & hold, in account currency. */
+  outperformance: number | null;
 }
 
 export interface TesterReport {
@@ -117,7 +131,22 @@ export interface TesterReport {
   summary: Summary;
   long: TradeStats;
   short: TradeStats;
+  engine: EngineFigures;
   warnings: string[];
+}
+
+const finite = (v: number | undefined): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/** The engine's own figures, as reported. PineTS reports Sharpe and Sortino as 0 when it has fewer
+ *  than two months of equity to measure; both exactly 0 is that, not a result, so neither is shown. */
+export function engineFigures(state: TesterInput['state']): EngineFigures {
+  const unmeasured = state.sharpe === 0 && state.sortino === 0;
+  return {
+    cagr: finite(state.cagr),
+    sharpe: unmeasured ? null : finite(state.sharpe),
+    sortino: unmeasured ? null : finite(state.sortino),
+    outperformance: finite(state.outperformance),
+  };
 }
 
 export function commissionFor(commission: Commission, qty: number, price: number): number {
@@ -296,15 +325,18 @@ export function buildReport(input: TesterInput): TesterReport {
     if (trough > 0 && ru / trough > maxRunupPct) maxRunupPct = ru / trough;
   }
 
-  // Buy & hold: the whole starting capital in at the first bar's open, held to the last close.
+  // Buy & hold, as TradingView and the engine measure it: the whole starting capital in at the
+  // first entry's price, held to the last close. Before that entry, the curve is the capital.
   const buyHold: CurvePoint[] = [];
-  let buyHoldPnl = 0;
-  let buyHoldPct = 0;
-  if (bars.length > 0 && bars[0].open > 0) {
-    const units = initialCapital / bars[0].open;
-    for (const bar of bars) buyHold.push({ time: bar.time, value: initialCapital + units * (bar.close - bars[0].open) });
-    buyHoldPnl = units * (lastClose - bars[0].open);
-    buyHoldPct = (lastClose / bars[0].open - 1) * 100;
+  let buyHoldPnl: number | null = null;
+  let buyHoldPct: number | null = null;
+  const first = ordered[0];
+  if (first && first.entry.price > 0 && bars.length > 0) {
+    const from = barIndexAtOrBefore(bars, first.entry.time);
+    const gain = (close: number) => close / first.entry.price - 1;
+    bars.forEach((bar, b) => buyHold.push({ time: bar.time, value: b < from ? initialCapital : initialCapital * (1 + gain(bar.close)) }));
+    buyHoldPnl = initialCapital * gain(lastClose);
+    buyHoldPct = gain(lastClose) * 100;
   }
 
   const all = tradeStats(rows);
@@ -344,6 +376,7 @@ export function buildReport(input: TesterInput): TesterReport {
     summary,
     long: tradeStats(rows.filter((r) => r.side === 'long')),
     short: tradeStats(rows.filter((r) => r.side === 'short')),
+    engine: engineFigures(input.state),
     warnings,
   };
 }

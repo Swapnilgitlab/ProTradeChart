@@ -1,20 +1,23 @@
 //! Tauri commands for the data-provider settings: what the Data providers dialog lists, saves, clears,
 //! switches on and off, and tests. A broker's own commands (its login, instruments, bars) live
 //! beside its client. Whatever here can change which broker serves `india:` symbols goes through
-//! `market_commands::after_broker_settings_changed`.
+//! `market_commands::sync_market`.
 
 use std::collections::HashMap;
 use std::sync::MutexGuard;
 
 use rusqlite::Connection;
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::db::Database;
 use crate::models::ProviderInfo;
+use crate::prices::SavedPrices;
 use crate::providers;
 use crate::secrets::Secrets;
+use crate::store::bar_memory::BarMemory;
 use crate::store::provider_settings::{self as settings, Table};
+use crate::symbols::Broker;
 use crate::zerodha::client::ZerodhaClient;
 use crate::zerodha::feed::Feed as ZerodhaFeed;
 use crate::zerodha_commands::{self, TOKEN_SAVED_KEY, ZERODHA};
@@ -49,7 +52,6 @@ pub fn save_provider_config(
     secrets: State<Secrets>,
     zerodha_feed: State<ZerodhaFeed>,
 ) -> Result<SaveResult, String> {
-    let before = market_commands::current_broker(&app);
     let storage = providers::save_config(&*lock(&db)?, &secrets, &provider, &values)?;
     if provider == fyers_commands::FYERS && values.get("accessToken").is_some_and(|t| !t.trim().is_empty()) {
         sql(fyers_commands::note_token_saved(&*lock(&db)?))?;
@@ -61,7 +63,7 @@ pub fn save_provider_config(
         }
         zerodha_feed.reconnect(); // a new token takes effect on the live connection too
     }
-    market_commands::after_broker_settings_changed(&app, before);
+    market_commands::sync_market(&app);
     Ok(SaveResult {
         secret_storage: storage.map(|s| s.as_str().to_string()),
     })
@@ -70,12 +72,12 @@ pub fn save_provider_config(
 #[tauri::command(async)]
 pub fn clear_provider_config(
     provider: String,
+    delete_saved_prices: Option<bool>,
     app: AppHandle,
     db: State<Database>,
     secrets: State<Secrets>,
     zerodha_feed: State<ZerodhaFeed>,
 ) -> Result<(), String> {
-    let before = market_commands::current_broker(&app);
     providers::clear_config(&*lock(&db)?, &secrets, &provider)?;
     if provider == fyers_commands::FYERS {
         sql(fyers_commands::forget_extras(&*lock(&db)?, &secrets))?;
@@ -89,7 +91,14 @@ pub fn clear_provider_config(
         ))?;
         zerodha_feed.reconnect();
     }
-    market_commands::after_broker_settings_changed(&app, before);
+    market_commands::sync_market(&app);
+    // A broker's terms ask for its data to be deleted once you stop using it: offered (and on by
+    // default) when its credentials are forgotten.
+    if let (true, Some(broker)) = (delete_saved_prices.unwrap_or(false), Broker::parse(&provider)) {
+        let memory = app.state::<BarMemory>();
+        let gone = app.state::<SavedPrices>().forget_broker(&memory, broker);
+        log::info!("saved prices: {gone} series {} supplied deleted", broker.label());
+    }
     Ok(())
 }
 
@@ -101,12 +110,11 @@ pub fn set_provider_enabled(
     db: State<Database>,
     zerodha_feed: State<ZerodhaFeed>,
 ) -> Result<(), String> {
-    let before = market_commands::current_broker(&app);
     providers::set_enabled(&*lock(&db)?, &provider, enabled)?;
     if provider == ZERODHA {
         zerodha_feed.reconnect();
     }
-    market_commands::after_broker_settings_changed(&app, before);
+    market_commands::sync_market(&app);
     Ok(())
 }
 

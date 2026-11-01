@@ -21,11 +21,12 @@ CREATE TABLE IF NOT EXISTS chart_layouts (
 );
 
 -- The user's Pine Script library. `source` is the script's own text; `kind` is
--- what its indicator()/strategy() declaration says, kept so the list can show it.
+-- what its indicator()/strategy()/library() declaration says, kept so the list can show it.
+-- (A database from before libraries has the older CHECK; `store::scripts::migrate` rebuilds it.)
 CREATE TABLE IF NOT EXISTS pine_scripts (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
-  kind        TEXT NOT NULL CHECK (kind IN ('indicator', 'strategy')),
+  kind        TEXT NOT NULL CHECK (kind IN ('indicator', 'strategy', 'library')),
   source      TEXT NOT NULL,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -63,9 +64,9 @@ CREATE TABLE IF NOT EXISTS watchlist_sections (
 );
 CREATE INDEX IF NOT EXISTS idx_watchlist_sections_list ON watchlist_sections(watchlist_id);
 
--- No table holds broker price history: it lives in memory for the session (`store/bar_memory.rs`)
--- and is never written to disk. Databases from before that change had three (`bars_cache`,
--- `research_bars`, `research_coverage`); `bar_tables::drop_disk_bars` removes them once.
+-- No table here holds broker price history: it lives in memory (`store/bar_memory.rs`), and only
+-- if the user switches on "Save prices on this computer" in a file of its own (`prices.rs`). Databases from before had three (`bars_cache`, `research_bars`, `research_coverage`);
+-- `bar_tables::drop_disk_bars` removes them once.
 
 -- The symbols "Keep the market loaded" covers (`store/market_symbols.rs`): names, never prices.
 -- Unlike the brokers' instrument tables, which each refresh replaces, a row here outlives
@@ -198,19 +199,25 @@ CREATE TABLE IF NOT EXISTS screeners (
   updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Python scripts the user scheduled to run by themselves (`scheduler/`). `rule_json` is a `scheduler::plan::Rule`;
+-- Sequences of Python scripts the user scheduled to run by themselves (`scheduler/`). `scripts_json` is the
+-- sequence (script file names, in order); `script` is its first, kept for databases from before sequences
+-- (`schedules::migrate` adds the newer columns to those). `rule_json` is a `scheduler::plan::Rule`;
 -- `next_run_at` (epoch ms) is when it next fires, NULL while it is switched off.
 CREATE TABLE IF NOT EXISTS script_schedules (
-  id           TEXT PRIMARY KEY,
-  script       TEXT NOT NULL,
-  rule_json    TEXT NOT NULL,
-  enabled      INTEGER NOT NULL DEFAULT 1,
-  next_run_at  INTEGER,
-  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  id                TEXT PRIMARY KEY,
+  name              TEXT NOT NULL DEFAULT '',
+  script            TEXT NOT NULL,
+  scripts_json      TEXT,
+  rule_json         TEXT NOT NULL,
+  enabled           INTEGER NOT NULL DEFAULT 1,
+  email_on_failure  INTEGER NOT NULL DEFAULT 0,
+  next_run_at       INTEGER,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- What happened each time a schedule came due: a run (with the tail of its output), or a run missed
--- while the app was closed, or skipped because the last one was still going. The newest few are kept.
+-- What happened each time a schedule came due: a run, or a run missed while the app was closed, or skipped
+-- because the last one was still going. The newest few are kept. A run's scripts are `schedule_steps`
+-- (a run from before sequences has none, and its output here instead).
 CREATE TABLE IF NOT EXISTS schedule_runs (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   schedule_id  TEXT NOT NULL REFERENCES script_schedules(id) ON DELETE CASCADE,
@@ -223,6 +230,20 @@ CREATE TABLE IF NOT EXISTS schedule_runs (
   output       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_schedule_runs_schedule ON schedule_runs(schedule_id, id);
+
+-- Each script of a run, in order: how it ended and the tail of what it printed. `not-run` for the ones
+-- after a script that failed.
+CREATE TABLE IF NOT EXISTS schedule_steps (
+  run_row      INTEGER NOT NULL REFERENCES schedule_runs(id) ON DELETE CASCADE,
+  step         INTEGER NOT NULL,
+  script       TEXT NOT NULL,
+  status       TEXT NOT NULL,
+  started_at   INTEGER,
+  finished_at  INTEGER,
+  message      TEXT NOT NULL DEFAULT '',
+  output       TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (run_row, step)
+);
 
 -- Colour flags, one per symbol (`store/watchlists.rs`): a flagged symbol shows its flag on every watchlist, and each
 -- colour's list is the symbols flagged with it, newest first. (Flags used to live on `watchlist_items.flag`;

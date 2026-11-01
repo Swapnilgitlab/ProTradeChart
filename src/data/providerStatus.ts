@@ -46,7 +46,7 @@ export function subscribeProviderState(listener: () => void): () => void {
 
 export const providerInfo = (id: string): ProviderInfo | undefined => state.providers.find((p) => p.id === id);
 
-/** The broker that serves `india:` symbols right now. Only one ever does: the two brokers' bars are never mixed. */
+/** The broker that serves `india:` symbols right now. Only one ever does (the prices held don't depend on it). */
 export const activeBroker = (): BrokerId => state.indiaBroker;
 
 export const brokerLabel = (broker: BrokerId = activeBroker()): string => BROKER_LABELS[broker];

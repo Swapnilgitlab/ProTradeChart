@@ -25,7 +25,8 @@ export interface ChartLayoutRow {
   updatedAt: string;
 }
 
-export type PineScriptKind = 'indicator' | 'strategy';
+/** A `library()` can be saved and imported by other scripts, but not added to a chart. */
+export type PineScriptKind = 'indicator' | 'strategy' | 'library';
 
 export interface PineScriptRow {
   id: string;
@@ -341,7 +342,9 @@ export const listProviders = () => invoke<ProviderInfo[]>('list_providers');
 export const saveProviderConfig = (provider: string, values: Record<string, string>) =>
   invoke<{ secretStorage: string | null }>('save_provider_config', { provider, values });
 
-export const clearProviderConfig = (provider: string) => invoke<void>('clear_provider_config', { provider });
+/** Forgets a provider's credentials; for a broker, `deleteSavedPrices` also deletes the saved prices it supplied. */
+export const clearProviderConfig = (provider: string, deleteSavedPrices = false) =>
+  invoke<void>('clear_provider_config', { provider, deleteSavedPrices });
 
 export const setProviderEnabled = (provider: string, enabled: boolean) =>
   invoke<void>('set_provider_enabled', { provider, enabled });
@@ -554,6 +557,9 @@ export interface ResearchStats {
 
 export const pythonEnvStatus = () => invoke<PythonEnvStatus>('python_env_status');
 
+/** Which of a fixed list of packages (pandas, numpy, matplotlib, …) the scripts' Python has. */
+export const pythonProbePackages = () => invoke<{ name: string; version: string | null }[]>('python_probe_packages');
+
 /** Use this interpreter instead of the app's own environment; null goes back to the app's. */
 export const pythonSetInterpreter = (path: string | null) => invoke<PythonEnvStatus>('python_set_interpreter', { path });
 
@@ -609,7 +615,7 @@ export interface StudyResultRow extends StudyResultInfo {
   resultJson: string;
 }
 
-export type StudyExportKind = 'csv' | 'json' | 'py' | 'md';
+export type StudyExportKind = 'csv' | 'json' | 'py' | 'md' | 'txt';
 
 export const listStudies = () => invoke<StudyRow[]>('list_studies');
 
@@ -632,10 +638,10 @@ export const deleteStudyResult = (id: string) => invoke<void>('delete_study_resu
  *  events (`python-output`, `python-result` of kind `study`, `python-exit`) for `runId`. */
 export const runStudy = (specJson: string, runId: string) => invoke<void>('study_run', { specJson, runId });
 
-/** Asks where to save, in the system's dialog, and writes `contents` there. Resolves with the path,
- *  or null when the dialog was cancelled. */
-export const exportStudyFile = (suggestedName: string, kind: StudyExportKind, contents: string) =>
-  invoke<string | null>('export_study_file', { suggestedName, kind, contents });
+/** Asks where to save, in the system's dialog, and writes `contents` there. `also` offers more file types
+ *  in the dialog for the same contents. Resolves with the path, or null when the dialog was cancelled. */
+export const exportStudyFile = (suggestedName: string, kind: StudyExportKind, contents: string, also: StudyExportKind[] = []) =>
+  invoke<string | null>('export_study_file', { suggestedName, kind, contents, also });
 
 /** The universe a Study would load, to price before it runs (mirrors `EstimateRequest`). */
 export interface StudyEstimateRequest {
@@ -673,15 +679,15 @@ export type ScheduleRule =
   | { days: boolean[]; kind: 'daily'; at: number }
   | { days: boolean[]; kind: 'every'; minutes: number; from: number; until: number };
 
-export type ScheduleRunStatus = 'running' | 'ok' | 'failed' | 'stopped' | 'missed' | 'skipped';
+/** `not-run` is a script after one that failed or was stopped. */
+export type ScheduleRunStatus = 'running' | 'ok' | 'failed' | 'stopped' | 'missed' | 'skipped' | 'not-run';
 
-/** What happened one time a schedule came due. Times are epoch ms. */
-export interface ScheduleRun {
-  id: number;
-  scheduleId: string;
-  runId: string | null;
+/** One script of a run. */
+export interface ScheduleStep {
+  /** 0-based position in the sequence. */
+  step: number;
+  script: string;
   status: ScheduleRunStatus;
-  dueAt: number;
   startedAt: number | null;
   finishedAt: number | null;
   message: string;
@@ -689,11 +695,30 @@ export interface ScheduleRun {
   output: string;
 }
 
+/** What happened one time a schedule came due. Times are epoch ms. */
+export interface ScheduleRun {
+  id: number;
+  scheduleId: string;
+  /** The Python run of the script going now. */
+  runId: string | null;
+  status: ScheduleRunStatus;
+  dueAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  message: string;
+  /** A run from before sequences kept its one script's output here; newer ones keep it per step. */
+  output: string;
+  steps: ScheduleStep[];
+}
+
+/** A schedule: a sequence of Python scripts run one after another, the first failure ending it. */
 export interface Schedule {
   id: string;
-  script: string;
+  name: string;
+  scripts: string[];
   rule: ScheduleRule;
   enabled: boolean;
+  emailOnFailure: boolean;
   /** Epoch ms; null while it is switched off. */
   nextRunAt: number | null;
   lastRun: ScheduleRun | null;
@@ -701,9 +726,16 @@ export interface Schedule {
 
 export const listSchedules = () => invoke<Schedule[]>('list_schedules');
 
-/** Creates or changes a schedule. Only the user's press in the Python tab calls this. */
-export const saveSchedule = (id: string, script: string, rule: ScheduleRule, enabled: boolean) =>
-  invoke<void>('save_schedule', { id, script, rule, enabled });
+/** Creates or changes a schedule. Only the user's press in the Scheduler tab calls this. */
+export const saveSchedule = (s: Pick<Schedule, 'id' | 'name' | 'scripts' | 'rule' | 'enabled' | 'emailOnFailure'>) =>
+  invoke<void>('save_schedule', {
+    id: s.id,
+    name: s.name,
+    scripts: s.scripts,
+    rule: s.rule,
+    enabled: s.enabled,
+    emailOnFailure: s.emailOnFailure,
+  });
 
 export const deleteSchedule = (id: string) => invoke<void>('delete_schedule', { id });
 
@@ -713,6 +745,50 @@ export const listScheduleRuns = (scheduleId: string) => invoke<ScheduleRun[]>('l
 export const runScheduleNow = (id: string) => invoke<void>('run_schedule_now', { id });
 
 export const stopScheduleRun = (id: string) => invoke<void>('stop_schedule_run', { id });
+
+// ---- Email (pt.send_email and schedules' failure notes) ----------------------------------
+
+export interface SmtpSettings {
+  host: string;
+  port: number;
+  security: 'starttls' | 'tls';
+  username: string;
+  /** Your own address: every message is from it and to it. */
+  address: string;
+}
+
+/** The settings, and whether a password is saved. The password itself never comes back. */
+export interface EmailStatus {
+  settings: SmtpSettings | null;
+  passwordSaved: boolean;
+}
+
+export const emailStatus = () => invoke<EmailStatus>('email_status');
+
+/** Logs in with the settings (and `password`, or the saved one) and saves them once that worked. */
+export const emailSave = (settings: SmtpSettings, password: string | null) =>
+  invoke<EmailStatus>('email_save', { settings, password });
+
+export const emailSendTest = () => invoke<void>('email_send_test');
+
+export const emailForget = () => invoke<EmailStatus>('email_forget');
+
+// ---- Screenshots for scripts (pt.screenshot) -----------------------------------------------
+
+/** What the main window is asked to draw (the `script-screenshot` event). */
+export interface ScreenshotRequest {
+  requestId: string;
+  symbol: string;
+  timeframe: string;
+  /** A saved layout's name, whose first chart styles it. */
+  layout: string | null;
+  width: number;
+  height: number;
+}
+
+/** The main window's answer: the chart as a base64 PNG, or why it couldn't draw it. */
+export const scriptScreenshotResult = (requestId: string, png: string | null, error: string | null) =>
+  invoke<void>('script_screenshot_result', { requestId, png, error });
 
 // ---- Screener ------------------------------------------------------------------
 
@@ -793,6 +869,41 @@ export const marketDataStop = () => invoke<void>('market_data_stop');
 
 /** Switches "Keep the market loaded" on (and starts loading) or off (and stops a load). */
 export const marketDataSetKeepLoaded = (on: boolean) => invoke<void>('market_data_set_keep_loaded', { on });
+
+// ---- Saved prices (`src-tauri/src/prices.rs`) -----------------------------------
+
+/** How many saved series hold one broker's bars (a series can hold both brokers'). */
+export interface SavedSupplier {
+  broker: string;
+  label: string;
+  series: number;
+}
+
+/** The saved prices: one file, keyed by neutral symbols whichever broker supplied them. */
+export interface SavedPricesStatus {
+  on: boolean;
+  /** Why prices aren't being saved although saving is on (another copy of the app has the file, say). */
+  problem: string | null;
+  /** The file's size on disk. */
+  bytes: number;
+  /** Whether the file is in use (saving on, and this copy of the app has it). */
+  open: boolean;
+  /** What the file holds; null while it isn't open. */
+  series: number | null;
+  dailySeries: number | null;
+  bars: number | null;
+  fromMs: number | null;
+  toMs: number | null;
+  supplied: SavedSupplier[];
+}
+
+export const savedPricesStatus = () => invoke<SavedPricesStatus>('saved_prices_status');
+
+/** Switches "Save prices on this computer" on, or off (which deletes the saved prices). */
+export const savedPricesSet = (on: boolean) => invoke<SavedPricesStatus>('saved_prices_set', { on });
+
+/** Deletes every saved price. */
+export const savedPricesDelete = () => invoke<SavedPricesStatus>('saved_prices_delete');
 
 // ---- Research Notebooks -------------------------------------------------------
 
@@ -967,3 +1078,20 @@ export interface AskAiAnswer {
 
 /** A question (or a follow-up) → words, proposed actions, or both. Runs nothing by itself. */
 export const askAi = (request: AskAiRequest, requestId: string) => invoke<AskAiAnswer>('ai_ask_ai', { request, requestId });
+
+// ---- The Python assistant (writes scripts as proposals; never saves or runs one) ------------------
+
+/** Mirrors `PythonAssistRequest` in `ai/prompts.rs`. `run` carries only what the user chose to send. */
+export interface PythonAssistRequest {
+  question: string;
+  scriptName: string | null;
+  source: string;
+  reference: string;
+  setup: string;
+  run: { failed: boolean; summary: string; errors: string; output: string | null } | null;
+  history: { role: 'user' | 'assistant'; text: string }[];
+  today: string;
+}
+
+/** A request about the open script → `{reply, code, name}` as `answer` (checked by `parseAssistAnswer`). */
+export const aiPythonAssist = (request: PythonAssistRequest, requestId: string) => invoke<AiAnswer>('ai_python_assist', { request, requestId });

@@ -111,6 +111,76 @@ async fn has_packages(python: &Path) -> bool {
     )
 }
 
+/// The packages the Python tab's AI assistant is told about, by distribution name: the baseline,
+/// and the ones a script most often wants (charts, statistics, indicator libraries). A fixed list,
+/// so nothing the webview sends reaches the command line.
+pub const KNOWN_PACKAGES: [&str; 9] = [
+    "pandas",
+    "numpy",
+    "matplotlib",
+    "scipy",
+    "statsmodels",
+    "scikit-learn",
+    "ta",
+    "pandas-ta",
+    "TA-Lib",
+];
+
+/// Prints one JSON object: each of [`KNOWN_PACKAGES`] and its installed version, or null. Reads
+/// package metadata only (nothing is imported, so it's quick), and runs with `-I` so nothing in the
+/// current folder or the user's environment variables can change what it loads.
+fn packages_code() -> String {
+    let names = KNOWN_PACKAGES.map(|n| format!("'{n}'")).join(", ");
+    format!(
+        "import json, importlib.metadata as m\n\
+         def v(n):\n    try:\n        return m.version(n)\n    except Exception:\n        return None\n\
+         print(json.dumps({{n: v(n) for n in [{names}]}}))"
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Package {
+    pub name: String,
+    pub version: Option<String>,
+}
+
+/// The probe's answer, in [`KNOWN_PACKAGES`]' order: its last line that is a JSON object. A name it
+/// didn't mention, or a version that isn't a short string, counts as not installed.
+pub fn parse_packages(stdout: &str) -> Option<Vec<Package>> {
+    let found: serde_json::Map<String, serde_json::Value> = stdout
+        .lines()
+        .rev()
+        .find_map(|line| serde_json::from_str(line.trim()).ok())?;
+    Some(
+        KNOWN_PACKAGES
+            .iter()
+            .map(|name| Package {
+                name: (*name).to_string(),
+                version: found
+                    .get(*name)
+                    .and_then(|v| v.as_str())
+                    .filter(|v| !v.is_empty() && v.len() <= 40)
+                    .map(str::to_string),
+            })
+            .collect(),
+    )
+}
+
+/// Which of [`KNOWN_PACKAGES`] `python` has, and their versions.
+pub async fn packages(python: &Path) -> Result<Vec<Package>, String> {
+    let mut cmd = command(python);
+    cmd.args(["-I", "-c", &packages_code()]);
+    let out = tokio::time::timeout(PROBE_TIMEOUT, cmd.output())
+        .await
+        .map_err(|_| "Python took too long to list its packages.".to_string())?
+        .map_err(|e| format!("Couldn't start Python: {e}"))?;
+    if !out.status.success() {
+        return Err("Python couldn't list its packages.".into());
+    }
+    parse_packages(&String::from_utf8_lossy(&out.stdout))
+        .ok_or_else(|| "Python's list of packages couldn't be read.".into())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum State {
@@ -278,6 +348,46 @@ pub async fn setup(paths: &Paths, custom: Option<&Path>, emit: Emit) -> Result<(
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn the_package_probe_reads_its_last_json_line_in_a_fixed_order() {
+        let got = parse_packages(
+            "a site hook printed this\n{\"pandas\": \"2.2.3\", \"numpy\": \"2.1.0\", \"matplotlib\": null, \"evil\": \"1\"}\r\n",
+        )
+        .unwrap();
+        assert_eq!(got.len(), KNOWN_PACKAGES.len());
+        assert_eq!(
+            got[0],
+            Package {
+                name: "pandas".into(),
+                version: Some("2.2.3".into())
+            }
+        );
+        assert_eq!(got[1].version.as_deref(), Some("2.1.0"));
+        assert_eq!(got[2].version, None);
+        assert!(got.iter().all(|p| p.name != "evil"));
+        assert!(parse_packages("Traceback…").is_none());
+    }
+
+    #[test]
+    fn the_package_probe_is_a_fixed_program() {
+        let code = packages_code();
+        for name in KNOWN_PACKAGES {
+            assert!(code.contains(&format!("'{name}'")), "{name}");
+        }
+        assert!(code.contains("importlib.metadata"));
+        assert!(!code.contains("import pandas"), "it reads metadata, it imports nothing");
+    }
+
+    /// Runs the probe on a real Python when there is one on PATH.
+    #[tokio::test]
+    async fn the_package_probe_runs_on_a_real_python() {
+        let Some(found) = find_system_python().await else {
+            return;
+        };
+        let got = packages(&found.path).await.unwrap();
+        assert_eq!(got.len(), KNOWN_PACKAGES.len());
+    }
 
     fn version(v: (u32, u32, u32)) -> Interpreter {
         Interpreter {

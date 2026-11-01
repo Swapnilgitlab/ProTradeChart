@@ -20,8 +20,9 @@ export function describeProgress(p: MarketDataProgress | null): string {
   return p.total > 0 ? `${PHASE_LABELS[p.phase]} · ${count(p.done)} of ${count(p.total)}` : PHASE_LABELS[p.phase];
 }
 
-/** Whether the market is loaded: a load has finished since the app opened. Memory is empty after
- *  every launch, so there is no "done" that outlives the session. */
+/** Whether the market is loaded: a load has finished since the app opened. Even with prices saved,
+ *  a launch needs a look at the broker before the market is current, so "done" never outlives the
+ *  session. */
 export const isLoaded = (s: MarketDataStatus) => s.lastUpdate !== null && s.holdings.series > 0;
 
 /** When it was last updated: a time today, else a date. */

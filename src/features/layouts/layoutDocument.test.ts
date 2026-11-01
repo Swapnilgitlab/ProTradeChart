@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkspaceState } from '@luxalgo/vela/workspace';
 import {
+  firstChartOf,
   parseLayout,
   serializeLayout,
   withChartSymbols,
@@ -235,5 +236,29 @@ describe('withChartSymbols', () => {
   it('copes with a state that has no charts', () => {
     const empty = { version: 1 } as unknown as WorkspaceState;
     expect(withChartSymbols(empty)).toBe(empty);
+  });
+});
+
+describe('firstChartOf', () => {
+  it("is a layout's first chart, alone, on the market asked for", () => {
+    const state = {
+      version: 1,
+      layout: '2x1',
+      activeCellId: 'c2',
+      charts: [
+        { id: 'c1', symbol: 'RELIANCE', timeframe: 'D', indicators: [{ type: 'sma' }] },
+        { id: 'c2', symbol: 'TCS', timeframe: '60' },
+      ],
+    } as unknown as WorkspaceState;
+    const json = serializeLayout({ version: 1, tabs: [{ symbol: 'india:NSE:RELIANCE', state }], activeTabIndex: 0 });
+    const one = firstChartOf(json, 'india:NSE:INFY', 'W')!;
+    expect(one.layout).toBe('1');
+    expect(one.activeCellId).toBe('c1');
+    expect(one.charts).toEqual([{ id: 'c1', symbol: 'india:INFY', timeframe: 'W', indicators: [{ type: 'sma' }] }]);
+  });
+
+  it('is null for a layout without a chart or that cannot be read', () => {
+    expect(firstChartOf('not json', 'india:NSE:INFY', 'D')).toBeNull();
+    expect(firstChartOf(serializeLayout(doc), 'india:NSE:INFY', 'D')).toBeNull();
   });
 });

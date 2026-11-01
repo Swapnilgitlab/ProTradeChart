@@ -47,6 +47,66 @@ pub struct WatchlistSync {
     pub total: usize,
 }
 
+/// A `POST /v1/sql` request (`pt.sql`): the SQL, its parameters (a list for `?`, an object for
+/// `:name`) and whether to roll it back.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SqlPost {
+    pub sql: String,
+    #[serde(default)]
+    pub params: Option<serde_json::Value>,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// A `POST /v1/email` request (`pt.send_email`). There is no recipient: it goes to the user's own
+/// address.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailPost {
+    pub subject: String,
+    #[serde(default)]
+    pub body: String,
+    #[serde(default)]
+    pub attachments: Vec<AttachmentPost>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentPost {
+    pub name: String,
+    #[serde(default)]
+    pub content_type: Option<String>,
+    /// The file's bytes, base64.
+    pub data: String,
+}
+
+/// A `POST /v1/screenshot` request (`pt.screenshot`): a chart the app draws and returns as a PNG.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenshotPost {
+    pub symbol: String,
+    #[serde(default = "daily")]
+    pub timeframe: String,
+    /// A saved layout whose first chart styles it (indicators, chart type), by name.
+    #[serde(default)]
+    pub layout: Option<String>,
+    #[serde(default = "default_width")]
+    pub width: u32,
+    #[serde(default = "default_height")]
+    pub height: u32,
+}
+
+fn daily() -> String {
+    "D".into()
+}
+fn default_width() -> u32 {
+    1280
+}
+fn default_height() -> u32 {
+    720
+}
+
 /// A `POST /v1/snapshot` request: the symbols whose day to quote.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct SnapshotPost {

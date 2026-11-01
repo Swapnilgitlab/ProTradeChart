@@ -1,12 +1,14 @@
 //! One run of "Keep the market loaded": record the listing, read into memory the history it
-//! doesn't hold yet (everything, the first time after launch; a new listing's, later), then bring
-//! every series up to the latest settled session from the batched quote. A series the quote can't
-//! update is read again whole, which costs Kite the same single request as its missing tail and
-//! can never mix prices from before and after a split.
+//! doesn't hold yet (everything, the first time after launch unless the prices are saved; a new
+//! listing's, later), then bring every series up to the latest settled session from the batched
+//! quote. A series the quote can't update is read from its last final bar; if the broker's copy of
+//! that bar has changed (a split), `load_bars` reads the whole series again, so prices from before
+//! and after a split are never mixed.
 //!
 //! The broker sits behind the Python API's own [`Fetcher`] and [`Snapshots`], so a run reuses
 //! `load_bars` (coverage-aware reads) and `sync_daily` (the quote top-up), and is tested here with
-//! a fake broker. Bars go to memory only; the database lock is never held across an await.
+//! a fake broker. Bars go to memory (and the saved prices behind it, when the user keeps them); the
+//! database lock is never held across an await.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -35,7 +37,7 @@ pub enum Phase {
     History,
     /// The batched quote top-up of every series' latest bar.
     Prices,
-    /// Series the quote couldn't update, read again whole.
+    /// Series the quote couldn't update, read from the broker.
     Corrections,
 }
 
@@ -56,7 +58,8 @@ pub struct Summary {
     pub loaded: usize,
     /// Series brought up to date from the quote.
     pub updated: usize,
-    /// Series the quote couldn't update, read again whole (a split or bonus among them).
+    /// Series the quote couldn't update, read from the broker (a split or bonus among them, read
+    /// again whole).
     pub reloaded: usize,
     pub failed: usize,
     pub holiday: bool,
@@ -179,7 +182,6 @@ pub async fn run(
             done: i,
             total: stale.len(),
         });
-        memory.forget(symbol, D);
         match load(memory, broker, symbol, from, now).await {
             Ok(()) => summary.reloaded += 1,
             Err(e) if fatal(&e) => return Err(e),
@@ -243,7 +245,7 @@ mod tests {
     use super::*;
     use crate::market::ist_day_start;
     use crate::models::{Bar, DaySnapshot};
-    use crate::pyapi::data::Fetched;
+    use crate::pyapi::data::{Fetched, Quoted};
     use futures::future::BoxFuture;
     use std::collections::{HashMap, HashSet};
     use std::sync::Mutex;
@@ -340,7 +342,11 @@ mod tests {
                         }
                     })
                     .collect();
-                Ok(Fetched { bars, from_ms: from })
+                Ok(Fetched {
+                    bars,
+                    from_ms: from,
+                    served_by: None,
+                })
             })
         }
     }
@@ -350,12 +356,12 @@ mod tests {
             &'a self,
             provider: &'a str,
             tickers: &'a [String],
-        ) -> BoxFuture<'a, Result<Vec<Option<DaySnapshot>>, ApiError>> {
+        ) -> BoxFuture<'a, Result<Quoted, ApiError>> {
             Box::pin(async move {
                 // On a holiday the quote is still the last session's.
                 let last = *self.last_day.lock().unwrap();
                 let traded = self.sessions(last - 10 * DAY_MS, last);
-                Ok(tickers
+                let days = tickers
                     .iter()
                     .map(|t| {
                         let symbol = format!("{provider}:{t}");
@@ -376,7 +382,8 @@ mod tests {
                             traded_at_ms: Some(session + 15 * HOUR_MS),
                         })
                     })
-                    .collect())
+                    .collect();
+                Ok(Quoted { served_by: None, days })
             })
         }
     }
@@ -448,6 +455,10 @@ mod tests {
         assert_eq!((next.loaded, next.updated, next.reloaded), (0, 3, 0));
         assert!(fake.fetched().is_empty(), "no probe and no per-symbol history read");
         assert_eq!(close_on(&w, B, at(1, 0)), Some(fake.price(B, at(1, 0))));
+        assert!(
+            w.memory.coverage(A, D).unwrap().from_ms <= history_from(at(0, 17)),
+            "the next day's quote extends the history held, never replaces it"
+        );
     }
 
     #[tokio::test]
@@ -486,6 +497,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn with_saved_prices_a_relaunch_reads_nothing_again() {
+        use crate::prices::SavedPrices;
+        let dir = std::env::temp_dir().join(format!("protrade-job-saved-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let w = world();
+        let fake = Fake::new(&[(A, 100.0), (B, 50.0)], at(0, 0));
+        {
+            let saved = SavedPrices::new(dir.clone());
+            saved.sync(&w.memory, true);
+            update(&w, &fake, &[eq(A), eq(B)], at(0, 17)).await.unwrap();
+            saved.close();
+        }
+        fake.fetched();
+
+        let relaunched = World {
+            db: w.db,
+            memory: BarMemory::default(),
+        };
+        let saved = SavedPrices::new(dir.clone());
+        saved.sync(&relaunched.memory, true);
+        let again = update(&relaunched, &fake, &[eq(A), eq(B)], at(0, 18)).await.unwrap();
+        assert_eq!((again.loaded, again.reloaded), (0, 0));
+        assert!(fake.fetched().is_empty(), "nothing asked of the broker");
+        assert_eq!(close_on(&relaunched, A, at(-28, 0)), Some(fake.price(A, at(-28, 0))));
+        saved.close();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn a_new_listing_is_loaded_on_the_day_it_appears() {
         let w = world();
         let fake = Fake::new(&[(A, 100.0), (B, 50.0)], at(0, 0));
@@ -520,16 +560,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_missed_week_is_read_again_whole() {
+    async fn a_missed_week_is_read_from_the_last_bar_held() {
         let w = world();
         let fake = Fake::new(&[(A, 100.0)], at(0, 0));
         update(&w, &fake, &[eq(A)], at(0, 17)).await.unwrap();
+        let from = w.memory.coverage(A, D).unwrap().from_ms;
 
         // A week left open without an update: the quote can't fill five sessions.
         *fake.last_day.lock().unwrap() = at(7, 0);
         let next = update(&w, &fake, &[eq(A)], at(7, 17)).await.unwrap();
         assert_eq!(next.reloaded, 1);
         assert_eq!(close_on(&w, A, at(3, 0)), Some(fake.price(A, at(3, 0))));
+        assert_eq!(
+            w.memory.coverage(A, D).unwrap().from_ms,
+            from,
+            "the history held is kept"
+        );
     }
 
     #[tokio::test]

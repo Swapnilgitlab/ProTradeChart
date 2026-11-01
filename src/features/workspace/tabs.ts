@@ -48,8 +48,14 @@ export interface ScreenerTab {
   id: string;
 }
 
+/** The Scheduler: sequences of Python scripts that run by themselves. At most one is open. */
+export interface SchedulerTab {
+  kind: 'scheduler';
+  id: string;
+}
+
 /** A tab that isn't a chart: a workspace with no symbol of its own. */
-export type WorkspaceTab = HomeTab | PineTab | PythonTab | StudiesTab | ScreenerTab;
+export type WorkspaceTab = HomeTab | PineTab | PythonTab | StudiesTab | ScreenerTab | SchedulerTab;
 
 /** What a workspace tab is called, in the tab bar and wherever else it is named. */
 export const WORKSPACE_LABELS: Record<WorkspaceTab['kind'], string> = {
@@ -58,6 +64,7 @@ export const WORKSPACE_LABELS: Record<WorkspaceTab['kind'], string> = {
   python: 'Python',
   studies: 'Studies',
   screener: 'Screener',
+  scheduler: 'Scheduler',
 };
 
 export type Tab = ChartTab | WorkspaceTab;
@@ -79,6 +86,9 @@ export const studiesTab = (tabs: readonly Tab[]): StudiesTab | undefined =>
 
 export const screenerTab = (tabs: readonly Tab[]): ScreenerTab | undefined =>
   tabs.find((t): t is ScreenerTab => t.kind === 'screener');
+
+export const schedulerTab = (tabs: readonly Tab[]): SchedulerTab | undefined =>
+  tabs.find((t): t is SchedulerTab => t.kind === 'scheduler');
 
 /** The open workspaces, in tab order: what a loaded layout leaves in place beside its charts. */
 export const workspaceTabs = (tabs: readonly Tab[]): WorkspaceTab[] => tabs.filter((t): t is WorkspaceTab => !isChartTab(t));

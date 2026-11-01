@@ -26,8 +26,11 @@ volunteer project, so please allow some time.
   kept in the app's database **unencrypted**, and the app says so. Access tokens are short-lived (Zerodha's last until about 6 AM the next
   morning), but treat one like a password: anyone holding it can read your account's market data. Zerodha's API secret is only
   used on this computer, to sign the login; it is never sent anywhere.
+- **Email.** If you set up *Email settings* (Scheduler tab), your SMTP password is kept the same way, used only by the Rust
+  backend to send mail through your own account, and only ever to your own address — a script can't choose a recipient.
 - Your layouts, watchlists and imported data are stored **unencrypted** in a SQLite file in your user
-  profile (the *About* dialog shows the path). Treat it like any other document of yours.
+  profile (the *About* dialog shows the path), and so are your broker's prices if you switch on *Save prices on this
+  computer* (one file beside it). Treat them like any other document of yours.
 - The web view runs with a restrictive Content-Security-Policy and only the Tauri permissions it uses; see
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#security-model).
 

@@ -119,8 +119,9 @@ export function PythonSettings({ env, onEnvChanged, say }: Props) {
           {stats ? `${stats.bars.toLocaleString()} bars across ${stats.series.toLocaleString()} series.` : 'Not available.'}
         </div>
         <div className="muted small">
-          Held while the app is open, so a screen over many symbols only asks your broker for what is new. Never saved on this
-          computer: it is cleared when the app closes.
+          Held while the app is open, so a screen over many symbols only asks your broker for what is new. Cleared when the
+          app closes, unless prices are saved on this computer (Data providers → Saved prices): then Clear it frees the
+          memory and the saved prices stay.
         </div>
         <button type="button" className="btn pine-btn" disabled={!stats || stats.bars === 0} onClick={() => void clearData()}>
           Clear it

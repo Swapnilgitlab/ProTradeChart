@@ -7,6 +7,7 @@
 //! so a rate-limit answer is not retried quickly, as Kite's is: the client waits for the next minute
 //! and tries once more, then gives up.
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -18,8 +19,9 @@ use super::instruments::{Instrument, MASTERS};
 use super::protocol::history_query;
 use super::protocol::{
     app_id_hash, classify_error, is_failure_body, parse_candles, parse_day_snapshots, parse_profile, parse_quotes,
-    parse_session, parse_ticks, plan_windows, quotes_query, refresh_body, validate_authcode_body, FyersError,
-    FyersErrorKind, Interval, Plan, QuoteTick, Session, API_URL, DATA_URL, QUOTE_BATCH, SYMBOL_MASTER_URL,
+    parse_session, parse_ticks, plan_windows, quotes_query, refresh_body, starts_before_history,
+    validate_authcode_body, FyersError, FyersErrorKind, Interval, Plan, QuoteTick, Session, API_URL, DATA_URL,
+    QUOTE_BATCH, SYMBOL_MASTER_URL,
 };
 use crate::db::now_ms;
 use crate::models::{Bar, DaySnapshot, Quote};
@@ -61,6 +63,9 @@ pub struct FyersClient {
     data: Throttle,
     plan: Mutex<Plan>,
     budget: Mutex<Budget>,
+    /// Per exchange and interval, the latest window start FYERS refused as older than its history:
+    /// a window starting no later is never asked for again this session.
+    history_floor: Mutex<HashMap<(String, Interval), i64>>,
 }
 
 fn network(e: reqwest::Error) -> FyersError {
@@ -86,6 +91,7 @@ impl FyersClient {
             endpoints,
             plan: Mutex::new(plan),
             budget: Mutex::new(Budget::default()),
+            history_floor: Mutex::new(HashMap::new()),
         }
     }
 
@@ -158,13 +164,27 @@ impl FyersClient {
                 sleep(wait).await;
                 continue;
             }
+            if failed {
+                // FYERS's refusals ("Invalid input") rarely say which parameter they mean, so keep
+                // what was asked beside them. The query is symbols and dates; the token is a header.
+                let asked: Vec<String> = query.iter().map(|(k, v)| format!("{k}={v}")).collect();
+                log::warn!(
+                    "FYERS refused {path}?{} (HTTP {status}): {}",
+                    asked.join("&"),
+                    text.chars().take(500).collect::<String>()
+                );
+            }
             return Ok((status, value));
         }
         unreachable!("the loop always returns on its last attempt")
     }
 
-    /// Bars for `[from, to]`. A range longer than FYERS allows in one request is split into windows
-    /// and stitched back together.
+    /// Bars for `[from, to]`, and where they really begin. A range longer than FYERS allows in one
+    /// request is split into windows, read newest first. A window that starts before the oldest data
+    /// FYERS holds is refused whole, so the first refusal ends the read: every older window would be
+    /// refused too. The bars are then said to begin where the oldest window served began, not the
+    /// refused one, which can still span days after the cutoff: a series may start a little late,
+    /// but never claims days it doesn't hold.
     pub async fn fetch_history(
         &self,
         creds: &Credentials,
@@ -173,16 +193,31 @@ impl FyersClient {
         from_ms: Option<i64>,
         to_ms: Option<i64>,
         now_ms: i64,
-    ) -> Result<Vec<Bar>, FyersError> {
+    ) -> Result<(Vec<Bar>, i64), FyersError> {
+        let windows = plan_windows(interval, from_ms, to_ms, now_ms);
+        let floor_key = (inst.exchange.clone(), interval);
+        let floor = self.history_floor.lock().ok().and_then(|f| f.get(&floor_key).copied());
+        let mut began = windows.last().map_or(from_ms.unwrap_or(now_ms), |w| w.to_ms);
         let mut bars: Vec<Bar> = Vec::new();
-        for window in plan_windows(interval, from_ms, to_ms, now_ms) {
+        for window in windows.into_iter().rev() {
+            if floor.is_some_and(|f| window.from_ms <= f) {
+                break;
+            }
             let query = history_query(inst, interval, window);
             let (status, body) = self.get_data("/history", &query, creds).await?;
+            if starts_before_history(&body) {
+                if let Ok(mut f) = self.history_floor.lock() {
+                    let seen = f.entry(floor_key).or_insert(window.from_ms);
+                    *seen = (*seen).max(window.from_ms);
+                }
+                break;
+            }
             bars.extend(parse_candles(status, &body)?);
+            began = window.from_ms;
         }
         bars.sort_by_key(|b| b.time);
         bars.dedup_by_key(|b| b.time);
-        Ok(bars)
+        Ok((bars, began))
     }
 
     async fn quote_batches(&self, creds: &Credentials, batch: &[Instrument]) -> Result<(u16, Value), FyersError> {
@@ -453,17 +488,20 @@ mod tests {
         let candles = |t: i64| json!({"s":"ok","candles":[[t, 1.0, 2.0, 0.5, 1.5, 100]]}).to_string();
         let (base, log) = mock(vec![(200, candles(1_000)), (200, candles(2_000))]).await;
         let now = 2_000_000_000_000;
-        let bars = client(&base)
+        let (bars, began) = client(&base)
             .fetch_history(&creds(), &sbin(), Interval::Day, Some(now - 500 * DAY), None, now)
             .await
             .unwrap();
         assert_eq!(bars.len(), 2);
+        assert_eq!(began, now - 500 * DAY);
         let sent = log.lock().unwrap().clone();
         assert_eq!(
             sent.len(),
             2,
             "500 days of daily bars is two requests of up to 365 days"
         );
+        let start = |r: &Recorded| r.param("range_from").unwrap().parse::<i64>().unwrap();
+        assert!(start(&sent[0]) > start(&sent[1]), "newest first");
         assert_eq!(sent[0].method, "GET");
         assert_eq!(sent[0].path(), "/data/history");
         assert_eq!(sent[0].header("authorization"), Some("APPID-100:tok"), "no Bearer");
@@ -483,6 +521,7 @@ mod tests {
             .fetch_history(&creds(), &sbin(), Interval::Day, Some(now - DAY), None, now)
             .await
             .unwrap()
+            .0
             .is_empty());
         assert_eq!(log.lock().unwrap().len(), 2);
 
@@ -493,6 +532,37 @@ mod tests {
             .unwrap_err();
         assert_eq!(e.kind, FyersErrorKind::RateLimited);
         assert_eq!(log.lock().unwrap().len(), 2, "never more than one retry");
+    }
+
+    #[tokio::test]
+    async fn history_older_than_fyers_holds_ends_the_read_and_is_not_asked_again() {
+        let candles = |t: i64| json!({"s":"ok","candles":[[t, 1.0, 2.0, 0.5, 1.5, 100]]}).to_string();
+        let too_old = json!({"code":-50,"data":{"range_from":"range_from exceeds the historical data available"},
+            "message":"Invalid input","s":"error"})
+        .to_string();
+        let now = 2_000_000_000_000;
+        let (base, log) = mock(vec![
+            (200, candles(now / 1000 - 86_400)),
+            (422, too_old),
+            (200, candles(now / 1000 - 86_400)),
+        ])
+        .await;
+        let c = client(&base);
+        // Three windows: [-1000, -635], [-635, -270] and [-270, 0] days.
+        let (creds, sbin) = (creds(), sbin());
+        let ask = || c.fetch_history(&creds, &sbin, Interval::Day, Some(now - 1000 * DAY), None, now);
+        let (bars, began) = ask().await.unwrap();
+        assert_eq!(bars.len(), 1, "what FYERS did serve is kept");
+        assert_eq!(
+            began,
+            now - 270 * DAY,
+            "the bars begin with the oldest window served, not the refused one"
+        );
+        assert_eq!(log.lock().unwrap().len(), 2, "nothing older than a refusal is asked");
+
+        let (_, began) = ask().await.unwrap();
+        assert_eq!(began, now - 270 * DAY);
+        assert_eq!(log.lock().unwrap().len(), 3, "the refused window isn't asked again");
     }
 
     #[tokio::test]

@@ -1,26 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { Indicator, PineTS } from 'pinets';
 import { PineEngine } from '@luxalgo/vela-pinets';
 import type { ExecutionRequest } from '@luxalgo/vela/plugin';
 import { buildReport, parseCommission } from './tester';
 
-/** These run the real PineTS engine (in-process) and hold the tester's derived numbers to
- *  PineTS's own ledger. They exist because the tester re-derives P&L and commission from
- *  fills: if the engine changes how it charges commission, this is where it shows. */
+/** These run the real Pine engine (in-process, the same runtime as the app's worker) and hold
+ *  the tester's derived numbers to the engine's own ledger. They exist because the tester
+ *  re-derives P&L and commission from fills: if the engine changes how it fills (it rounds
+ *  fills to the tick grid, as TradingView does) or charges commission, this is where it shows. */
 
 const DAY = 86_400_000;
 const T0 = Date.UTC(2024, 0, 1);
+
+/** Prices on a cent grid, as an exchange's are: the engine fills and marks on the tick grid. */
+const cents = (x: number) => Math.round(x * 100) / 100;
 
 function makeBars(n: number): ExecutionRequest['bars'] {
   const out: ExecutionRequest['bars'] = [];
   let prev = 100;
   for (let i = 0; i < n; i++) {
-    const close = 100 + 20 * Math.sin(i / 12) + i * 0.05 + 3 * Math.sin(i * 1.7);
+    const close = cents(100 + 20 * Math.sin(i / 12) + i * 0.05 + 3 * Math.sin(i * 1.7));
     out.push({
       time: T0 + i * DAY,
       open: prev,
-      high: Math.max(prev, close) + 1.5,
-      low: Math.min(prev, close) - 1.5,
+      high: cents(Math.max(prev, close) + 1.5),
+      low: cents(Math.min(prev, close) - 1.5),
       close,
       volume: 1000 + i,
     });
@@ -54,25 +57,6 @@ async function runViaVela(source: string) {
   return { state: ctx.strategy, trades: ctx.trades, props };
 }
 
-async function runPineTsDirect(source: string) {
-  const klines = BARS.map((b) => ({
-    openTime: b.time,
-    open: b.open,
-    high: b.high,
-    low: b.low,
-    close: b.close,
-    volume: b.volume ?? 0,
-    closeTime: b.time + DAY - 1,
-    quoteAssetVolume: 0,
-    numberOfTrades: 0,
-    takerBuyBaseAssetVolume: 0,
-    takerBuyQuoteAssetVolume: 0,
-    ignore: 0,
-  }));
-  const ctx = await new PineTS(klines, 'TEST', 'D').run(new Indicator(source));
-  return ctx.strategy!;
-}
-
 const VARIANTS: [string, string][] = [
   ['no commission, fixed size', 'default_qty_type=strategy.fixed, default_qty_value=10'],
   ['percent commission, 50% of equity', 'default_qty_type=strategy.percent_of_equity, default_qty_value=50, commission_type=strategy.commission.percent, commission_value=0.1'],
@@ -82,29 +66,36 @@ const VARIANTS: [string, string][] = [
 
 describe('tester vs the real engine', () => {
   for (const [label, declaration] of VARIANTS) {
-    it(`matches PineTS's ledger: ${label}`, async () => {
+    it(`matches the engine's ledger: ${label}`, async () => {
       const source = strategy(declaration);
-      const [viaVela, direct] = await Promise.all([runViaVela(source), runPineTsDirect(source)]);
+      const { state, trades, props } = await runViaVela(source);
       const report = buildReport({
-        state: viaVela.state,
-        trades: viaVela.trades,
+        state,
+        trades,
         bars: BARS,
-        commission: parseCommission(viaVela.props.commission_type, viaVela.props.commission_value),
+        commission: parseCommission(props.commission_type, props.commission_value),
       });
 
-      expect(report.rows.length).toBe(direct.closedtrades.length + direct.opentrades.length);
+      expect(report.rows.length).toBe(trades.length);
       expect(report.rows.length).toBeGreaterThan(2);
 
       // Per trade: our net P&L (with commission) equals the engine's.
-      const engineProfit = new Map(direct.closedtrades.map((t) => [t.entry_time, t.profit ?? NaN]));
+      const engineProfit = new Map(trades.filter((t) => !t.open).map((t) => [t.entry.time, t.pnl ?? NaN]));
       for (const row of report.rows.filter((r) => !r.open)) {
         expect(row.pnl).toBeCloseTo(engineProfit.get(row.entryTime) ?? NaN, 6);
       }
 
       // The equity curve ends where the engine says the account ended.
       const last = report.equity[report.equity.length - 1].value;
-      expect(last).toBeCloseTo(direct.equity, 6);
-      expect(report.summary.equity).toBeCloseTo(viaVela.state.equity, 6);
+      expect(last).toBeCloseTo(state.equity, 6);
+      expect(report.summary.equity).toBeCloseTo(state.equity, 6);
+
+      // Buy & hold is measured as the engine measures it, so its outperformance adds up.
+      expect(report.summary.buyHold).toBeCloseTo(state.buyHoldPnl ?? NaN, 6);
+      expect(report.summary.buyHoldPct).toBeCloseTo(state.buyHoldPct ?? NaN, 6);
+      expect(report.engine.outperformance).toBeCloseTo(state.netPnl - (state.buyHoldPnl ?? NaN), 6);
+      expect(report.buyHold[report.buyHold.length - 1].value).toBeCloseTo(state.initialCapital + (state.buyHoldPnl ?? NaN), 6);
+      for (const figure of ['cagr', 'sharpe', 'sortino'] as const) expect(report.engine[figure]).toEqual(expect.any(Number));
     });
   }
 

@@ -1,6 +1,7 @@
-//! Tauri commands for scheduled scripts: the schedules and their history (`store/schedules.rs`),
-//! and running or stopping one by hand. A schedule is made only here, by the user in the Python
-//! tab; nothing else — not Ask AI, not a script — can create one. The engine is `scheduler/`.
+//! Tauri commands for scheduled sequences of scripts: the schedules and their history
+//! (`store/schedules.rs`), and running or stopping one by hand. A schedule is made only here, by
+//! the user in the Scheduler tab; nothing else — not Ask AI, not a script — can create one. The
+//! engine is `scheduler/`.
 
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -9,7 +10,7 @@ use crate::python::{scripts, PythonState};
 use crate::python_commands::{paths, python_stop};
 use crate::scheduler::engine::{self, CHANGED_EVENT};
 use crate::scheduler::plan::Rule;
-use crate::store::schedules::{self, Schedule, ScheduleRun, KEEP_RUNS};
+use crate::store::schedules::{self, Schedule, ScheduleRun, ScheduleSpec, KEEP_RUNS};
 
 fn sql<T>(result: rusqlite::Result<T>) -> Result<T, String> {
     result.map_err(|e| e.to_string())
@@ -20,13 +21,17 @@ pub fn list_schedules(db: State<Database>) -> Result<Vec<Schedule>, String> {
     sql(schedules::list(&*db.conn.lock().map_err(|e| e.to_string())?))
 }
 
-/// Creates or changes a schedule. Its script must exist; a schedule switched on is planned from now.
+/// Creates or changes a schedule. Each of its scripts must exist; a schedule switched on is
+/// planned from now.
 #[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
 pub fn save_schedule(
     id: String,
-    script: String,
+    name: String,
+    scripts: Vec<String>,
     rule: Rule,
     enabled: bool,
+    email_on_failure: bool,
     app: AppHandle,
     db: State<Database>,
 ) -> Result<(), String> {
@@ -34,18 +39,20 @@ pub fn save_schedule(
         return Err("That isn't a schedule id.".into());
     }
     let paths = paths(&app)?;
-    scripts::path_of(&paths.scripts, &script)?;
-    if !scripts::exists(&paths.scripts, &script) {
-        return Err(format!("There is no script called {script}."));
+    for script in &scripts {
+        scripts::path_of(&paths.scripts, script)?;
+        if !scripts::exists(&paths.scripts, script) {
+            return Err(format!("There is no script called {script}."));
+        }
     }
-    schedules::save(
-        &*db.conn.lock().map_err(|e| e.to_string())?,
-        &id,
-        &script,
-        &rule,
+    let spec = ScheduleSpec {
+        name: &name,
+        scripts: &scripts,
+        rule: &rule,
         enabled,
-        now_ms(),
-    )?;
+        email_on_failure,
+    };
+    schedules::save(&*db.conn.lock().map_err(|e| e.to_string())?, &id, &spec, now_ms())?;
     let _ = app.emit(CHANGED_EVENT, ());
     Ok(())
 }
@@ -68,9 +75,9 @@ pub fn list_schedule_runs(schedule_id: String, db: State<Database>) -> Result<Ve
     ))
 }
 
-/// Runs a schedule's script now, as its schedule would (recorded in its history). The user's press.
-#[tauri::command]
-pub async fn run_schedule_now(id: String, app: AppHandle, db: State<'_, Database>) -> Result<(), String> {
+/// Runs a schedule's scripts now, as its schedule would (recorded in its history). The user's press.
+#[tauri::command(async)]
+pub fn run_schedule_now(id: String, app: AppHandle, db: State<Database>) -> Result<(), String> {
     let schedule = {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
         if sql(schedules::is_running(&conn, &id))? {
@@ -78,19 +85,21 @@ pub async fn run_schedule_now(id: String, app: AppHandle, db: State<'_, Database
         }
         sql(schedules::get(&conn, &id))?.ok_or("That schedule no longer exists.")?
     };
-    engine::launch(&app, &schedule.id, &schedule.script, now_ms()).await;
+    engine::launch(&app, schedule, now_ms())?;
+    let _ = app.emit(CHANGED_EVENT, ());
     Ok(())
 }
 
-/// Stops the running run of a schedule, if there is one.
+/// Stops the script a schedule's run is going through, which ends the run (the scripts after it
+/// aren't run).
 #[tauri::command(async)]
 pub fn stop_schedule_run(id: String, app: AppHandle, db: State<Database>) -> Result<(), String> {
     let running = {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
-        sql(schedules::runs(&conn, &id, KEEP_RUNS))?
-            .into_iter()
-            .filter(|r| r.status == "running")
-            .find_map(|r| r.run_id)
+        if sql(schedules::is_running(&conn, &id))? {
+            engine::request_stop(&id);
+        }
+        sql(schedules::running_script(&conn, &id))?
     };
     match running {
         Some(run_id) => python_stop(run_id, app.state::<PythonState>()),

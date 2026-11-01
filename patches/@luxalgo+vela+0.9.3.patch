@@ -1,87 +1,54 @@
-diff --git a/node_modules/@luxalgo/vela/dist/chunk-BKHSQ4YM.js b/node_modules/@luxalgo/vela/dist/chunk-BKHSQ4YM.js
-index 21d5c75..5eeebaa 100644
---- a/node_modules/@luxalgo/vela/dist/chunk-BKHSQ4YM.js
-+++ b/node_modules/@luxalgo/vela/dist/chunk-BKHSQ4YM.js
-@@ -307,7 +307,17 @@ var Surface = class _Surface {
-       items: [],
-       id: opts.id,
-       placement: opts.placement,
--      onSelect: (id) => this.onSelect(id),
-+      onSelect: (id) => {
-+        // ProTradeChart patch: a checkbox item keeps the menu open, so it flips at once.
-+        const hit = this.items?.find((i) => i.id === id && i.checkbox);
-+        if (hit) {
-+          hit.checked = !hit.checked;
-+          const row = [...this.list.children].find((el) => el.dataset.veiId === id);
-+          row?.querySelector(".vela-menu-checkbox")?.classList.toggle("on", hit.checked);
-+          row?.setAttribute("aria-checked", hit.checked ? "true" : "false");
-+        }
-+        this.onSelect(id);
-+      },
-       getAnchorRect: () => this.pinnedAnchor,
-       onOpenChange: (open2) => {
-         if (open2 && trigger) {
-@@ -367,7 +377,7 @@ var Surface = class _Surface {
-         continue;
-       }
-       const item = this.byId(id);
--      spreadProps(li, api.getItemProps({ value: id, disabled: item?.disabled, closeOnSelect: item?.toggle ? false : void 0 }), this.mid);
-+      spreadProps(li, api.getItemProps({ value: id, disabled: item?.disabled, closeOnSelect: item?.toggle || item?.checkbox ? false : void 0 }), this.mid);
-     }
-   }
-   build() {
-@@ -388,7 +398,17 @@ var Surface = class _Surface {
-       if (item.toggle) {
-         li.dataset.toggle = "1";
-       }
--      if (markable) {
-+      if (item.checkbox) {
-+        // ProTradeChart patch: a checkbox item — an empty or ticked box in the mark column.
-+        const box = doc.createElement("span");
-+        box.className = "vela-menu-checkbox" + (item.checked ? " on" : "");
-+        box.setAttribute("aria-hidden", "true");
-+        box.appendChild(iconEl("check", doc));
-+        li.dataset.checkbox = "1";
-+        li.setAttribute("role", "menuitemcheckbox");
-+        li.setAttribute("aria-checked", item.checked ? "true" : "false");
-+        li.appendChild(box);
-+      } else if (markable) {
-         const mark = doc.createElement("span");
-         mark.className = "vela-menu-mark";
-         if (!branch && !item.toggle && item.checked) {
-diff --git a/node_modules/@luxalgo/vela/dist/chunk-EMB53WNQ.js b/node_modules/@luxalgo/vela/dist/chunk-EMB53WNQ.js
-index a58af1d..a3eb341 100644
---- a/node_modules/@luxalgo/vela/dist/chunk-EMB53WNQ.js
-+++ b/node_modules/@luxalgo/vela/dist/chunk-EMB53WNQ.js
-@@ -4830,12 +4830,18 @@ var ChartContextMenu = class {
+diff --git a/node_modules/@luxalgo/vela/dist/chunk-BDVUH2Y7.js b/node_modules/@luxalgo/vela/dist/chunk-BDVUH2Y7.js
+index 6c2f07c..0ae0276 100644
+--- a/node_modules/@luxalgo/vela/dist/chunk-BDVUH2Y7.js
++++ b/node_modules/@luxalgo/vela/dist/chunk-BDVUH2Y7.js
+@@ -10072,7 +10072,9 @@ var DrawingSceneRenderer = class {
+ // src/renderers/native/chrome/tz.ts
+ var DAY_MS = 864e5;
+ function displayZone(timeZone, barIntervalMs) {
+-  return barIntervalMs >= DAY_MS ? "UTC" : timeZone;
++  // ProTradeChart patch: daily-and-up bars are stamped at local midnight of their date, so their
++  // date reads in the chart's own zone, not UTC.
++  return timeZone;
+ }
+ function tzOffsetMs(ms, timeZone) {
+   return zoneOffsetMs(ms, timeZone);
+diff --git a/node_modules/@luxalgo/vela/dist/chunk-FAKYUVNT.js b/node_modules/@luxalgo/vela/dist/chunk-FAKYUVNT.js
+index 57fad7a..699ab57 100644
+--- a/node_modules/@luxalgo/vela/dist/chunk-FAKYUVNT.js
++++ b/node_modules/@luxalgo/vela/dist/chunk-FAKYUVNT.js
+@@ -5351,10 +5351,23 @@ var ChartContextMenu = class {
+     });
    }
    contributed(zone) {
-     const ctx = this.cbs.getContext?.();
--    return widgetActions(`context:${zone}`, ctx).map((a, i) => ({
--      id: `action:${a.id}`,
--      label: a.label,
--      icon: a.icon,
--      separatorBefore: i === 0
+-    return widgetActions(`context:${zone}`, this.context()).map((a) => ({
+-      item: { id: `action:${a.id}`, label: textOf(this.chart?.i18n, a.label), icon: a.icon },
+-      order: a.order
 -    }));
-+    return widgetActions(`context:${zone}`, ctx).map((a, i) => {
-+      // ProTradeChart patch: an action may carry a submenu — `submenu(ctx)` returns its items
-+      // ({ id, label, checked?, disabled?, separatorBefore? }) and `runItem(ctx, id)` runs the one picked.
++    const ctx = this.context();
++    return widgetActions(`context:${zone}`, ctx).map((a) => {
++      // ProTradeChart patch: an action may name itself from the chart (`labelFor(ctx)`) and carry a
++      // submenu: `submenu(ctx)` returns its items ({ id, label, checked?, checkbox?, disabled?,
++      // separatorBefore? }) and `runItem(ctx, id)` runs the one picked.
 +      const sub = typeof a.submenu === "function" && ctx ? a.submenu(ctx) : null;
++      const label = typeof a.labelFor === "function" && ctx ? a.labelFor(ctx) : a.label;
 +      return {
-+        id: `action:${a.id}`,
-+        label: typeof a.labelFor === "function" && ctx ? a.labelFor(ctx) : a.label,
-+        icon: a.icon,
-+        separatorBefore: i === 0,
-+        ...Array.isArray(sub) && sub.length > 0 ? { submenu: sub.map((s) => ({ id: `action:${a.id}::${s.id}`, label: s.label, checked: s.checked, checkbox: s.checkbox, disabled: s.disabled, separatorBefore: s.separatorBefore })) } : {}
++        item: {
++          id: `action:${a.id}`,
++          label: textOf(this.chart?.i18n, label),
++          icon: a.icon,
++          ...Array.isArray(sub) && sub.length > 0 ? { submenu: sub.map((s) => ({ id: `action:${a.id}::${s.id}`, label: textOf(this.chart?.i18n, s.label), checked: s.checked, checkbox: s.checkbox, disabled: s.disabled, separatorBefore: s.separatorBefore })) } : {}
++        },
++        order: a.order
 +      };
 +    });
    }
    itemsFor(zone) {
-     if (zone === "price-axis") {
-@@ -4871,7 +4877,14 @@ var ChartContextMenu = class {
+     return composeMenu(zone, this.builtinItems(zone), this.contributed(zone));
+@@ -5390,7 +5403,14 @@ var ChartContextMenu = class {
      if (!chart) return;
      if (id.startsWith("action:")) {
-       const ctx = this.cbs.getContext?.();
+       const ctx = this.context();
 -      if (ctx) widgetActions(`context:${this.lastZone}`, ctx).find((a) => a.id === id.slice("action:".length))?.run(ctx);
 +      if (ctx) {
 +        // ProTradeChart patch: `action:<id>::<item>` is an item of that action's submenu.
@@ -94,26 +61,11 @@ index a58af1d..a3eb341 100644
        return;
      }
      if (id.startsWith("toggle:")) {
-diff --git a/node_modules/@luxalgo/vela/dist/chunk-JSVCWYBF.js b/node_modules/@luxalgo/vela/dist/chunk-JSVCWYBF.js
-index 9cf23dc..f7ec646 100644
---- a/node_modules/@luxalgo/vela/dist/chunk-JSVCWYBF.js
-+++ b/node_modules/@luxalgo/vela/dist/chunk-JSVCWYBF.js
-@@ -16877,8 +16877,8 @@ function createProjector(coords, paneOf, paneIdAtY, barsInRange, seriesInRange)
- }
- 
- // src/renderers/native/core/autoscale.ts
--var MARGIN_TOP = 2 / 7;
--var MARGIN_BOTTOM = 1 / 7;
-+var MARGIN_TOP = 1 / 10;
-+var MARGIN_BOTTOM = 1 / 10;
- function computePaneScale(models, bars, includeCandles, i0, i1, drawings, log = false, offsetOf = () => 0) {
-   let min = Infinity;
-   let max = -Infinity;
-diff --git a/node_modules/@luxalgo/vela/dist/index.cjs b/node_modules/@luxalgo/vela/dist/index.cjs
-index 52d3494..0dfc13a 100644
---- a/node_modules/@luxalgo/vela/dist/index.cjs
-+++ b/node_modules/@luxalgo/vela/dist/index.cjs
-@@ -11282,7 +11282,17 @@ var Surface = class _Surface {
+diff --git a/node_modules/@luxalgo/vela/dist/chunk-PZN4RS4T.js b/node_modules/@luxalgo/vela/dist/chunk-PZN4RS4T.js
+index 4b8e11d..fa57b71 100644
+--- a/node_modules/@luxalgo/vela/dist/chunk-PZN4RS4T.js
++++ b/node_modules/@luxalgo/vela/dist/chunk-PZN4RS4T.js
+@@ -364,7 +364,17 @@ var Surface = class _Surface {
        items: [],
        id: opts.id,
        placement: opts.placement,
@@ -132,16 +84,16 @@ index 52d3494..0dfc13a 100644
        getAnchorRect: () => this.pinnedAnchor,
        onOpenChange: (open2) => {
          if (open2 && trigger) {
-@@ -11342,7 +11352,7 @@ var Surface = class _Surface {
+@@ -448,7 +458,7 @@ var Surface = class _Surface {
          continue;
        }
        const item = this.byId(id);
--      vanilla.spreadProps(li, api.getItemProps({ value: id, disabled: item?.disabled, closeOnSelect: item?.toggle ? false : void 0 }), this.mid);
-+      vanilla.spreadProps(li, api.getItemProps({ value: id, disabled: item?.disabled, closeOnSelect: item?.toggle || item?.checkbox ? false : void 0 }), this.mid);
+-      spreadProps(li, api.getItemProps({ value: id, disabled: item?.disabled, closeOnSelect: item?.toggle ? false : void 0 }), this.mid);
++      spreadProps(li, api.getItemProps({ value: id, disabled: item?.disabled, closeOnSelect: item?.toggle || item?.checkbox ? false : void 0 }), this.mid);
      }
    }
    build() {
-@@ -11363,7 +11373,17 @@ var Surface = class _Surface {
+@@ -473,7 +483,17 @@ var Surface = class _Surface {
        if (item.toggle) {
          li.dataset.toggle = "1";
        }
@@ -160,22 +112,11 @@ index 52d3494..0dfc13a 100644
          const mark = doc.createElement("span");
          mark.className = "vela-menu-mark";
          if (!branch && !item.toggle && item.checked) {
-@@ -28220,8 +28240,8 @@ function createProjector(coords, paneOf, paneIdAtY, barsInRange, seriesInRange)
- }
- 
- // src/renderers/native/core/autoscale.ts
--var MARGIN_TOP = 2 / 7;
--var MARGIN_BOTTOM = 1 / 7;
-+var MARGIN_TOP = 1 / 10;
-+var MARGIN_BOTTOM = 1 / 10;
- function computePaneScale(models, bars, includeCandles, i0, i1, drawings, log = false, offsetOf = () => 0) {
-   let min = Infinity;
-   let max = -Infinity;
-diff --git a/node_modules/@luxalgo/vela/dist/ui.cjs b/node_modules/@luxalgo/vela/dist/ui.cjs
-index 8735ee8..eefe3b7 100644
---- a/node_modules/@luxalgo/vela/dist/ui.cjs
-+++ b/node_modules/@luxalgo/vela/dist/ui.cjs
-@@ -793,7 +793,17 @@ var Surface = class _Surface {
+diff --git a/node_modules/@luxalgo/vela/dist/index.cjs b/node_modules/@luxalgo/vela/dist/index.cjs
+index 17a1992..15866a0 100644
+--- a/node_modules/@luxalgo/vela/dist/index.cjs
++++ b/node_modules/@luxalgo/vela/dist/index.cjs
+@@ -14078,7 +14078,17 @@ var Surface = class _Surface {
        items: [],
        id: opts.id,
        placement: opts.placement,
@@ -194,7 +135,7 @@ index 8735ee8..eefe3b7 100644
        getAnchorRect: () => this.pinnedAnchor,
        onOpenChange: (open2) => {
          if (open2 && trigger) {
-@@ -853,7 +863,7 @@ var Surface = class _Surface {
+@@ -14162,7 +14172,7 @@ var Surface = class _Surface {
          continue;
        }
        const item = this.byId(id);
@@ -203,7 +144,69 @@ index 8735ee8..eefe3b7 100644
      }
    }
    build() {
-@@ -874,7 +884,17 @@ var Surface = class _Surface {
+@@ -14187,7 +14197,17 @@ var Surface = class _Surface {
+       if (item.toggle) {
+         li.dataset.toggle = "1";
+       }
+-      if (markable) {
++      if (item.checkbox) {
++        // ProTradeChart patch: a checkbox item — an empty or ticked box in the mark column.
++        const box = doc.createElement("span");
++        box.className = "vela-menu-checkbox" + (item.checked ? " on" : "");
++        box.setAttribute("aria-hidden", "true");
++        box.appendChild(iconEl("check", doc));
++        li.dataset.checkbox = "1";
++        li.setAttribute("role", "menuitemcheckbox");
++        li.setAttribute("aria-checked", item.checked ? "true" : "false");
++        li.appendChild(box);
++      } else if (markable) {
+         const mark = doc.createElement("span");
+         mark.className = "vela-menu-mark";
+         if (!branch && !item.toggle && item.checked) {
+@@ -23712,7 +23732,9 @@ var DrawingSceneRenderer = class {
+ // src/renderers/native/chrome/tz.ts
+ var DAY_MS3 = 864e5;
+ function displayZone(timeZone, barIntervalMs) {
+-  return barIntervalMs >= DAY_MS3 ? "UTC" : timeZone;
++  // ProTradeChart patch: daily-and-up bars are stamped at local midnight of their date, so their
++  // date reads in the chart's own zone, not UTC.
++  return timeZone;
+ }
+ function tzOffsetMs(ms, timeZone) {
+   return zoneOffsetMs(ms, timeZone);
+diff --git a/node_modules/@luxalgo/vela/dist/ui.cjs b/node_modules/@luxalgo/vela/dist/ui.cjs
+index 6717f2b..b566329 100644
+--- a/node_modules/@luxalgo/vela/dist/ui.cjs
++++ b/node_modules/@luxalgo/vela/dist/ui.cjs
+@@ -1809,7 +1809,17 @@ var Surface = class _Surface {
+       items: [],
+       id: opts.id,
+       placement: opts.placement,
+-      onSelect: (id) => this.onSelect(id),
++      onSelect: (id) => {
++        // ProTradeChart patch: a checkbox item keeps the menu open, so it flips at once.
++        const hit = this.items?.find((i) => i.id === id && i.checkbox);
++        if (hit) {
++          hit.checked = !hit.checked;
++          const row = [...this.list.children].find((el) => el.dataset.veiId === id);
++          row?.querySelector(".vela-menu-checkbox")?.classList.toggle("on", hit.checked);
++          row?.setAttribute("aria-checked", hit.checked ? "true" : "false");
++        }
++        this.onSelect(id);
++      },
+       getAnchorRect: () => this.pinnedAnchor,
+       onOpenChange: (open2) => {
+         if (open2 && trigger) {
+@@ -1893,7 +1903,7 @@ var Surface = class _Surface {
+         continue;
+       }
+       const item = this.byId(id);
+-      vanilla.spreadProps(li, api.getItemProps({ value: id, disabled: item?.disabled, closeOnSelect: item?.toggle ? false : void 0 }), this.mid);
++      vanilla.spreadProps(li, api.getItemProps({ value: id, disabled: item?.disabled, closeOnSelect: item?.toggle || item?.checkbox ? false : void 0 }), this.mid);
+     }
+   }
+   build() {
+@@ -1918,7 +1928,17 @@ var Surface = class _Surface {
        if (item.toggle) {
          li.dataset.toggle = "1";
        }
@@ -223,10 +226,10 @@ index 8735ee8..eefe3b7 100644
          mark.className = "vela-menu-mark";
          if (!branch && !item.toggle && item.checked) {
 diff --git a/node_modules/@luxalgo/vela/dist/vela.global.js b/node_modules/@luxalgo/vela/dist/vela.global.js
-index 60156d8..bbfba75 100644
+index 3464ce3..7b590dd 100644
 --- a/node_modules/@luxalgo/vela/dist/vela.global.js
 +++ b/node_modules/@luxalgo/vela/dist/vela.global.js
-@@ -17509,7 +17509,17 @@ ${STATIC_DECLS}
+@@ -20303,7 +20303,17 @@ ${STATIC_DECLS}
          items: [],
          id: opts.id,
          placement: opts.placement,
@@ -245,7 +248,7 @@ index 60156d8..bbfba75 100644
          getAnchorRect: () => this.pinnedAnchor,
          onOpenChange: (open2) => {
            if (open2 && trigger) {
-@@ -17569,7 +17579,7 @@ ${STATIC_DECLS}
+@@ -20387,7 +20397,7 @@ ${STATIC_DECLS}
            continue;
          }
          const item = this.byId(id);
@@ -254,7 +257,7 @@ index 60156d8..bbfba75 100644
        }
      }
      build() {
-@@ -17590,7 +17600,17 @@ ${STATIC_DECLS}
+@@ -20412,7 +20422,17 @@ ${STATIC_DECLS}
          if (item.toggle) {
            li.dataset.toggle = "1";
          }
@@ -273,22 +276,22 @@ index 60156d8..bbfba75 100644
            const mark = doc.createElement("span");
            mark.className = "vela-menu-mark";
            if (!branch && !item.toggle && item.checked) {
-@@ -35636,8 +35656,8 @@ ${overlayScrollbarCss(".vela-sd-pane")}
+@@ -31126,7 +31146,9 @@ void main() {
+   // src/renderers/native/chrome/tz.ts
+   var DAY_MS3 = 864e5;
+   function displayZone(timeZone, barIntervalMs) {
+-    return barIntervalMs >= DAY_MS3 ? "UTC" : timeZone;
++    // ProTradeChart patch: daily-and-up bars are stamped at local midnight of their date, so their
++    // date reads in the chart's own zone, not UTC.
++    return timeZone;
    }
- 
-   // src/renderers/native/core/autoscale.ts
--  var MARGIN_TOP = 2 / 7;
--  var MARGIN_BOTTOM = 1 / 7;
-+  var MARGIN_TOP = 1 / 10;
-+  var MARGIN_BOTTOM = 1 / 10;
-   function computePaneScale(models, bars, includeCandles, i0, i1, drawings, log = false, offsetOf = () => 0) {
-     let min2 = Infinity;
-     let max2 = -Infinity;
+   function tzOffsetMs(ms, timeZone) {
+     return zoneOffsetMs(ms, timeZone);
 diff --git a/node_modules/@luxalgo/vela/dist/widget.cjs b/node_modules/@luxalgo/vela/dist/widget.cjs
-index 4262833..4e73db0 100644
+index d5e9cd1..e095d7d 100644
 --- a/node_modules/@luxalgo/vela/dist/widget.cjs
 +++ b/node_modules/@luxalgo/vela/dist/widget.cjs
-@@ -1690,7 +1690,17 @@ var Surface = class _Surface {
+@@ -2766,7 +2766,17 @@ var Surface = class _Surface {
        items: [],
        id: opts.id,
        placement: opts.placement,
@@ -307,7 +310,7 @@ index 4262833..4e73db0 100644
        getAnchorRect: () => this.pinnedAnchor,
        onOpenChange: (open2) => {
          if (open2 && trigger) {
-@@ -1750,7 +1760,7 @@ var Surface = class _Surface {
+@@ -2850,7 +2860,7 @@ var Surface = class _Surface {
          continue;
        }
        const item = this.byId(id);
@@ -316,7 +319,7 @@ index 4262833..4e73db0 100644
      }
    }
    build() {
-@@ -1771,7 +1781,17 @@ var Surface = class _Surface {
+@@ -2875,7 +2885,17 @@ var Surface = class _Surface {
        if (item.toggle) {
          li.dataset.toggle = "1";
        }
@@ -335,46 +338,49 @@ index 4262833..4e73db0 100644
          const mark = doc.createElement("span");
          mark.className = "vela-menu-mark";
          if (!branch && !item.toggle && item.checked) {
-@@ -34775,8 +34795,8 @@ function createProjector(coords, paneOf, paneIdAtY, barsInRange, seriesInRange)
+@@ -31855,7 +31875,9 @@ var DrawingSceneRenderer = class {
+ // src/renderers/native/chrome/tz.ts
+ var DAY_MS3 = 864e5;
+ function displayZone(timeZone, barIntervalMs) {
+-  return barIntervalMs >= DAY_MS3 ? "UTC" : timeZone;
++  // ProTradeChart patch: daily-and-up bars are stamped at local midnight of their date, so their
++  // date reads in the chart's own zone, not UTC.
++  return timeZone;
  }
- 
- // src/renderers/native/core/autoscale.ts
--var MARGIN_TOP = 2 / 7;
--var MARGIN_BOTTOM = 1 / 7;
-+var MARGIN_TOP = 1 / 10;
-+var MARGIN_BOTTOM = 1 / 10;
- function computePaneScale(models, bars, includeCandles, i0, i1, drawings, log = false, offsetOf = () => 0) {
-   let min = Infinity;
-   let max = -Infinity;
-@@ -43478,12 +43498,18 @@ var ChartContextMenu = class {
+ function tzOffsetMs(ms, timeZone) {
+   return zoneOffsetMs(ms, timeZone);
+@@ -51442,10 +51464,23 @@ var ChartContextMenu = class {
+     });
    }
    contributed(zone) {
-     const ctx = this.cbs.getContext?.();
--    return widgetActions(`context:${zone}`, ctx).map((a, i) => ({
--      id: `action:${a.id}`,
--      label: a.label,
--      icon: a.icon,
--      separatorBefore: i === 0
+-    return widgetActions(`context:${zone}`, this.context()).map((a) => ({
+-      item: { id: `action:${a.id}`, label: textOf(this.chart?.i18n, a.label), icon: a.icon },
+-      order: a.order
 -    }));
-+    return widgetActions(`context:${zone}`, ctx).map((a, i) => {
-+      // ProTradeChart patch: an action may carry a submenu — `submenu(ctx)` returns its items
-+      // ({ id, label, checked?, disabled?, separatorBefore? }) and `runItem(ctx, id)` runs the one picked.
++    const ctx = this.context();
++    return widgetActions(`context:${zone}`, ctx).map((a) => {
++      // ProTradeChart patch: an action may name itself from the chart (`labelFor(ctx)`) and carry a
++      // submenu: `submenu(ctx)` returns its items ({ id, label, checked?, checkbox?, disabled?,
++      // separatorBefore? }) and `runItem(ctx, id)` runs the one picked.
 +      const sub = typeof a.submenu === "function" && ctx ? a.submenu(ctx) : null;
++      const label = typeof a.labelFor === "function" && ctx ? a.labelFor(ctx) : a.label;
 +      return {
-+        id: `action:${a.id}`,
-+        label: typeof a.labelFor === "function" && ctx ? a.labelFor(ctx) : a.label,
-+        icon: a.icon,
-+        separatorBefore: i === 0,
-+        ...Array.isArray(sub) && sub.length > 0 ? { submenu: sub.map((s) => ({ id: `action:${a.id}::${s.id}`, label: s.label, checked: s.checked, checkbox: s.checkbox, disabled: s.disabled, separatorBefore: s.separatorBefore })) } : {}
++        item: {
++          id: `action:${a.id}`,
++          label: textOf(this.chart?.i18n, label),
++          icon: a.icon,
++          ...Array.isArray(sub) && sub.length > 0 ? { submenu: sub.map((s) => ({ id: `action:${a.id}::${s.id}`, label: textOf(this.chart?.i18n, s.label), checked: s.checked, checkbox: s.checkbox, disabled: s.disabled, separatorBefore: s.separatorBefore })) } : {}
++        },
++        order: a.order
 +      };
 +    });
    }
    itemsFor(zone) {
-     if (zone === "price-axis") {
-@@ -43519,7 +43545,14 @@ var ChartContextMenu = class {
+     return composeMenu(zone, this.builtinItems(zone), this.contributed(zone));
+@@ -51481,7 +51516,14 @@ var ChartContextMenu = class {
      if (!chart) return;
      if (id.startsWith("action:")) {
-       const ctx = this.cbs.getContext?.();
+       const ctx = this.context();
 -      if (ctx) widgetActions(`context:${this.lastZone}`, ctx).find((a) => a.id === id.slice("action:".length))?.run(ctx);
 +      if (ctx) {
 +        // ProTradeChart patch: `action:<id>::<item>` is an item of that action's submenu.
@@ -388,10 +394,10 @@ index 4262833..4e73db0 100644
      }
      if (id.startsWith("toggle:")) {
 diff --git a/node_modules/@luxalgo/vela/dist/workspace.cjs b/node_modules/@luxalgo/vela/dist/workspace.cjs
-index 1b95be0..a08ee92 100644
+index 1677124..aec99bb 100644
 --- a/node_modules/@luxalgo/vela/dist/workspace.cjs
 +++ b/node_modules/@luxalgo/vela/dist/workspace.cjs
-@@ -1690,7 +1690,17 @@ var Surface = class _Surface {
+@@ -2766,7 +2766,17 @@ var Surface = class _Surface {
        items: [],
        id: opts.id,
        placement: opts.placement,
@@ -410,7 +416,7 @@ index 1b95be0..a08ee92 100644
        getAnchorRect: () => this.pinnedAnchor,
        onOpenChange: (open2) => {
          if (open2 && trigger) {
-@@ -1750,7 +1760,7 @@ var Surface = class _Surface {
+@@ -2850,7 +2860,7 @@ var Surface = class _Surface {
          continue;
        }
        const item = this.byId(id);
@@ -419,7 +425,7 @@ index 1b95be0..a08ee92 100644
      }
    }
    build() {
-@@ -1771,7 +1781,17 @@ var Surface = class _Surface {
+@@ -2875,7 +2885,17 @@ var Surface = class _Surface {
        if (item.toggle) {
          li.dataset.toggle = "1";
        }
@@ -438,46 +444,49 @@ index 1b95be0..a08ee92 100644
          const mark = doc.createElement("span");
          mark.className = "vela-menu-mark";
          if (!branch && !item.toggle && item.checked) {
-@@ -34707,8 +34727,8 @@ function createProjector(coords, paneOf, paneIdAtY, barsInRange, seriesInRange)
+@@ -31787,7 +31807,9 @@ var DrawingSceneRenderer = class {
+ // src/renderers/native/chrome/tz.ts
+ var DAY_MS3 = 864e5;
+ function displayZone(timeZone, barIntervalMs) {
+-  return barIntervalMs >= DAY_MS3 ? "UTC" : timeZone;
++  // ProTradeChart patch: daily-and-up bars are stamped at local midnight of their date, so their
++  // date reads in the chart's own zone, not UTC.
++  return timeZone;
  }
- 
- // src/renderers/native/core/autoscale.ts
--var MARGIN_TOP = 2 / 7;
--var MARGIN_BOTTOM = 1 / 7;
-+var MARGIN_TOP = 1 / 10;
-+var MARGIN_BOTTOM = 1 / 10;
- function computePaneScale(models, bars, includeCandles, i0, i1, drawings, log = false, offsetOf = () => 0) {
-   let min = Infinity;
-   let max = -Infinity;
-@@ -43410,12 +43430,18 @@ var ChartContextMenu = class {
+ function tzOffsetMs(ms, timeZone) {
+   return zoneOffsetMs(ms, timeZone);
+@@ -51362,10 +51384,23 @@ var ChartContextMenu = class {
+     });
    }
    contributed(zone) {
-     const ctx = this.cbs.getContext?.();
--    return widgetActions(`context:${zone}`, ctx).map((a, i) => ({
--      id: `action:${a.id}`,
--      label: a.label,
--      icon: a.icon,
--      separatorBefore: i === 0
+-    return widgetActions(`context:${zone}`, this.context()).map((a) => ({
+-      item: { id: `action:${a.id}`, label: textOf(this.chart?.i18n, a.label), icon: a.icon },
+-      order: a.order
 -    }));
-+    return widgetActions(`context:${zone}`, ctx).map((a, i) => {
-+      // ProTradeChart patch: an action may carry a submenu — `submenu(ctx)` returns its items
-+      // ({ id, label, checked?, disabled?, separatorBefore? }) and `runItem(ctx, id)` runs the one picked.
++    const ctx = this.context();
++    return widgetActions(`context:${zone}`, ctx).map((a) => {
++      // ProTradeChart patch: an action may name itself from the chart (`labelFor(ctx)`) and carry a
++      // submenu: `submenu(ctx)` returns its items ({ id, label, checked?, checkbox?, disabled?,
++      // separatorBefore? }) and `runItem(ctx, id)` runs the one picked.
 +      const sub = typeof a.submenu === "function" && ctx ? a.submenu(ctx) : null;
++      const label = typeof a.labelFor === "function" && ctx ? a.labelFor(ctx) : a.label;
 +      return {
-+        id: `action:${a.id}`,
-+        label: typeof a.labelFor === "function" && ctx ? a.labelFor(ctx) : a.label,
-+        icon: a.icon,
-+        separatorBefore: i === 0,
-+        ...Array.isArray(sub) && sub.length > 0 ? { submenu: sub.map((s) => ({ id: `action:${a.id}::${s.id}`, label: s.label, checked: s.checked, checkbox: s.checkbox, disabled: s.disabled, separatorBefore: s.separatorBefore })) } : {}
++        item: {
++          id: `action:${a.id}`,
++          label: textOf(this.chart?.i18n, label),
++          icon: a.icon,
++          ...Array.isArray(sub) && sub.length > 0 ? { submenu: sub.map((s) => ({ id: `action:${a.id}::${s.id}`, label: textOf(this.chart?.i18n, s.label), checked: s.checked, checkbox: s.checkbox, disabled: s.disabled, separatorBefore: s.separatorBefore })) } : {}
++        },
++        order: a.order
 +      };
 +    });
    }
    itemsFor(zone) {
-     if (zone === "price-axis") {
-@@ -43451,7 +43477,14 @@ var ChartContextMenu = class {
+     return composeMenu(zone, this.builtinItems(zone), this.contributed(zone));
+@@ -51401,7 +51436,14 @@ var ChartContextMenu = class {
      if (!chart) return;
      if (id.startsWith("action:")) {
-       const ctx = this.cbs.getContext?.();
+       const ctx = this.context();
 -      if (ctx) widgetActions(`context:${this.lastZone}`, ctx).find((a) => a.id === id.slice("action:".length))?.run(ctx);
 +      if (ctx) {
 +        // ProTradeChart patch: `action:<id>::<item>` is an item of that action's submenu.

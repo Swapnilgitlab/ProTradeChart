@@ -474,6 +474,150 @@ pub fn set_section_collapsed(conn: &Connection, id: i64, collapsed: bool) -> rus
     Ok(())
 }
 
+/// A symbol as a script's SQL may write it, made canonical: `india:NSE:RELIANCE`, `india:RELIANCE`,
+/// `NSE:RELIANCE` and a bare `RELIANCE` all name the same stock (a bare ticker is Indian, on NSE, as
+/// everywhere else in the app).
+fn canonical_from_sql(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if let Some(symbol) = crate::symbols::canonical_symbol(raw) {
+        return Some(symbol);
+    }
+    // Without a provider it is Indian, but only when what's there is a ticker or an exchange's:
+    // `nope:X` names nothing.
+    let indian = match raw.split_once(':') {
+        None => true,
+        Some((exchange, _)) => {
+            crate::zerodha::instruments::EXCHANGES.contains(&exchange.trim().to_ascii_uppercase().as_str())
+        }
+    };
+    indian
+        .then(|| crate::symbols::canonical_symbol(&format!("india:{raw}")))
+        .flatten()
+}
+
+/// Brings the watchlist tables back to the app's rules after a script's own SQL changed them
+/// (`pt.sql`), inside the caller's transaction: symbols made canonical (a row that then repeats one on
+/// its list goes), each colour flag on a canonical symbol, the legacy `watchlist_items.flag` cleared,
+/// and every list's rows renumbered from 1 in their order — rows written without a position (0) after
+/// the rest, in the order they were added. What can't be repaired (an unreadable symbol, an unknown
+/// colour, a list without a name) is an error, and the caller rolls the whole change back.
+pub fn repair_after_sql(conn: &Connection) -> Result<(), String> {
+    let sql = |e: rusqlite::Error| e.to_string();
+    let lists: Vec<(i64, String)> = conn
+        .prepare("SELECT id, name FROM watchlists ORDER BY id")
+        .and_then(|mut s| s.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect())
+        .map_err(sql)?;
+    for (id, name) in &lists {
+        let trimmed = name.trim();
+        if trimmed.is_empty() || trimmed.chars().count() > 100 || trimmed.chars().any(char::is_control) {
+            return Err(format!(
+                "Watchlist {id} needs a name of 1 to 100 characters, not '{name}'."
+            ));
+        }
+    }
+
+    let items: Vec<(i64, i64, String)> = conn
+        .prepare("SELECT id, watchlist_id, symbol FROM watchlist_items ORDER BY id")
+        .and_then(|mut s| s.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect())
+        .map_err(sql)?;
+    for (id, list, symbol) in items {
+        let canonical = canonical_from_sql(&symbol).ok_or_else(|| {
+            format!("'{symbol}' isn't a symbol the app can show: write it like india:NSE:RELIANCE (a bare RELIANCE is NSE).")
+        })?;
+        if canonical == symbol {
+            continue;
+        }
+        let taken: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM watchlist_items WHERE watchlist_id = ?1 AND symbol = ?2 AND id != ?3)",
+                params![list, canonical, id],
+                |r| r.get(0),
+            )
+            .map_err(sql)?;
+        if taken {
+            conn.execute("DELETE FROM watchlist_items WHERE id = ?1", params![id])
+                .map_err(sql)?;
+        } else {
+            conn.execute(
+                "UPDATE watchlist_items SET symbol = ?2 WHERE id = ?1",
+                params![id, canonical],
+            )
+            .map_err(sql)?;
+        }
+    }
+
+    let flags: Vec<(String, String, i64)> = conn
+        .prepare("SELECT symbol, flag, flagged_at FROM symbol_flags ORDER BY symbol")
+        .and_then(|mut s| s.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect())
+        .map_err(sql)?;
+    for (symbol, flag, flagged_at) in flags {
+        if !is_flag(&flag) {
+            return Err(format!(
+                "'{flag}' isn't a flag colour: use one of {}.",
+                FLAGS.join(", ")
+            ));
+        }
+        let canonical = canonical_from_sql(&symbol)
+            .ok_or_else(|| format!("'{symbol}' isn't a symbol the app can show: write it like india:NSE:RELIANCE."))?;
+        if canonical == symbol {
+            continue;
+        }
+        // Two spellings of one symbol: the newer flag wins.
+        let held: Option<i64> = conn
+            .query_row(
+                "SELECT flagged_at FROM symbol_flags WHERE symbol = ?1",
+                params![canonical],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(sql)?;
+        match held {
+            Some(held_at) if held_at >= flagged_at => {
+                conn.execute("DELETE FROM symbol_flags WHERE symbol = ?1", params![symbol])
+                    .map_err(sql)?;
+            }
+            _ => {
+                conn.execute("DELETE FROM symbol_flags WHERE symbol = ?1", params![canonical])
+                    .map_err(sql)?;
+                conn.execute(
+                    "UPDATE symbol_flags SET symbol = ?2 WHERE symbol = ?1",
+                    params![symbol, canonical],
+                )
+                .map_err(sql)?;
+            }
+        }
+    }
+
+    conn.execute("UPDATE watchlist_items SET flag = NULL WHERE flag IS NOT NULL", [])
+        .map_err(sql)?;
+
+    for (id, _) in &lists {
+        let rows: Vec<RowRef> = conn
+            .prepare(
+                "SELECT 0 AS rank, id, position, position <= 0 AS unset FROM watchlist_sections WHERE watchlist_id = ?1
+                 UNION ALL
+                 SELECT 1, id, position, position <= 0 FROM watchlist_items WHERE watchlist_id = ?1
+                 ORDER BY unset, position, rank, id",
+            )
+            .and_then(|mut s| {
+                s.query_map(params![id], |r| {
+                    Ok(RowRef {
+                        kind: if r.get::<_, i64>(0)? == 0 {
+                            RowKind::Section
+                        } else {
+                            RowKind::Item
+                        },
+                        id: r.get(1)?,
+                    })
+                })?
+                .collect()
+            })
+            .map_err(sql)?;
+        write_order(conn, *id, &rows).map_err(sql)?;
+    }
+    Ok(())
+}
+
 const SEEDED_PREF: &str = "watchlists_seeded";
 
 /// The starter list shown on a fresh install — well-known NSE names, so a new user has something

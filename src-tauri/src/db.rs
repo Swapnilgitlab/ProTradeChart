@@ -7,7 +7,7 @@ use std::time::Duration;
 use crate::schema::SCHEMA_SQL;
 use crate::store::bar_tables;
 
-const FILE: &str = "charting.db";
+pub const FILE: &str = "charting.db";
 /// The copy made before the stored symbols moved to the `india:` namespace (`store::india_symbols`).
 const BEFORE_INDIA: &str = "charting.before-india.db";
 /// How long a statement waits for another connection's transaction before failing.
@@ -47,7 +47,10 @@ impl Database {
         conn.execute_batch(SCHEMA_SQL)?;
         // Columns added to a table that may already exist on disk (`CREATE TABLE IF NOT EXISTS` won't add them).
         crate::store::watchlists::migrate(&conn)?;
-        // Broker price history is no longer kept on disk. Once, on the first launch after that
+        crate::store::schedules::migrate(&conn)?;
+        crate::store::scripts::migrate(&conn)?;
+        // Broker price history is no longer kept in this file (saved prices, when the user keeps
+        // them, are a file of their own: `crate::prices`). Once, on the first launch after that
         // change, the old tables go and the file is compacted to hand their space back.
         if bar_tables::drop_disk_bars(&conn)? {
             conn.execute_batch("VACUUM;")?;

@@ -5,6 +5,74 @@ project uses [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+- **An AI assistant in the Python tab** (the sparkle icon in its toolbar), on your own Claude or GPT key. Ask it for a new
+  script, a change to the open one, or an explanation: it knows this app's `protrade` package and your setup (your broker,
+  your settings, and the names of your watchlists, layouts and scripts), and shows what it would change line by line.
+  **Apply** puts the change in the editor, unsaved (`Ctrl+Z` undoes it); **Save as new script…** makes a file of its own.
+  It never saves, runs or schedules a script. **Fix with AI** after a failed run sends the error and asks for a fix; what a
+  script printed goes only when you tick **Include output**. **Copy prompt** gives the same context to an outside AI.
+- **The Scheduler**, a tab of its own (right rail, Home, or **Schedule** in the Python tab): a schedule now runs a
+  **sequence** of Python scripts one after another — add, remove and reorder them — and the first that fails ends the run
+  (the rest are marked *Not run*). History shows each script of each run with what it printed, and **Email me if a run
+  fails** sends you a note. Your existing schedules carry over as sequences of one. The scripts of a run share a folder,
+  `pt.run_folder()`.
+- **`pt.sql`**: SQL on the app's database from a script. It reads your watchlists, the symbol lists, imported data and
+  saved prices, and may add, change and delete rows in the watchlist tables only — checked and kept consistent, or not
+  changed at all. `dry_run=True` tries it.
+- **`pt.send_email`**: a script emails you, through your own mail account (Scheduler → **Email settings**), with tables
+  and files attached. Mail goes only to your own address.
+- **`pt.screenshot`**: a chart the app draws, as a PNG for a script to save or email — optionally styled like one of your
+  saved layouts.
+- **Save prices on this computer** (Data providers → Saved prices, or the Home tab). Off by default: switched on, after a
+  notice that your broker's terms may restrict copies of its data, the prices your broker sends are kept in a file as
+  well as in memory. Charts open from it and ask the broker only for the newest bars (none for a daily chart after the
+  close), and the first screen, Study or script after a launch reads the saved history and tops it up from one quote.
+  Intraday prices are kept for a year; switching it off deletes the file, and forgetting a broker's login offers to
+  delete the prices it supplied.
+- **Bar replay.** Right-click a bar and choose **Replay from this bar**, or press **Replay** on a chart's toolbar and pick a
+  date: the chart rewinds there and reveals the following bars one at a time, with Play, Pause, Next bar and four
+  speeds. Indicators and strategies recalculate as it goes; a grid replays on one clock.
+- **Drawing tools remember how you style them.** Each tool's last settings and your saved styles now carry over to every
+  tab, window and layout, and to the next launch.
+- **More from the Strategy Tester:** CAGR, the Sharpe and Sortino ratios and outperformance against buy & hold, as the
+  engine measures them, whenever the backtest is long enough to.
+- **Pine libraries.** A `library()` script can be saved in **My scripts**, and other scripts use it with `import`.
+- **From Vela 0.9:** a settings panel for every drawing (with saved styles and per-timeframe visibility), Fibonacci level
+  sets (Classic, Extension, OTE), the **Fair Value Gap**, **Order Block** and **Liquidity** tools, fully styleable
+  built-in indicators, thirteen kinds of moving average, LSMA and Linear Regression Slope, **Scale price chart only**, and
+  price-scale **Margins** in the chart settings.
+- **Export for TradingView…** in the watchlist's **⋯** menu saves a list in TradingView's own format (sections included),
+  ready for TradingView's **Import list…** — as `.txt`, which TradingView asks for, or `.csv`. Importing a TradingView
+  list now also recognises TradingView's names for the NSE indices (`NSE:CNXIT` is Nifty IT).
+
+### Changed
+
+- **The AI features use Claude Opus 5.5** (from Opus 5), at a lower price per request; a Python assistant conversation
+  re-reads its context from Anthropic's cache.
+- The Python tab's prompt for an outside AI now covers every function of `protrade` (`pt.panel`, `pt.snapshot` and the
+  errors were missing) and describes your setup.
+- **Prices held no longer depend on the broker.** They are kept by symbol (`india:NSE:RELIANCE`), so changing broker keeps
+  them: the new broker fills in only what is new, after checking its own copy of the last bar held is the same (a stock
+  where it isn't is read again whole from the new broker).
+- **Charts are drawn by Vela 0.9.3** (from 0.7.6), and Pine runs on PineTS 0.13.1 (from 0.9.34). PineTS now fills strategy
+  orders on the price grid and follows TradingView's path through each bar, so **backtests can give different results
+  from before**, closer to TradingView's. A layout's Linear Regression becomes Vela's LSMA (or its Slope pane).
+- **Buy & hold** in the Strategy Tester is measured as TradingView measures it, from the first trade's entry price, not
+  from the first bar on the chart.
+- The price scale's padding is Vela's own setting now (10% above and below by default) instead of a fixed change of ours.
+
+### Fixed
+
+- The next session's quote top-up no longer shrinks a series' history to that one day, which made the following read
+  fetch it all again.
+- A refresh now checks one already-final bar against the broker's copy, so a split or bonus while the app was closed is
+  read again whole instead of being stitched onto unadjusted prices.
+- The chart's OHLC values no longer vanish on up bars when the up candles' body is the canvas colour (a hollow look):
+  Vela 0.9 inks them with the body colour, so a colour that doesn't stand out from the canvas now gives way to the
+  candle's border or wick colour, or the theme's.
+
 ## [0.3.0] — 2026-10-10
 
 ### Changed

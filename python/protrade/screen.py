@@ -7,8 +7,8 @@ in ``src/screener/fixtures/screen-cases.json``). It is written in the Studies' f
 
 Where a Study looks for every day in history its conditions held, a screen judges them on each
 symbol's *latest* bar only: ``crosses_above`` means "crossed on the latest bar". Bars come through
-the app's local API, which holds them in memory while it is open, so a second screen the same day
-fetches nothing.
+the app's local API, which holds them in memory while it is open (and saved, if the user keeps
+prices), so a second screen the same day fetches nothing.
 
 Filters that today's quote alone decides (:func:`snapshot_decidable`: the day's prices, its gap
 and its change from the previous close) are judged first, on one batched quote for the whole

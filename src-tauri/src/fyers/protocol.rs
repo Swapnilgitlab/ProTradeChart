@@ -175,6 +175,20 @@ pub fn is_failure_body(body: &Value) -> bool {
     body.get("s").and_then(Value::as_str) == Some("error")
 }
 
+/// Whether a history request was refused for starting before the oldest data FYERS holds:
+/// `{"code":-50,"data":{"range_from":"range_from exceeds the historical data available"},
+/// "message":"Invalid input"}`, with a 422. FYERS refuses the whole window rather than answer with
+/// the part it has, and the cutoff (one date, around 2001, whatever the symbol's listing) isn't
+/// documented.
+pub fn starts_before_history(body: &Value) -> bool {
+    code_of(body) == Some(-50)
+        && body
+            .get("data")
+            .and_then(|d| d.get("range_from"))
+            .and_then(Value::as_str)
+            .is_some_and(|why| why.to_lowercase().contains("historical data available"))
+}
+
 fn check(status: u16, body: &Value) -> Result<(), FyersError> {
     if status >= 400 || is_failure_body(body) {
         return Err(classify_error(status, body));
@@ -212,7 +226,7 @@ fn epoch_ms(value: &Value) -> Option<i64> {
 
 // ---- History requests ------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Interval {
     Minutes(u32),
     Day,
@@ -782,6 +796,21 @@ mod tests {
         assert!(parse_candles(200, &json!({"s":"ok"})).unwrap().is_empty());
         let e = parse_candles(200, &json!({"s":"error","code":-16,"message":"x"})).unwrap_err();
         assert_eq!(e.kind, FyersErrorKind::Token);
+    }
+
+    #[test]
+    fn a_window_older_than_fyerss_history_is_told_apart_from_other_bad_input() {
+        // The real answer (2026-10-31) to a daily window starting 1997-07-05.
+        let too_old = json!({"code":-50,"data":{"range_from":"range_from exceeds the historical data available"},
+            "message":"Invalid input","s":"error"});
+        assert!(starts_before_history(&too_old));
+        assert!(!starts_before_history(
+            &json!({"code":-50,"message":"Invalid input","s":"error"})
+        ));
+        assert!(!starts_before_history(
+            &json!({"code":-300,"message":"Please provide a valid symbol","s":"error"})
+        ));
+        assert!(!starts_before_history(&json!({"s":"ok","candles":[]})));
     }
 
     fn quote_body() -> Value {

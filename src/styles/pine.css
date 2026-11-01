@@ -170,6 +170,10 @@
   background: color-mix(in srgb, var(--profit) 14%, transparent);
   color: var(--profit);
 }
+.pine-kind.library {
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
 
 .pine-kind-dot {
   width: 8px;
@@ -180,6 +184,9 @@
 }
 .pine-kind-dot.strategy {
   background: var(--profit);
+}
+.pine-kind-dot.library {
+  background: var(--text-muted);
 }
 
 .pine-status {

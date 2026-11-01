@@ -20,7 +20,7 @@ Every chart in this app is drawn by **Vela™**, a charting library by LuxAlgo.
 ```
 Vela
 Copyright (c) 2026 LuxAlgo
-https://luxalgo.com/vela
+https://velacharts.dev
 
 This product includes the Vela charting library, developed by LuxAlgo.
 
@@ -55,9 +55,10 @@ Vela is licensed under the Apache License, Version 2.0
 bottom-left of each chart), and credits Vela in *About*.
 
 **This app ships a modified copy of Vela.** As section 4(b) of the Apache License asks, note that
-ProTradeChart changes Vela's distributed files before bundling them: it shrinks the fixed top and
-bottom padding of the price scale's autoscale, and extends its chart context menu and menu surface
-with submenus, labels that name the chart's symbol, and checkbox items. The changes are exactly the
+ProTradeChart changes Vela's distributed files before bundling them: it extends its chart context
+menu and menu surface with submenus, labels that name the chart's symbol, and checkbox items, and it
+shows the date of a daily, weekly or monthly bar in the chart's own time zone rather than in UTC
+(ProTradeChart stamps such bars at local midnight of their date). The changes are exactly the
 diff in `patches/@luxalgo+vela+<version>.patch` in this repository, applied by `patch-package` when
 dependencies are installed. Vela's attribution mark is not affected by them.
 
@@ -121,8 +122,10 @@ only if they connect one. No market data is bundled with the app or passes
 through any server of this project. The data belongs to the exchanges (NSE,
 BSE, MCX and others) and is licensed to the user, for their own use, under
 Zerodha's Kite Connect terms (<https://kite.trade/terms>) and the exchanges'
-rules: it may not be redistributed or shown to the public. The app never saves
-broker prices on the user's computer: it holds them in memory while it is open.
+rules: it may not be redistributed or shown to the public. By default the app
+holds broker prices in memory while it is open and saves none on the user's
+computer; it keeps a copy on disk only if the user switches on "Save prices on
+this computer" and accepts that their broker's terms may restrict it.
 See the data-source notes in the [README](README.md#data-sources) and the app's
 *About* dialog.
 

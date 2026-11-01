@@ -13,6 +13,7 @@ pub mod layouts;
 pub mod market_symbols;
 pub mod notebooks;
 pub mod preferences;
+pub mod price_store;
 pub mod provider_settings;
 pub mod research_bars;
 pub mod schedules;

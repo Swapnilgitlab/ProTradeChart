@@ -56,4 +56,30 @@ describe('performanceSections', () => {
     expect(row('Profit factor').long.text).toBe('—'); // no losing longs
     expect(row('Profit factor').all.text).toBe('2.50');
   });
+
+  it("shows the engine's own figures only when it reports them", () => {
+    const labels = ['Outperformance vs buy & hold', 'CAGR', 'Sharpe ratio', 'Sortino ratio'];
+    for (const label of labels) expect(returns.rows.find((r) => r.label === label)).toBeUndefined();
+
+    const withEngine = buildReport({
+      state: { initialCapital: 1000, equity: 0, cagr: 12.5, sharpe: 1.234, sortino: -0.5, outperformance: -4 },
+      trades: [trade('long', 0, 100, 2000, 110), trade('short', 1000, 104, 3000, 108)],
+      bars,
+      commission: { type: 'percent', value: 0 },
+    });
+    const [r] = performanceSections(withEngine, 'USD');
+    const get = (label: string) => r.rows.find((x) => x.label === label)!;
+    expect(get('CAGR').all).toMatchObject({ text: '+12.50%', tone: 'pos' });
+    expect(get('Sharpe ratio').all.text).toBe('1.23');
+    expect(get('Sortino ratio').all.text).toBe('−0.50');
+    expect(get('Outperformance vs buy & hold').all).toMatchObject({ text: '−4.00 USD', tone: 'neg' });
+    expect(get('Sharpe ratio').long.text).toBe('—');
+  });
+
+  it('hides the ratios PineTS reports as zero when it had too little history to measure them', () => {
+    const short = buildReport({ state: { initialCapital: 1000, equity: 0, sharpe: 0, sortino: 0 }, trades: [], bars, commission: { type: 'percent', value: 0 } });
+    expect(short.engine).toMatchObject({ sharpe: null, sortino: null });
+    expect(short.summary.buyHold).toBeNull(); // nothing to start buy & hold from
+    expect(performanceSections(short)[0].rows.find((x) => x.label === 'Buy & hold return')!.all.text).toBe('—');
+  });
 });

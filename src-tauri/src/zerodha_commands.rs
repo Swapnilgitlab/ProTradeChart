@@ -11,20 +11,17 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::db::{now_ms, Database};
 use crate::market::ist_date;
-use crate::models::{BarsResponse, Quote, SymbolMatch};
+use crate::models::{Quote, SymbolMatch};
 use crate::provider_commands::TestResult;
 use crate::providers;
 use crate::secrets::Secrets;
-use crate::store::bar_memory::BarMemory;
 use crate::store::provider_settings::{self as settings, Table};
-use crate::store::research_bars::canonical_interval;
 use crate::zerodha::callback;
 use crate::zerodha::client::{Credentials, ZerodhaClient};
 use crate::zerodha::feed::{Feed, StatusEvent};
 use crate::zerodha::instruments::{self, Instrument};
 use crate::zerodha::protocol::{
     extract_request_token, login_url, token_expiry_estimate_secs, Interval, ZerodhaError, ZerodhaErrorKind,
-    IST_OFFSET_SECS,
 };
 
 pub const ZERODHA: &str = "zerodha";
@@ -157,7 +154,10 @@ pub async fn zerodha_login_in_browser(
         .open_url(login_url(&api_key), None::<&str>)
         .map_err(|e| format!("Couldn't open your browser: {e}"))?;
     let request_token = callback::wait_for_request_token(listener, callback::WAIT).await?;
-    save_access_token(&api_key, &api_secret, &request_token, &db, &secrets, &client, &feed).await
+    let result = save_access_token(&api_key, &api_secret, &request_token, &db, &secrets, &client, &feed).await?;
+    // A first login can make Zerodha the broker serving Indian symbols.
+    crate::market_commands::sync_market(&app);
+    Ok(result)
 }
 
 /// Finishes a login: trades the `request_token` Zerodha sent the browser to
@@ -165,6 +165,7 @@ pub async fn zerodha_login_in_browser(
 #[tauri::command]
 pub async fn zerodha_complete_login(
     pasted: String,
+    app: AppHandle,
     db: State<'_, Database>,
     secrets: State<'_, Secrets>,
     client: State<'_, ZerodhaClient>,
@@ -172,7 +173,9 @@ pub async fn zerodha_complete_login(
 ) -> Result<LoginResult, String> {
     let request_token = extract_request_token(&pasted)?;
     let (api_key, api_secret) = login_credentials(&db, &secrets)?;
-    save_access_token(&api_key, &api_secret, &request_token, &db, &secrets, &client, &feed).await
+    let result = save_access_token(&api_key, &api_secret, &request_token, &db, &secrets, &client, &feed).await?;
+    crate::market_commands::sync_market(&app);
+    Ok(result)
 }
 
 /// The API key and secret a login needs. The secret never leaves Rust: it is
@@ -392,89 +395,12 @@ pub fn search_instruments(db: &Database, query: &str, limit: usize) -> Result<Ve
     sql(instruments::search(&*lock(db)?, query, limit))
 }
 
-fn resolve_or_explain(conn: &Connection, ticker: &str) -> Result<Instrument, String> {
+pub fn resolve_or_explain(conn: &Connection, ticker: &str) -> Result<Instrument, String> {
     sql(instruments::resolve(conn, ticker))?.ok_or_else(|| {
         format!(
             "Zerodha has no instrument called '{ticker}'. Search for it, or update the instrument list in Data providers."
         )
     })
-}
-
-pub async fn fetch_bars(
-    app: &AppHandle,
-    ticker: &str,
-    interval: &str,
-    from_ms: Option<i64>,
-    to_ms: Option<i64>,
-) -> Result<BarsResponse, String> {
-    let db = app.state::<Database>();
-    let client = app.state::<ZerodhaClient>();
-    let secrets = app.state::<Secrets>();
-    let interval_kind =
-        Interval::parse(interval).ok_or_else(|| format!("Zerodha doesn't serve a '{interval}' interval"))?;
-    let (creds, inst) = {
-        let conn = lock(&db)?;
-        let creds = zerodha_credentials(&conn, &secrets).map_err(|e| e.message())?;
-        (creds, resolve_or_explain(&conn, ticker)?)
-    };
-
-    let cache_key = format!("{}:{}", crate::symbols::INDIA, inst.ticker);
-    // The session's memory, under the same spelling the Python API uses. Never the disk: broker
-    // price history isn't kept on this computer.
-    let cache_interval = canonical_interval(interval);
-    let memory = app.state::<BarMemory>();
-    let response = |bars, from_cache| BarsResponse {
-        bars,
-        gmt_offset: IST_OFFSET_SECS,
-        timezone: Some("Asia/Kolkata".into()),
-        from_cache,
-    };
-    // Daily (and the weekly and monthly charts made from it) comes from memory when the market is
-    // loaded or a script read the symbol; only what memory lacks is read from Kite.
-    if let (true, Some(from)) = (canonical_interval(interval).as_deref() == Some("D"), from_ms) {
-        match crate::marketdata::chart_daily(app, &cache_key, from, to_ms).await {
-            Some(Ok(bars)) => return Ok(response(bars, false)),
-            Some(Err((_, stored))) if !stored.is_empty() => return Ok(response(stored, true)),
-            Some(Err((message, _))) => return Err(message),
-            None => {}
-        }
-    }
-    match client
-        .fetch_history(&creds, &inst, interval_kind, from_ms, to_ms, now_ms())
-        .await
-    {
-        Ok(bars) => {
-            // Kept for the session only, without coverage: it answers this chart when the network
-            // drops, and nothing ever treats it as a complete series.
-            if let Some(interval) = cache_interval.as_deref().filter(|_| !bars.is_empty()) {
-                // Daily bars sit on IST midnight in memory, as the Python API stores them.
-                let mut kept = bars.clone();
-                if interval == "D" {
-                    crate::pyapi::data::normalise_daily(&mut kept);
-                }
-                memory.put(&cache_key, interval, &kept);
-            }
-            Ok(response(bars, false))
-        }
-        // Only a network failure falls back to memory: a rejected token must
-        // be fixed, not papered over with stale data.
-        Err(e) if e.kind == ZerodhaErrorKind::Network => {
-            let cached = cache_interval.as_deref().map_or_else(Vec::new, |interval| {
-                memory.get(
-                    &cache_key,
-                    interval,
-                    from_ms.unwrap_or(i64::MIN),
-                    to_ms.unwrap_or(i64::MAX),
-                    None,
-                )
-            });
-            if cached.is_empty() {
-                return Err(e.message());
-            }
-            Ok(response(cached, true))
-        }
-        Err(e) => Err(e.message()),
-    }
 }
 
 pub async fn quotes(app: &AppHandle, tickers: &[String]) -> Result<Vec<Quote>, String> {

@@ -11,9 +11,15 @@
 //!   and handed only to the scripts the app starts, and it is compared in constant time.
 //!
 //! Everything answered is read-only market data (`/v1/snapshot` and `/v1/panel` are posted only
-//! because a market's symbol list doesn't fit in a URL). The one exception is a posted result: shown in the
-//! app's window, or — for kind `watchlist` — written to the watchlist the script named, after the
-//! same checks, through the same store code the watchlist panel uses.
+//! because a market's symbol list doesn't fit in a URL), with four exceptions, each the user's own
+//! script asking for something they set up:
+//! - a posted result: shown in the app's window, or — for kind `watchlist` — written to the
+//!   watchlist the script named, through the same store code the watchlist panel uses;
+//! - `pt.sql` (`/v1/sql`): the script's own SQL, which may change the watchlist tables and nothing
+//!   else (`sql::policy`), checked and repaired before it commits;
+//! - `pt.send_email` (`/v1/email`): a message to the user's own address only, through their SMTP
+//!   settings (the password never leaves Rust);
+//! - `pt.screenshot` (`/v1/screenshot`): a chart the main window draws, returned as a PNG.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,14 +27,18 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use subtle::ConstantTimeEq;
 
+use base64::Engine;
+
 use super::data::{BarsData, BarsRequest, PanelRequest, PanelSeries, Snapshot, SyncReport, SyncRequest, MAX_LIMIT};
+use super::sql::{Params, SqlAnswer, SqlRequest, MAX_SQL_BYTES};
 use super::valid_run_id;
 use super::wire::{
-    bars_body, error_json, panel_body, snapshot_body, sync_report_body, InstrumentRow, PanelPost, ProviderStatus,
-    ResultPost, SnapshotPost, SyncPost, WatchlistContent, WatchlistInfo, WatchlistSync, WatchlistUpdate,
-    MAX_TITLE_CHARS, PNG_BASE64_PREFIX, RESULT_KINDS,
+    bars_body, error_json, panel_body, snapshot_body, sync_report_body, EmailPost, InstrumentRow, PanelPost,
+    ProviderStatus, ResultPost, ScreenshotPost, SnapshotPost, SqlPost, SyncPost, WatchlistContent, WatchlistInfo,
+    WatchlistSync, WatchlistUpdate, MAX_TITLE_CHARS, PNG_BASE64_PREFIX, RESULT_KINDS,
 };
 use super::ApiError;
+use crate::email::{content_type_for, Attachment};
 use crate::store::instrument_list::Filter;
 use crate::store::research_bars::canonical_interval;
 use crate::symbols::{canonical_provider, canonical_symbol, with_canonical_prefix, MAX_SYMBOL_CHARS};
@@ -51,7 +61,8 @@ pub trait Backend: Send + Sync {
     /// safe (`store::day_topup`), ahead of the caller's own per-symbol `bars` reads. Never fails
     /// outright — a broker problem is reported per symbol in the result, not as an error here.
     fn sync_bars<'a>(&'a self, request: SyncRequest) -> BoxFuture<'a, Result<SyncReport, ApiError>>;
-    /// Many symbols' held bars, from the session's memory alone: never a broker call.
+    /// Many symbols' held bars, from memory (and the saved prices behind it) alone: never a broker
+    /// call.
     fn panel<'a>(&'a self, request: PanelRequest) -> BoxFuture<'a, Result<Vec<PanelSeries>, ApiError>>;
     /// Many symbols' day from the broker's batched quote, in the order asked (`data::snapshot`).
     fn snapshot<'a>(&'a self, symbols: Vec<String>) -> BoxFuture<'a, Result<Snapshot, ApiError>>;
@@ -60,6 +71,18 @@ pub trait Backend: Send + Sync {
     fn publish(&self, post: ResultPost) -> Result<(), ApiError>;
     /// Creates or refreshes a watchlist from a script's list (`pt.set_watchlist`).
     fn set_watchlist(&self, update: WatchlistUpdate) -> Result<WatchlistSync, ApiError>;
+    /// Runs a script's own SQL (`pt.sql`) under `sql::run`'s rules. A change to the watchlists tells
+    /// every window.
+    fn sql<'a>(&'a self, request: SqlRequest) -> BoxFuture<'a, Result<SqlAnswer, ApiError>>;
+    /// Sends a message to the user's own address (`pt.send_email`).
+    fn send_email<'a>(
+        &'a self,
+        subject: String,
+        body: String,
+        attachments: Vec<Attachment>,
+    ) -> BoxFuture<'a, Result<(), ApiError>>;
+    /// A chart drawn by the app's main window, as PNG bytes (`pt.screenshot`).
+    fn screenshot<'a>(&'a self, request: ScreenshotPost) -> BoxFuture<'a, Result<Vec<u8>, ApiError>>;
 }
 
 /// The most symbols a script may put on one watchlist.
@@ -268,6 +291,14 @@ async fn route(ctx: &Ctx, req: &Req) -> Result<Body, ApiError> {
         }
         return post_snapshot(ctx, req).await;
     }
+    if matches!(path, "/v1/sql" | "/v1/email" | "/v1/screenshot") {
+        require_json_post(req)?;
+        return match path {
+            "/v1/sql" => post_sql(ctx, req).await,
+            "/v1/email" => post_email(ctx, req).await,
+            _ => post_screenshot(ctx, req).await,
+        };
+    }
     if !req.method.eq_ignore_ascii_case("GET") {
         return Err(ApiError::new(
             405,
@@ -431,6 +462,128 @@ async fn post_snapshot(ctx: &Ctx, req: &Req) -> Result<Body, ApiError> {
     let symbols = checked_symbols(&post.symbols)?;
     let snapshot = ctx.backend.snapshot(symbols).await?;
     json(&snapshot_body(&snapshot))
+}
+
+/// A POST with a JSON body no larger than the server takes.
+fn require_json_post(req: &Req) -> Result<(), ApiError> {
+    if !req.method.eq_ignore_ascii_case("POST") {
+        return Err(ApiError::new(
+            405,
+            "method_not_allowed",
+            "This route only answers POST.",
+        ));
+    }
+    let is_json = req
+        .content_type
+        .as_deref()
+        .is_some_and(|t| t.trim().to_ascii_lowercase().starts_with("application/json"));
+    if !is_json {
+        return Err(ApiError::new(
+            415,
+            "unsupported_media_type",
+            "Post it as application/json.",
+        ));
+    }
+    if req.body.len() > MAX_BODY_BYTES {
+        return Err(too_large());
+    }
+    Ok(())
+}
+
+/// A script's own SQL (`pt.sql`).
+async fn post_sql(ctx: &Ctx, req: &Req) -> Result<Body, ApiError> {
+    let post: SqlPost = serde_json::from_slice(&req.body)
+        .map_err(|e| ApiError::bad_request(format!("That isn't a SQL request: {e}")))?;
+    json(&ctx.backend.sql(sql_request(post)?).await?)
+}
+
+pub fn sql_request(post: SqlPost) -> Result<SqlRequest, ApiError> {
+    if post.sql.trim().is_empty() {
+        return Err(ApiError::bad_request("There is no SQL to run."));
+    }
+    if post.sql.len() > MAX_SQL_BYTES {
+        return Err(ApiError::bad_request(format!(
+            "At most {} KB of SQL per call.",
+            MAX_SQL_BYTES / 1024
+        )));
+    }
+    let params = match post.params {
+        None | Some(serde_json::Value::Null) => Params::None,
+        Some(serde_json::Value::Array(list)) => Params::Positional(list),
+        Some(serde_json::Value::Object(map)) => Params::Named(map),
+        Some(_) => {
+            return Err(ApiError::bad_request(
+                "params must be a list (for ?) or a dict (for :name).",
+            ))
+        }
+    };
+    Ok(SqlRequest {
+        sql: post.sql,
+        params,
+        dry_run: post.dry_run,
+    })
+}
+
+/// A message to the user's own address (`pt.send_email`).
+async fn post_email(ctx: &Ctx, req: &Req) -> Result<Body, ApiError> {
+    let post: EmailPost =
+        serde_json::from_slice(&req.body).map_err(|e| ApiError::bad_request(format!("That isn't an email: {e}")))?;
+    let mut attachments = Vec::with_capacity(post.attachments.len());
+    for a in post.attachments {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(a.data.as_bytes())
+            .map_err(|_| ApiError::bad_request(format!("The attachment {} isn't base64.", a.name)))?;
+        attachments.push(Attachment {
+            content_type: content_type_for(&a.name, a.content_type.as_deref()),
+            name: a.name,
+            bytes,
+        });
+    }
+    ctx.backend.send_email(post.subject, post.body, attachments).await?;
+    json(&serde_json::json!({ "ok": true }))
+}
+
+/// The largest and smallest chart a screenshot draws, each way, in pixels.
+const MAX_SHOT_SIDE: u32 = 3840;
+const MIN_SHOT_SIDE: u32 = 200;
+
+/// A chart the app draws (`pt.screenshot`), answered as PNG bytes.
+async fn post_screenshot(ctx: &Ctx, req: &Req) -> Result<Body, ApiError> {
+    let post: ScreenshotPost = serde_json::from_slice(&req.body)
+        .map_err(|e| ApiError::bad_request(format!("That isn't a screenshot request: {e}")))?;
+    Ok(Body::Binary(ctx.backend.screenshot(screenshot_request(post)?).await?))
+}
+
+pub fn screenshot_request(mut post: ScreenshotPost) -> Result<ScreenshotPost, ApiError> {
+    let raw = post.symbol.trim().to_string();
+    post.symbol = canonical_symbol(&raw)
+        .or_else(|| canonical_symbol(&format!("india:{raw}")))
+        .ok_or_else(|| {
+            ApiError::bad_request(format!(
+                "'{}' isn't a symbol the app can show: write it like india:NSE:RELIANCE.",
+                raw.chars().take(MAX_SYMBOL_CHARS).collect::<String>()
+            ))
+        })?;
+    let tf = post.timeframe.trim().to_string();
+    if tf.is_empty() || tf.len() > 8 || !tf.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(ApiError::bad_request("timeframe must be like D, W, M, 60 or 15."));
+    }
+    post.timeframe = tf;
+    for side in [post.width, post.height] {
+        if !(MIN_SHOT_SIDE..=MAX_SHOT_SIDE).contains(&side) {
+            return Err(ApiError::bad_request(format!(
+                "width and height must be {MIN_SHOT_SIDE} to {MAX_SHOT_SIDE} pixels."
+            )));
+        }
+    }
+    if post
+        .layout
+        .as_deref()
+        .is_some_and(|l| l.trim().is_empty() || l.chars().count() > 100)
+    {
+        return Err(ApiError::bad_request("layout must name one of your saved layouts."));
+    }
+    Ok(post)
 }
 
 fn panel_request(post: PanelPost) -> Result<PanelRequest, ApiError> {
@@ -718,7 +871,21 @@ pub mod testing {
         pub panel_missing: Mutex<Vec<String>>,
         pub last_snapshot: Mutex<Option<Vec<String>>>,
         pub fail_snapshot_with: Mutex<Option<ApiError>>,
+        /// The database `pt.sql` runs on: the real rules, on an in-memory copy of the app's tables.
+        pub sql_db: Mutex<Option<crate::db::Database>>,
+        /// Every email a script sent: subject, text and attachments.
+        pub emails: Mutex<Vec<(String, String, Vec<Attachment>)>>,
+        /// Every screenshot a script asked for.
+        pub screenshots: Mutex<Vec<ScreenshotPost>>,
     }
+
+    /// A 1 x 1 PNG, what the fake draws for a screenshot.
+    pub const TINY_PNG: [u8; 67] = [
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00,
+        0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00,
+        0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D,
+        0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+    ];
 
     /// `n` consecutive daily bars from 2022-01-03 (IST midnight) for `symbol`.
     ///
@@ -946,6 +1113,34 @@ pub mod testing {
             };
             self.watchlist_updates.lock().unwrap().push(update);
             Ok(done)
+        }
+
+        fn sql<'a>(&'a self, request: SqlRequest) -> BoxFuture<'a, Result<SqlAnswer, ApiError>> {
+            Box::pin(async move {
+                let mut db = self.sql_db.lock().unwrap();
+                let db = db.get_or_insert_with(|| crate::db::Database::open_in_memory().unwrap());
+                let conn = db.conn.lock().unwrap();
+                crate::pyapi::sql::run(&conn, &request).map_err(ApiError::bad_request)
+            })
+        }
+
+        fn send_email<'a>(
+            &'a self,
+            subject: String,
+            body: String,
+            attachments: Vec<Attachment>,
+        ) -> BoxFuture<'a, Result<(), ApiError>> {
+            Box::pin(async move {
+                self.emails.lock().unwrap().push((subject, body, attachments));
+                Ok(())
+            })
+        }
+
+        fn screenshot<'a>(&'a self, request: ScreenshotPost) -> BoxFuture<'a, Result<Vec<u8>, ApiError>> {
+            Box::pin(async move {
+                self.screenshots.lock().unwrap().push(request);
+                Ok(TINY_PNG.to_vec())
+            })
         }
     }
 }
